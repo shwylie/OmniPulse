@@ -143,7 +143,7 @@
     st.setProperty("--bdir", l.boxDir || "135deg");
     st.setProperty("--font", fontOf(l.font));
     document.getElementById("lines").style.textTransform = l.transform || "none";
-    b.className = [l.align || "center", l.style || "karaoke", l.place || "", l.box ? "box" : "", l.shadow === false ? "" : "shadow", l.title === false ? "notitle" : "", preview ? "preview" : ""].filter(Boolean).join(" ");
+    b.className = [l.align || "center", l.style || "karaoke", l.place || "", l.box ? "box" : "", l.shadow === false ? "" : "shadow", l.title === false ? "notitle" : "", preview && !/[?&]inline=1/.test(location.search) ? "preview" : ""].filter(Boolean).join(" ");
   }
 
   // all of the song's lines (made once a song), the one being sung lit, and the window onto them moved to

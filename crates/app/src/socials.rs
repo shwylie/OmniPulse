@@ -31,7 +31,7 @@ pub fn platform(id: &str) -> (&'static str, &'static str, &'static str, &'static
 }
 
 pub fn list(prefs: &Value) -> Vec<Map<String, Value>> {
-    prefs["socials"].as_array().into_iter().flatten().filter_map(|x| x.as_object().cloned()).collect()
+    prefs["socialList"].as_array().into_iter().flatten().filter_map(|x| x.as_object().cloned()).collect()
 }
 
 fn s<'a>(m: &'a Map<String, Value>, k: &str) -> &'a str { m.get(k).and_then(|v| v.as_str()).unwrap_or("") }
@@ -182,19 +182,19 @@ mod tests {
     fn added_moved_shown() {
         let (id, l) = added(&json!({}));
         assert_eq!(id, "s1");
-        let p = json!({ "socials": l });
+        let p = json!({ "socialList": l });
         let (id2, l2) = added(&p);
-        let p = json!({ "socials": l2 });
+        let p = json!({ "socialList": l2 });
         assert_eq!(list(&p)[1]["platform"], "kick");
-        let p = json!({ "socials": moved(&p, &id2, -1) });
+        let p = json!({ "socialList": moved(&p, &id2, -1) });
         assert_eq!(list(&p)[0]["id"], id2.as_str());
         // (only those with a handle, and switched on, shown)
-        let p = json!({ "socials": with(&p, &id, |m| { m.insert("handle".into(), json!("@me")); }) });
+        let p = json!({ "socialList": with(&p, &id, |m| { m.insert("handle".into(), json!("@me")); }) });
         let w = widget_json(&p);
         assert_eq!(w["list"].as_array().unwrap().len(), 1);
         assert_eq!(w["list"][0]["col1"], "#9146ff");
         // (one of your own: your name and colours)
-        let p = json!({ "socials": with(&p, &id, |m| { m.insert("platform".into(), json!("other")); m.insert("name".into(), json!("Fansly")); m.insert("col1".into(), json!("#123456")); }) });
+        let p = json!({ "socialList": with(&p, &id, |m| { m.insert("platform".into(), json!("other")); m.insert("name".into(), json!("Fansly")); m.insert("col1".into(), json!("#123456")); }) });
         assert_eq!(widget_json(&p)["list"][0]["name"], "Fansly");
         assert_eq!(widget_json(&p)["list"][0]["col1"], "#123456");
     }

@@ -8486,14 +8486,14 @@ fn panel_press(shared: &Shared, key: &str) {
     // (the Social Plug's platforms)
     if key == "socAdd" {
         let (id, all) = socials::added(&shared.borrow().web.prefs);
-        pref_put(shared, "socials", all);
+        pref_put(shared, "socialList", all);
         push_out(shared, true);
         return pf_leave(shared, &format!("panel:social:{id}"));
     }
     if let Some(id) = key.strip_prefix("socEdit:") { return pf_leave(shared, &format!("panel:social:{id}")); }
     if let Some((id, by)) = key.strip_prefix("socUp:").map(|i| (i, -1)).or_else(|| key.strip_prefix("socDown:").map(|i| (i, 1))) {
         let all = socials::moved(&shared.borrow().web.prefs, id, by);
-        pref_put(shared, "socials", all);
+        pref_put(shared, "socialList", all);
         push_out(shared, true);
         return pf_paint(shared);
     }
@@ -8502,7 +8502,7 @@ fn panel_press(shared: &Shared, key: &str) {
         match omnipulse_core::widget::alert_media_set(&format!("social-{id}"), "image", &path.display().to_string()) {
             Ok(file) => {
                 let all = socials::with(&shared.borrow().web.prefs, id, |m| { m.insert("icon".into(), serde_json::json!(file)); m.insert("iconAt".into(), serde_json::json!(now_ms())); });
-                pref_put(shared, "socials", all);
+                pref_put(shared, "socialList", all);
                 push_out(shared, true);
                 if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Icon added.".into()); }
             }
@@ -8512,13 +8512,13 @@ fn panel_press(shared: &Shared, key: &str) {
     }
     if let Some(id) = key.strip_prefix("socIconClear:") {
         let all = socials::with(&shared.borrow().web.prefs, id, |m| { m.remove("icon"); });
-        pref_put(shared, "socials", all);
+        pref_put(shared, "socialList", all);
         push_out(shared, true);
         return pf_paint(shared);
     }
     if let Some(id) = key.strip_prefix("socDel:") {
         let all = socials::without(&shared.borrow().web.prefs, id);
-        pref_put(shared, "socials", all);
+        pref_put(shared, "socialList", all);
         push_out(shared, true);
         PF_EDIT.with(|e| e.borrow_mut().take());
         return panel_open(shared, "socials");
@@ -8893,20 +8893,26 @@ fn widget_preview(shared: &Shared) {
         return;
     };
     let Some(name) = id.strip_prefix("panel:") else { return };
-    if !matches!(name, "widget" | "lyricsw" | "alerts" | "alertlist") && !name.starts_with("alert:") { return; }
+    if !matches!(name, "widget" | "lyricsw" | "alerts" | "alertlist" | "socials") && !name.starts_with("alert:") { return; }
     let a = shared.borrow();
     let mut prefs = a.web.prefs.clone();
     let changes: Vec<(String, serde_json::Value)> = if let Some(k) = name.strip_prefix("alert:") {
         alerts::edit_save(&a.web.prefs, k, &vals).into_iter().map(|(k, v)| (k.to_string(), v)).collect()
     } else if name == "alertlist" {
         alerts::list_save(&a.web.prefs, &vals).into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+    } else if name == "socials" {
+        // (the platforms switched on or off here, and the look)
+        let list = socials::list_save(&a.web.prefs, &vals);
+        let mut c: Vec<(String, serde_json::Value)> = vals.into_iter().filter(|(k, _)| !k.starts_with("on:")).collect();
+        c.push(("socialList".into(), list));
+        c
     } else {
         vals.into_iter().collect()
     };
     if let Some(o) = prefs.as_object_mut() {
         for (k, v) in changes { o.insert(k, v); }
         // (shown whether they're switched on yet or not)
-        for k in ["widget", "lyricsWidget", "alertsOn"] { o.insert(k.into(), serde_json::json!(true)); }
+        for k in ["widget", "lyricsWidget", "alertsOn", "socials"] { o.insert(k.into(), serde_json::json!(true)); }
     }
     let loading = a.ui.upgrade().is_some_and(|u| u.get_track_loading());
     let (pos, dur) = if loading { (0, 0) } else { (a.engine.position_ms(), a.engine.duration_ms()) };
@@ -8924,23 +8930,48 @@ fn widget_preview(shared: &Shared) {
 }
 
 thread_local! {
-    /// the real Stream Widget in its page: its web view, whether it's loaded, and where it was last put
-    static LIVE: RefCell<Option<(wry::WebView, Arc<std::sync::atomic::AtomicBool>, (f32, f32, f32, f32, bool))>> = const { RefCell::new(None) };
+    /// a widget page's real page: its web view, whether it's loaded, where it was last put, and its address
+    static LIVE: RefCell<Option<(wry::WebView, Arc<std::sync::atomic::AtomicBool>, (f32, f32, f32, f32, bool), String)>> = const { RefCell::new(None) };
     /// the menus' count as last seen, and when it last moved
     static LIVE_BEAT: std::cell::Cell<(i32, Option<std::time::Instant>)> = const { std::cell::Cell::new((0, None)) };
 }
 
-/// The Stream Widget's page: the real widget (its own page, with what's on the page before you save) in a web
-/// view sitting on the preview's card. It steps aside, showing the drawing under it, while the card isn't all
-/// in sight or a menu or anything else is over the page (a web view draws over everything in the window), and
-/// it's let go when you leave the page
+/// The real page for a widget page's preview (the Stream Widget, Alerts, Lyrics Widget, Multichat Overlay,
+/// Social Plug): served as OBS gets it, with what's on the page before you save
+fn live_path(ui: &AppWindow) -> Option<String> {
+    let q = "preview=1&inline=1";
+    Some(match ui.get_pf_preview().as_str() {
+        "widget" => format!("/?{q}"),
+        "alerts" => format!("{}?{q}", if ui.get_pf_alert().in_widget { "/" } else { "/alerts" }),
+        "lyrics" => format!("/lyrics?{q}"),
+        // (with no platforms added, the drawing's sample ones: the real one would be empty)
+        "socials" if !ui.get_pf_social().sample => format!("/socials?{q}"),
+        // (its look is in its address, as an OBS source's is: the page's settings put there)
+        "multichat" => {
+            let vals = PF_EDIT.with(|e| e.borrow().as_ref().map(|x| x.1.clone())).unwrap_or_default();
+            let mut url = format!("/chat?{q}");
+            for (k, v) in vals {
+                let v = match v { serde_json::Value::Bool(b) => if b { "1".to_string() } else { "0".to_string() }, serde_json::Value::Number(n) => n.to_string(), serde_json::Value::String(s) => s, _ => continue };
+                let enc: String = v.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+                url.push_str(&format!("&{k}={enc}"));
+            }
+            url
+        }
+        _ => return None,
+    })
+}
+
+/// A widget page's preview: the real page (see live_path) in a web view sitting on the preview. It steps aside,
+/// showing the drawing under it, while that part isn't all in sight or a menu or anything else is over the page
+/// (a web view draws over everything in the window), and it's let go when you leave the page
 fn live_widget(shared: &Shared) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     let g = ui.global::<WLive>();
-    if !(ui.get_pf_open() && ui.get_pf_preview() == "widget") {
+    let path = if ui.get_pf_open() { live_path(&ui) } else { None };
+    let Some(path) = path else {
         if LIVE.with(|l| l.borrow_mut().take().is_some()) { g.set_live(false); }
         return;
-    }
+    };
     // (a menu open: its count moving, or it moved a moment ago)
     let beat = g.get_beat();
     let menu = LIVE_BEAT.with(|b| {
@@ -8962,7 +8993,7 @@ fn live_widget(shared: &Shared) {
         if integrations::widget_start(&prefs).is_none() { let _ = integrations::widget_start(&on); }
         widget_preview(shared);
         if let Ok(d) = omnipulse_core::data_dir() { unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", d.join("webview")); } }
-        let url = format!("http://127.0.0.1:{port}/?preview=1&inline=1");
+        let url = format!("http://127.0.0.1:{port}{path}");
         let loaded = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let l2 = loaded.clone();
         use slint::winit_030::WinitWindowAccessor;
@@ -8970,13 +9001,21 @@ fn live_widget(shared: &Shared) {
             .with_on_page_load_handler(move |e, _| if matches!(e, wry::PageLoadEvent::Finished) { l2.store(true, std::sync::atomic::Ordering::Relaxed); })
             .build_as_child(w).ok()).flatten();
         let Some(view) = view else { return };
-        LIVE.with(|l| *l.borrow_mut() = Some((view, loaded, at)));
+        LIVE.with(|l| *l.borrow_mut() = Some((view, loaded, at, path)));
         return;
     }
     LIVE.with(|l| {
         let mut l = l.borrow_mut();
-        let Some((view, loaded, last)) = l.as_mut() else { return };
+        let Some((view, loaded, last, was)) = l.as_mut() else { return };
+        // (another page's, or its address changed (the Multichat Overlay's look): loaded afresh)
+        if *was != path {
+            let port = shared.borrow().web.prefs["widgetPort"].as_u64().unwrap_or(7878);
+            loaded.store(false, std::sync::atomic::Ordering::Relaxed);
+            let _ = view.load_url(&format!("http://127.0.0.1:{port}{path}"));
+            *was = path;
+        }
         if *last != at {
+            if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: live {was} at {at:?}"); }
             if show { let _ = view.set_bounds(rect); }
             if show != last.4 { let _ = view.set_visible(show); }
             *last = at;
@@ -9011,7 +9050,7 @@ fn widget_preview_open(shared: &Shared, name: &str) {
 fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_json::Value>) {
     if let Some(id) = name.strip_prefix("social:") {
         let all = socials::edit_save(&shared.borrow().web.prefs, id, &vals);
-        pref_put(shared, "socials", all);
+        pref_put(shared, "socialList", all);
         push_out(shared, true);
         PF_EDIT.with(|e| e.borrow_mut().take());
         if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Saved.".into()); }
@@ -9019,7 +9058,7 @@ fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_j
     }
     if name == "socials" {
         let all = socials::list_save(&shared.borrow().web.prefs, &vals);
-        pref_put(shared, "socials", all);
+        pref_put(shared, "socialList", all);
     }
     if docksets::page_of(name).is_some() {
         let all = docksets::saved(&shared.borrow().web.prefs, name, &vals);

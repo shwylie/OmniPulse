@@ -110,7 +110,9 @@
   const $ = (id) => document.getElementById(id);
   const PREVIEW = /[?&]preview=1/.test(location.search);
   const SPONSORS = location.pathname.startsWith("/sponsors");
-  if (PREVIEW) document.body.classList.add("preview");
+  // (in the app's own page, over its preview: no checks behind it)
+  const INLINE = /[?&]inline=1/.test(location.search);
+  if (PREVIEW && !INLINE) document.body.classList.add("preview");
   let cfg = null, list = [], at = 0, sig = "", turnT = null;
 
   function card(p) {
@@ -192,7 +194,7 @@
       if (now !== sig) {
         sig = now;
         list = next;
-        document.body.className = (PREVIEW ? "preview " : "") + (SPONSORS ? "sponsors " : "") + (SPONSORS ? "sponsors " : "") + ((cfg && cfg.style) || "card") + (cfg && cfg.align === "right" ? " right" : cfg && cfg.align === "centre" ? " centre" : "") + (cfg && cfg.rounded === false ? " sharp" : "") + (cfg && cfg.coloured ? " coloured" : "") + (cfg && cfg.motion === "none" ? " still" : "");
+        document.body.className = (PREVIEW && !INLINE ? "preview " : "") + (SPONSORS ? "sponsors " : "") + (SPONSORS ? "sponsors " : "") + ((cfg && cfg.style) || "card") + (cfg && cfg.align === "right" ? " right" : cfg && cfg.align === "centre" ? " centre" : "") + (cfg && cfg.rounded === false ? " sharp" : "") + (cfg && cfg.coloured ? " coloured" : "") + (cfg && cfg.motion === "none" ? " still" : "");
         const stage = $("stage");
         stage.className = cfg && cfg.all ? "all" : "one";
         stage.innerHTML = "";

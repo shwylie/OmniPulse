@@ -2718,6 +2718,32 @@ component DesignSketch inherits VerticalLayout {
 }
 
 /// The Lyrics Widget's preview: a few lines in its look (colours, size, alignment, style, outline, box), as it's set
+/// Where a widget page's real page goes, in its preview: told to WLive as it moves (and whether all of it is in
+/// sight, between view-top and view-bottom)
+component LiveSpot inherits Rectangle {
+    in property <length> view-top: -100000px;
+    in property <length> view-bottom: 100000px;
+    property <length> lx: self.absolute-position.x;
+    property <length> ly: self.absolute-position.y;
+    property <bool> lseen: self.ly >= root.view-top && self.ly + self.height <= root.view-bottom;
+    changed lx => { WLive.x = self.lx; }
+    changed ly => { WLive.y = self.ly; }
+    changed width => { WLive.w = self.width; }
+    changed height => { WLive.h = self.height; }
+    changed lseen => { WLive.seen = self.lseen; }
+    init => { WLive.x = self.lx; WLive.y = self.ly; WLive.w = self.width; WLive.h = self.height; WLive.seen = self.lseen; }
+}
+
+/// Over a preview's drawing while the real page shows on it: the preview's backdrop, so nothing drawn shows
+/// through the page's see-through parts
+component LiveCover inherits Rectangle {
+    in property <string> note: "The real thing, as it will look in OBS.";
+    visible: WLive.live;
+    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
+    Caps { r: 14px; outside: Theme.bg; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
+    Text { x: 12px; y: 8px; text: root.note; color: #ffffffa0; font-size: 11px; }
+}
+
 /// The Stream Widget's words, as widget.html sets them: the title, the artist (and who asked for it), the
 /// progress and its times
 component WInfo inherits VerticalLayout {
@@ -2796,7 +2822,7 @@ component WidgetPreview inherits Rectangle {
     init => { WLive.x = self.lx; WLive.y = self.ly; WLive.w = self.cw; WLive.h = self.ch; WLive.seen = self.lseen; }
     // (moving as the real one does: the progress, the record, the equaliser's bars; still with Reduce Motion)
     property <int> step;
-    Timer { interval: 80ms; running: Theme.motion; triggered => { root.step = mod(root.step + 1, 4500); } }
+    Timer { interval: 80ms; running: Theme.motion && !WLive.live; triggered => { root.step = mod(root.step + 1, 4500); } }
     property <float> p: Theme.motion ? 0.15 + 0.7 * mod(root.step, 1500) / 1500 : 0.35;
     property <angle> turn: root.look.spin && Theme.motion ? mod(root.step, 75) / 75 * 360deg : 0deg;
     // (the theme over the layout: Cassette and Polaroid keep their own panel)
@@ -3074,6 +3100,9 @@ component ThemeSketch inherits VerticalLayout {
 /// The alerts as they'll look in the Stream Widget: a made-up one every few seconds (a follow, a sub, bits, a
 /// raid), in their theme
 component AlertPreview inherits Rectangle {
+    // (the part of the page in sight: the real page is shown only while all of it is)
+    in property <length> view-top: -100000px;
+    in property <length> view-bottom: 100000px;
     in property <AlertLook> look;
     height: 190px;
     border-radius: 14px;
@@ -3090,8 +3119,8 @@ component AlertPreview inherits Rectangle {
         { head: "Raid", main: "RaidLeader", msg: "with 42 viewers", d: Icons.broadcast },
     ];
     // (a turn every 5 s: the alert comes in at 1 s, goes at 4 s; between, Now Playing (in the widget) or nothing)
-    property <int> turn: Theme.motion ? floor(animation-tick() / 5000ms) : 1;
-    property <float> at: Theme.motion ? mod(animation-tick() / 1ms, 5000) : 2000;
+    property <int> turn: (Theme.motion && !WLive.live) ? floor(animation-tick() / 5000ms) : 1;
+    property <float> at: (Theme.motion && !WLive.live) ? mod(animation-tick() / 1ms, 5000) : 2000;
     property <float> come: clamp((root.at - 1000) / 550, 0, 1);
     property <float> go: clamp((root.at - 3500) / 500, 0, 1);
     property <bool> entering: root.go == 0;
@@ -3196,6 +3225,9 @@ component AlertPreview inherits Rectangle {
             }
         }
     }
+    // (the real page over it: its spot, and the drawing covered)
+    LiveSpot { x: (root.width - root.w0) / 2; y: (root.height - root.h0) / 2 + 8px; width: root.w0; height: root.h0; view-top: root.view-top; view-bottom: root.view-bottom; }
+    LiveCover { note: "The real alerts, as they will look in OBS."; }
 }
 
 /// Game HUD Frames' editor: your screenshot, its frames on it; drag a box for a new one, click one to pick it
@@ -4077,6 +4109,9 @@ component ChatRow inherits Rectangle {
 
 /// The Multichat Overlay as it'll look in OBS: over a stream, made-up chat coming in every couple of seconds
 component ChatPreview inherits Rectangle {
+    // (the part of the page in sight: the real page is shown only while all of it is)
+    in property <length> view-top: -100000px;
+    in property <length> view-bottom: 100000px;
     in property <ChatLook> look;
     in property <[ChatSample]> samples;
     height: 230px;
@@ -4090,8 +4125,8 @@ component ChatPreview inherits Rectangle {
     Text { x: 12px; y: 8px; text: "A preview, with made-up chat"; color: #ffffffa0; font-size: 11px; }
     // (a new one every 2 s: the newest is the turn's, the rest the ones before it)
     property <int> n: max(1, root.samples.length);
-    property <int> turn: Theme.motion ? floor(animation-tick() / 2000ms) : 4;
-    property <float> into: Theme.motion ? mod(animation-tick() / 1ms, 2000) / 350 : 1;
+    property <int> turn: (Theme.motion && !WLive.live) ? floor(animation-tick() / 2000ms) : 4;
+    property <float> into: (Theme.motion && !WLive.live) ? mod(animation-tick() / 1ms, 2000) / 350 : 1;
     property <float> come: clamp(root.into, 0, 1);
     // (stacked: on the side it's lined up on)
     if !root.look.row: VerticalLayout {
@@ -4128,6 +4163,9 @@ component ChatPreview inherits Rectangle {
             }
         }
     }
+    // (the real page over it: its spot, and the drawing covered)
+    LiveSpot { x: 14px; y: 26px; width: root.width - 28px; height: root.height - 34px; view-top: root.view-top; view-bottom: root.view-bottom; }
+    LiveCover { note: "The real page, as it will look in OBS."; }
 }
 
 /// One platform, as the Social Plug draws it (Card, Pill or Minimal; in its colours or not)
@@ -4191,6 +4229,9 @@ component SocialCard inherits Rectangle {
 /// The Social Plug as it'll look in OBS: over a stream, one at a time in turn (coming in as its Animation
 /// says) or all together; shown while its settings are, as they're changed
 component SocialPreview inherits Rectangle {
+    // (the part of the page in sight: the real page is shown only while all of it is)
+    in property <length> view-top: -100000px;
+    in property <length> view-bottom: 100000px;
     in property <[SocialItem]> items;
     in property <SocialLook> look;
     height: 150px;
@@ -4205,12 +4246,12 @@ component SocialPreview inherits Rectangle {
     if root.look.sample: Text { x: 12px; y: 8px; text: "Sample platforms: add yours below to see them here."; color: #ffffffb0; font-size: 11px; }
     // (one at a time: which one's up, and how far into its turn)
     property <int> secs: max(3, root.look.secs);
-    property <int> ms: Theme.motion ? mod(animation-tick() / 1ms, root.secs * 1000 * max(1, root.items.length)) : 1000;
+    property <int> ms: (Theme.motion && !WLive.live) ? mod(animation-tick() / 1ms, root.secs * 1000 * max(1, root.items.length)) : 1000;
     property <int> at: root.items.length > 0 ? floor(root.ms / (root.secs * 1000)) : 0;
     property <float> into: root.ms - root.at * root.secs * 1000;
     // (0 to 1: coming in over its first 0.65 s, going out over its last 0.5 s)
-    property <float> come: !Theme.motion || root.look.motion == "none" ? 1 : clamp(root.into / 650, 0, 1);
-    property <float> go: !Theme.motion || root.look.motion == "none" ? 0 : clamp((root.into - (root.secs * 1000 - 500)) / 500, 0, 1);
+    property <float> come: !(Theme.motion && !WLive.live) || root.look.motion == "none" ? 1 : clamp(root.into / 650, 0, 1);
+    property <float> go: !(Theme.motion && !WLive.live) || root.look.motion == "none" ? 0 : clamp((root.into - (root.secs * 1000 - 500)) / 500, 0, 1);
     property <float> ease: 1 - (1 - root.come) * (1 - root.come) * (1 - root.come);
     property <length> pad: 24px;
     if !root.look.all && root.items.length > 0: SocialCard {
@@ -4220,7 +4261,7 @@ component SocialPreview inherits Rectangle {
         x: self.home + (root.look.motion == "slide" ? (1 - root.ease) * -32px + root.go * 32px : 0px);
         y: (root.height - self.height) / 2 + (root.look.motion == "rise" ? (1 - root.ease) * 14px - root.go * 10px : 0px);
         // (Typewriter: popped in, then the handle typed at 70 ms a letter, its caret blinking a while after)
-        property <bool> typing: Theme.motion && root.look.motion == "type";
+        property <bool> typing: (Theme.motion && !WLive.live) && root.look.motion == "type";
         typed: self.typing ? clamp((root.into - 300) / (70 * max(1, self.it.handle.character-count)), 0, 1) : 1;
         caret: self.typing && root.into < 1500 + 70 * self.it.handle.character-count && mod(root.into, 800) < 400;
         opacity: root.come * (1 - root.go);
@@ -4237,9 +4278,15 @@ component SocialPreview inherits Rectangle {
         spacing: 10px;
         for it in root.items: SocialCard { it: it; look: root.look; }
     }
+    // (the real page over it: its spot, and the drawing covered)
+    LiveSpot { x: 0; y: 0; width: root.width; height: root.height; view-top: root.view-top; view-bottom: root.view-bottom; }
+    LiveCover { note: "The real page, as it will look in OBS."; }
 }
 
 component LyricsPreview inherits Rectangle {
+    // (the part of the page in sight: the real page is shown only while all of it is)
+    in property <length> view-top: -100000px;
+    in property <length> view-bottom: 100000px;
     in property <LyricsLook> look;
     height: 190px;
     border-radius: 14px;
@@ -4293,6 +4340,9 @@ component LyricsPreview inherits Rectangle {
         }
     }
     Text { x: parent.width - self.width - 10px; y: parent.height - self.height - 8px; text: "Preview"; color: #ffffff70; font-size: 10px; }
+    // (the real page over it: its spot, and the drawing covered)
+    LiveSpot { x: 0; y: 0; width: root.width; height: root.height; view-top: root.view-top; view-bottom: root.view-bottom; }
+    LiveCover { note: "The real page, as it will look in OBS."; }
 }
 
 /// (a line between a group's rows)
@@ -8726,10 +8776,10 @@ export component AppWindow inherits Window {
                             spacing: 12px;
                             padding-right: 10px;
                             // (the preview, on a smaller window: first, above what it shows)
-                            if root.width < 1440px && root.pf-preview == "lyrics": LyricsPreview { look: root.pf-lyrics; }
-                            if root.width < 1440px && root.pf-preview == "socials": SocialPreview { items: root.pf-social-items; look: root.pf-social; }
-                            if root.width < 1440px && root.pf-preview == "multichat": ChatPreview { look: root.pf-chat; samples: root.pf-chat-samples; }
-                            if root.width < 1440px && root.pf-preview == "alerts": AlertPreview { look: root.pf-alert; }
+                            if root.width < 1440px && root.pf-preview == "lyrics": LyricsPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; look: root.pf-lyrics; }
+                            if root.width < 1440px && root.pf-preview == "socials": SocialPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; items: root.pf-social-items; look: root.pf-social; }
+                            if root.width < 1440px && root.pf-preview == "multichat": ChatPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; look: root.pf-chat; samples: root.pf-chat-samples; }
+                            if root.width < 1440px && root.pf-preview == "alerts": AlertPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; look: root.pf-alert; }
                             if root.width < 1440px && root.pf-preview == "widget": WidgetPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; look: root.pf-widget; art: root.now-art; title: root.now-title == "Nothing playing" || root.now-title == "" ? "A Song You Love" : root.now-title; artist: root.now-artist == "" ? "Your Favourite Artist" : root.now-artist; }
                             // (room under the last one, clear of Cancel and Save)
                             padding-bottom: 24px;

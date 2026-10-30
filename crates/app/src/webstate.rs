@@ -133,6 +133,14 @@ pub fn load() -> WebState {
     }
     // (the Stream Widget's old designs, as a layout and a theme)
     crate::integrations::widget_split_all(&mut s.prefs);
+    // (the Social Plug's platforms were kept under its switch's name, so saving them switched it off in OBS:
+    // moved to their own, and the switch put back on, as you'd added them)
+    if s.prefs["socials"].is_array() {
+        let list = s.prefs["socials"].take();
+        s.prefs["socialList"] = list.clone();
+        s.prefs["socials"] = Value::Bool(true);
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { save_pref("socialList", list); save_pref("socials", Value::Bool(true)); }
+    }
     // this app's own plays count too
     for p in native_plays() {
         let e = s.last_played.entry(p.id.clone()).or_insert(0);

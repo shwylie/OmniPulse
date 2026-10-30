@@ -473,7 +473,25 @@
     setTimeout(offCheck, 5000);
   }
   offCheck();
+  // (the app's preview of this page: made-up chat, a new line every 2 s, as the page's drawing had it)
+  const SAMPLES = [
+    ["PixelPanda", "that transition was so clean", "twitch", "#ff7a59", ["subscriber"]], ["kickfan_92", "hello from Kick!", "kick", "#53fc18", []],
+    ["ModMaya", "remember to hydrate chat", "twitch", "#3ccd6c", ["moderator"]], ["lofi_larry", "what's this song?", "twitch", "#7aa2ff", []],
+    ["Zed", "GG that was close", "kick", "#ffd24a", ["vip"]], ["Nova", "first time here, love the vibes", "youtube", "#e05ce0", []],
+    ["RaidLeader", "we came from the raid!", "twitch", "#ff4f8b", ["subscriber"]], ["quietcat", "lurking but enjoying it", "kick", "#5ad1ff", []],
+  ];
+  let sampleN = 0;
+  function sample(again) {
+    const pick = SAMPLES.filter((x) => opt.from === "all" || opt.from === x[2]);
+    const x = (pick.length ? pick : SAMPLES)[sampleN % (pick.length || SAMPLES.length)];
+    sampleN++;
+    add({ n: sampleN, ts: Date.now(), user: x[0], login: x[0].toLowerCase(), text: x[1], platform: x[2], color: x[3], badges: x[4], first: sampleN === 6 });
+    const keep = Math.max(1, Number(opt.max) || 30);
+    for (const n of [...rows.keys()]) if (n <= sampleN - keep) gone(n);
+    if (again) setTimeout(() => sample(true), 2000);
+  }
   async function poll() {
+    if (PREV) { for (let i = 0; i < 3; i++) sample(false); sample(true); return; }
     if (OFF) { setTimeout(poll, 2000); return; }
     try {
       const j = await (await fetch("/dock/chat.json?after=" + Math.max(0, last), { cache: "no-store" })).json();
