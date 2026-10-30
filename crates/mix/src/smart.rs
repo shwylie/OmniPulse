@@ -243,7 +243,7 @@ pub fn blend_blocked(a: &Side, b: &Side) -> Option<&'static str> {
     if !grid_trusted(b) { return Some("the next one's beat isn't sure"); }
     let (ma, mb) = (a.rhythm?, b.rhythm?);
     let near = |x: f64| ride(x, mb.rhythm.bpm) <= MAX_RAMP_BLEND;
-    if match_rate(ma.rhythm.bpm, mb.rhythm.bpm).is_none() && !near(ma.rhythm.bpm) && !near(ma.rhythm.bpm / 2.0) { return Some("tempos too far apart (more than 50%)"); }
+    if match_rate(ma.rhythm.bpm, mb.rhythm.bpm).is_none() && !near(ma.rhythm.bpm) && !near(ma.rhythm.bpm / 2.0) { return Some("tempos too far apart (more than 30%)"); }
     // (keys that don't go together: still a blend, a short one: the clash only briefly, as a DJ does)
     None
 }

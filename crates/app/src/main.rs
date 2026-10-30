@@ -6055,10 +6055,10 @@ fn smart_both_sing(a: &str, b: &str, a_at: (u64, u64), b_at: (u64, u64)) -> bool
 /// A song's timed lyrics fetched (once; kept with Wordplay's), for the voices' handoff
 fn smart_lyrics(shared: &Shared, t: &Track) {
     if MIX_WORDS.with(|w| w.borrow().contains_key(&t.key)) || MIX_WORDS_BUSY.with(|b| !b.borrow_mut().insert(t.key.clone())) { return; }
-    let (t, rt, weak) = { let a = shared.borrow(); (t.clone(), a.rt.clone(), a.ui.clone()) };
+    let (t, rt, weak, prefs) = { let a = shared.borrow(); (t.clone(), a.rt.clone(), a.ui.clone(), a.web.prefs.clone()) };
     let secs = t.ms / 1000;
     rt.spawn(async move {
-        let l = player::mix_lyrics(&t, secs).await;
+        let l = player::mix_lyrics(&t, secs, &prefs).await;
         let _ = weak.upgrade_in_event_loop(move |_| {
             MIX_WORDS.with(|w| w.borrow_mut().insert(t.key.clone(), l));
             MIX_WORDS_BUSY.with(|b| b.borrow_mut().remove(&t.key));

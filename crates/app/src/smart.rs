@@ -91,7 +91,7 @@ mod tests {
             let first = |an: &serde_json::Value| an["silences"].as_array().and_then(|s| s.first()).filter(|s| s[0].as_u64() == Some(0)).and_then(|s| s[1].as_u64()).unwrap_or(0);
             // (the voices handed over only where both sing, by their timed lyrics, as the app does; and the
             // blend placed so the one playing's singer isn't cut off: fetched before it's planned)
-            let lyrics = |t: &Track, m: &Option<Measured>| rt.block_on(crate::player::mix_lyrics(t, m.as_ref().map_or(0, |m| m.to_ms / 1000)));
+            let lyrics = |t: &Track, m: &Option<Measured>| rt.block_on(crate::player::mix_lyrics(t, m.as_ref().map_or(0, |m| m.to_ms / 1000), &serde_json::Value::Null));
             let (la, lb) = (lyrics(&ta, &ma), lyrics(&tb, &mb));
             println!("timed lyrics: {} lines / {} lines", la.len(), lb.len());
             let a = Side { dur_ms: a_dur, audible_ms: ana["audible_ms"].as_u64().unwrap_or(0), first_ms: 0, rhythm: ma.as_ref(), stated_bpm: None, key_known: ka_ok, lines: &la };

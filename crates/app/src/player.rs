@@ -397,10 +397,22 @@ pub async fn lyrics_from(t: &Track, provider: &str) -> Vec<Line> {
 
 /// A track's timed lyrics for Seamless Mix's voices' handoff: LRCLIB's, for a recording `secs` long (what
 /// plays, as measured: a remix or another version of another length has none, its timing not the same)
-pub async fn mix_lyrics(t: &Track, secs: u64) -> Vec<(u64, String)> {
-    let (artist, title, _, _) = lyrics_query(t).await;
-    let Ok(v) = core::lyrics::from("lrclib", &artist, &title, secs, "").await else { return Vec::new() };
-    timed(&v).map(|l| l.into_iter().filter(|x| x.ms > 0 && !x.text.trim().is_empty()).map(|x| (x.ms, x.text)).collect()).unwrap_or_default()
+pub async fn mix_lyrics(t: &Track, secs: u64, prefs: &Value) -> Vec<(u64, String)> {
+    // (every place Now Playing asks, in your order, not LRCLIB's alone: most of a library's remixes have
+    // timed lyrics only on one of the others (2026-10-30: none found for 7 of 8 songs rendered). A remix:
+    // only its own, as named, never the original's, whose timing isn't the remix's. YouTube: the captions
+    // of the video that plays)
+    let (artist, title, _, video) = lyrics_query(t).await;
+    let title = match remix_tag(&t.title) { Some(tag) => format!("{title} {tag}"), None => title };
+    for p in lyrics_order(prefs) {
+        if p == "youtube" && video.is_empty() { continue; }
+        let Ok(v) = core::lyrics::from(&p, &artist, &title, secs, &video).await else { continue };
+        if let Some(l) = timed(&v) {
+            let l: Vec<(u64, String)> = l.into_iter().filter(|x| x.ms > 0 && !x.text.trim().is_empty()).map(|x| (x.ms, x.text)).collect();
+            if !l.is_empty() { return l; }
+        }
+    }
+    Vec::new()
 }
 
 /// A place's timed lyrics, if they are timed (not empty, not untimed text in the timed field)
