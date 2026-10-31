@@ -143,13 +143,20 @@ impl Source for Decoded {
         let got = self.format.seek(SeekMode::Accurate, to).map_err(|e| format!("Couldn't seek: {e}"))?;
         self.decoder.reset();
         let tb = self.format.tracks().iter().find(|t| t.id == self.track).and_then(|t| t.codec_params.time_base);
-        Ok(match tb {
-            Some(tb) => {
-                let t = tb.calc_time(got.actual_ts);
-                t.seconds * 1000 + (t.frac * 1000.0) as u64
-            }
-            None => ms,
-        })
+        let Some(tb) = tb else { return Ok(ms) };
+        // (it lands on the start of the block holding that time, up to a block early (an m4a's: 23 ms; a
+        // YouTube song's next one in a blend came in that late against its beats): decoded on to it)
+        let secs = |ts: u64| { let t = tb.calc_time(ts); t.seconds as f64 + t.frac };
+        let mut skip = (((secs(got.required_ts) - secs(got.actual_ts)).max(0.0) * self.rate as f64).round() as usize) * 2;
+        let mut scratch = Vec::new();
+        while skip > 0 {
+            scratch.clear();
+            if !self.read(&mut scratch)? { break; }
+            if scratch.len() > skip { self.carry = scratch.split_off(skip); break; }
+            skip -= scratch.len();
+        }
+        let t = tb.calc_time(got.required_ts);
+        Ok(t.seconds * 1000 + (t.frac * 1000.0).round() as u64)
     }
 }
 

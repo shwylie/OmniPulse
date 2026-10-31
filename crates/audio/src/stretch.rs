@@ -85,6 +85,11 @@ struct Deck {
     feed: SourceProducer,
 }
 
+/// What the tempo engine's sound is late by past the latency it says it has (ms): 6 as it is, 3 to 5 with
+/// its key shifted; dropped too, so a stretched song is on time within 2 ms (its next one in a blend was 7
+/// late against the one playing)
+const STRETCH_LATE_MS: usize = 4;
+
 fn deck(rate: u32, tempo: f64) -> Result<Deck, String> {
     let h = Engine::build(EngineConfig { sample_rate: rate, channels: 2, profile: EngineProfile::Keylock, initial_tempo_rate: tempo, max_block_frames: BLOCK, ..EngineConfig::default() }).map_err(|e| format!("the tempo engine wouldn't start: {e:?}"))?;
     Ok(Deck { ctl: h.controller, proc: h.processor, feed: h.source })
@@ -121,7 +126,7 @@ impl Stretched {
     }
 
     fn delayed(mut self) -> Self {
-        self.delay_left = self.deck.proc.pipeline_latency_frames();
+        self.delay_left = self.deck.proc.pipeline_latency_frames() + self.rate as usize * STRETCH_LATE_MS / 1000;
         self
     }
 
@@ -231,7 +236,7 @@ impl Source for Stretched {
         self.finished = false;
         self.real_frames = 0;
         self.last_at = -1.0;
-        self.delay_left = self.deck.proc.pipeline_latency_frames();
+        self.delay_left = self.deck.proc.pipeline_latency_frames() + self.rate as usize * STRETCH_LATE_MS / 1000;
         Ok(at)
     }
     fn position_ms(&self) -> Option<u64> {
@@ -305,9 +310,9 @@ mod tests {
             let ch: Vec<f32> = out.chunks(2).map(|f| f[0].abs()).collect();
             let gap = (rate as f64 * 0.5 / t) as usize;
             let peaks: Vec<String> = (0..4).map(|k| { let a = (k * gap).saturating_sub(gap / 2); let b = (k * gap + gap / 2).min(ch.len()); let i = (a..b).max_by(|x, y| ch[*x].total_cmp(&ch[*y])).unwrap(); format!("{:.1} ({:.2})", (i as f64 - k as f64 * gap as f64) * 1000.0 / rate as f64, ch[i]) }).collect();
-            // each click where it should be (but the chain's few ms, as every track has), not its deck's
+            // each click where it should be (within 3 ms; with its key shifted, the resampling's drift, 7), not its deck's
             // delay or its resampling's behind (once 95 ms a semitone up, half a second two)
-            for p in &peaks[1..] { let late: f64 = p.split(' ').next().unwrap().parse().unwrap(); assert!(late.abs() < 10.0, "tempo {t} {semis:+}: {peaks:?}"); }
+            for p in &peaks[1..] { let late: f64 = p.split(' ').next().unwrap().parse().unwrap(); assert!(late.abs() < if semis == 0 { 3.0 } else { 7.0 }, "tempo {t} {semis:+}: {peaks:?}"); }
         }
     }
 

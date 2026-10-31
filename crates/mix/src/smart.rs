@@ -462,8 +462,7 @@ pub fn shifted(m: &Measured, n: i32) -> Measured {
 }
 
 /// Where it's mixed sure, when the whole song isn't: its end's downbeat for the one going out (`end`), its
-/// start's for the next one, if that part's is sure (its bars counted from there, and as sure as it is);
-/// then its beat 1 a beat later if its drop gaps fall on it (by_drop_gaps)
+/// start's for the next one, if that part's is sure (its bars counted from there, and as sure as it is)
 pub fn local_downbeat(m: &Measured, end: bool) -> Measured {
     let r = &m.rhythm;
     let part = if end { r.tail_downbeat } else { r.head_downbeat };
@@ -472,41 +471,10 @@ pub fn local_downbeat(m: &Measured, end: bool) -> Measured {
             let n = (d as i32 - r.downbeat as i32).rem_euclid(4);
             let mut s = shifted(m, n);
             s.rhythm.downbeat_confidence = c;
-            by_drop_gaps(&s)
+            s
         }
-        _ => by_drop_gaps(m),
+        _ => m.clone(),
     }
-}
-
-/// A song's drop gaps: a beat near silent just before its main part comes back (6 dB under the 4 beats
-/// before it, 8 under the 4 after, each of those 6 louder, and those as loud as its body is), counted by
-/// where in its bar they fall (0: on its beat 1, 3: on its beat 4)
-pub fn drop_gaps(r: &omnipulse_core::rhythm::Rhythm) -> [usize; 4] {
-    let db = &r.beat_db;
-    let mut body: Vec<f32> = db.iter().copied().filter(|d| *d > -40.0).collect();
-    body.sort_by(|a, b| a.total_cmp(b));
-    let Some(&loud) = body.get(body.len() * 3 / 4) else { return [0; 4] };
-    let mean = |x: &[f32]| x.iter().sum::<f32>() / x.len() as f32;
-    let mut at = [0usize; 4];
-    for i in 4..db.len().saturating_sub(4) {
-        let (before, after) = (mean(&db[i - 4..i]), mean(&db[i + 1..i + 5]));
-        let quietest_after = db[i + 1..i + 5].iter().copied().fold(f32::MAX, f32::min);
-        if after > loud - 3.0 && quietest_after > db[i] + 6.0 && db[i] < before - 6.0 && db[i] < after - 8.0 {
-            at[(i as i64 - r.downbeat as i64).rem_euclid(4) as usize] += 1;
-        }
-    }
-    at
-}
-
-/// Its beat 1 a beat later when its drop gaps fall on it: the silent beat before a drop is the bar's last
-/// (beat 4), the drop on the one after it (as Shooting Stars', 2026-10-31: counted a beat early, its blend a
-/// beat out). Of your library's songs with clear drop gaps, 95 of 161 have them on beat 4 as counted, 19 on
-/// beat 1; on beat 2 or 3, left as counted (a half bar's a bigger claim, and a gap on 3 can lead into a
-/// pickup)
-pub fn by_drop_gaps(m: &Measured) -> Measured {
-    let g = drop_gaps(&m.rhythm);
-    let n: usize = g.iter().sum();
-    if n >= 2 && g[0] * 10 >= n * 7 { shifted(m, 1) } else { m.clone() }
 }
 
 /// A song counted at half time: every other beat a beat (from its bars' first), two of its bars a bar
@@ -751,29 +719,6 @@ mod tests {
             let c: &'static Measured = Box::leak(Box::new(song(bpm, &levels(8, 48, 8), 0.6, "8A")));
             assert!(blend(&side(a), &side(c), 0).is_none(), "{bpm}");
         }
-    }
-
-    #[test]
-    fn a_drop_gap_on_beat_1_moves_it_a_beat_later() {
-        // 64 bars at 128, loud throughout, with a silent beat before each 16-bar phrase's drop
-        let mut m = song(128.0, &[-8.0; 64], 0.6, "8A");
-        let gaps_on = |m: &mut Measured, at: usize| {
-            m.rhythm.beat_db = vec![-8.0; m.rhythm.beats.len()];
-            for phrase in 1..4 { m.rhythm.beat_db[phrase * 64 + at] = -30.0; }
-        };
-        // (on beat 1 as counted: it's beat 4, the drop the beat after it)
-        gaps_on(&mut m, 0);
-        assert_eq!(drop_gaps(&m.rhythm), [3, 0, 0, 0]);
-        let s = local_downbeat(&m, true);
-        assert_eq!(s.rhythm.downbeat, 1);
-        assert_eq!(drop_gaps(&s.rhythm), [0, 0, 0, 3]);
-        // (moved once only: already on beat 4, it stays)
-        assert_eq!(local_downbeat(&s, true).rhythm.downbeat, 1);
-        // (on beat 4, or beat 3, as counted: left)
-        gaps_on(&mut m, 3);
-        assert_eq!(local_downbeat(&m, true).rhythm.downbeat, 0);
-        gaps_on(&mut m, 2);
-        assert_eq!(local_downbeat(&m, true).rhythm.downbeat, 0);
     }
 
     #[test]

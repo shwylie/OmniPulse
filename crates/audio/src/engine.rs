@@ -954,12 +954,14 @@ impl Handoff {
         }
     }
 
-    /// The same with the two melodies kept apart (keys that clash): the one playing's mids gone over the
-    /// bar before the swap, the next one's up over the beat either side of it; the beats (the highs) and
-    /// the bass swap as they are
+    /// The same with the two melodies barely together (keys that clash): their mids crossfaded over one
+    /// stretch, from a bar before the swap (a quarter of the run-up, on a long one) to a beat past it, the
+    /// one going as the other comes (equal power: no dip between them; apart, with the next one's up only
+    /// once the other's was gone, there was silence, as Ghost in the Machine into Wish You Could Stay had);
+    /// the beats (the highs) and the bass as they are
     pub fn melodies_apart(mut self, swap: u64, beat_ms: u64) -> Self {
-        let bar = beat_ms * 4;
-        self.mid = Ramp { in_at: swap.saturating_sub(beat_ms), in_len: (beat_ms * 2).max(1), out_at: swap.saturating_sub(bar), out_len: bar.max(1) };
+        let from = swap.saturating_sub((beat_ms * 4).max(swap / 4));
+        self.mid = Ramp::swap(from, (swap + beat_ms - from).max(1));
         self
     }
 
@@ -1612,6 +1614,20 @@ pub fn render(src: Box<dyn Source>, out_rate: u32, eq: &[f32], match_db: f32, ma
 mod xfade_tests {
     use super::*;
     use crate::source::Tone;
+
+    #[test]
+    fn melodies_kept_apart_never_leave_a_gap() {
+        // a 16 s run-up, beats of 500 ms: the mids crossfaded from 4 s before the swap to a beat past it
+        let h = Handoff::carry(18_000, 16_000, 500).melodies_apart(16_000, 500);
+        for t in (0..18_000).step_by(100) {
+            let (o, i) = h.mid.gains(t);
+            assert!(o * o + i * i > 0.99, "a dip at {t}: {o} {i}");
+        }
+        assert!(h.mid.gains(11_900).1 < 0.01 && h.mid.gains(16_500).0 < 0.01);
+        // a short one: from a bar before
+        let s = Handoff::carry(10_000, 8_000, 500).melodies_apart(8_000, 500);
+        assert!(s.mid.gains(5_900).1 < 0.01 && s.mid.gains(6_100).1 > 0.0);
+    }
 
     #[test]
     fn a_blends_hats_are_handed_over_by_the_swap() {
