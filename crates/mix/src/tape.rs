@@ -128,6 +128,7 @@ pub fn tape(a: &Side, b: &Side, now_ms: u64) -> Option<Plan> {
         beatmatched: false,
         out_tempo: 1.0,
         roll_speed: 1.0,
+        clash: false,
         ramp_ms: spin.round() as u64,
         tape_stop: true,
         style: None,

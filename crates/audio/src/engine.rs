@@ -954,6 +954,15 @@ impl Handoff {
         }
     }
 
+    /// The same with the two melodies kept apart (keys that clash): the one playing's mids gone over the
+    /// bar before the swap, the next one's up over the beat either side of it; the beats (the highs) and
+    /// the bass swap as they are
+    pub fn melodies_apart(mut self, swap: u64, beat_ms: u64) -> Self {
+        let bar = beat_ms * 4;
+        self.mid = Ramp { in_at: swap.saturating_sub(beat_ms), in_len: (beat_ms * 2).max(1), out_at: swap.saturating_sub(bar), out_len: bar.max(1) };
+        self
+    }
+
     /// A roll out (as Traktor's Beatmasher): the one going out's bar from the mix's start played, then
     /// rolled over `bars - 1` more bars (its first half twice, its first quarter four times...), a
     /// high-pass rising through it, the build; on the roll's end the one coming in lands at once on its

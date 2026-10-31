@@ -37,6 +37,9 @@ pub struct Plan {
     /// a roll: its loop's speed by its end (the next one's tempo over the one playing's), ridden to from its
     /// own over the roll, so the next one lands at the tempo it's been heard going to; 1.0 otherwise
     pub roll_speed: f64,
+    /// a blend of keys that clash, not shifted to go together: the two melodies kept apart (the next one's
+    /// in at the swap, the one playing's gone by then), only their beats together before it; keys either of which isn't sure, too
+    pub clash: bool,
 }
 
 /// The one playing's tempo `p` (0..1) of the way through a mix that slows it to `target`: eased there

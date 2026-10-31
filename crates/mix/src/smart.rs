@@ -230,10 +230,13 @@ pub fn match_rate(a_bpm: f64, b_bpm: f64) -> Option<f64> {
     [1.0, 2.0, 0.5].iter().map(|m| a_bpm / (b_bpm * m)).filter(|r| (r - 1.0).abs() <= MAX_RATE).min_by(|x, y| (x - 1.0).abs().total_cmp(&(y - 1.0).abs()))
 }
 
+/// A measured key clear enough to go by (its key_confidence)
+const KEY_CLEAR: f64 = 0.25;
+
 /// Their keys go together as they are (the same, a step round the Camelot wheel, or relative major and
 /// minor); a key not clear enough to say counts as going together
 pub fn keys_go(a: &Measured, b: &Measured) -> bool {
-    const CLEAR: f64 = 0.25;
+    const CLEAR: f64 = KEY_CLEAR;
     a.rhythm.key_confidence < CLEAR || b.rhythm.key_confidence < CLEAR || omnipulse_core::rhythm::keys_mix(&a.rhythm.camelot, &b.rhythm.camelot)
 }
 
@@ -329,6 +332,11 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     // (only by keys known from outside: our own readings are a fifth out too often to shift a song by)
     let semitones = if a.key_known && b.key_known { key_ride(ma, mb) } else { 0 };
     let clash = !keys_go(ma, mb) && semitones == 0;
+    // (the melodies kept apart unless both keys are sure, from outside or clearly measured, and go together:
+    // one unclear counted as going together let D major and E major blend, Ghost in the Machine's into Wish
+    // You Could Stay's, rated bad)
+    let sure = |s: &Side, m: &Measured| s.key_known || m.rhythm.key_confidence >= KEY_CLEAR;
+    let apart = semitones == 0 && !(sure(a, ma) && sure(b, mb) && omnipulse_core::rhythm::keys_mix(&ma.rhythm.camelot, &mb.rhythm.camelot));
     // the one playing: its main part's end (its outro from there), and its sound's
     let line = body_line(ma)?;
     let outro = ma.rhythm.bar_db.iter().rposition(|d| *d >= line)? + 1;
@@ -387,7 +395,7 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     Some(crate::plan::Plan {
         at_ms: at.round() as u64, ms: len.round() as u64, swap_ms: swap_at.round() as u64, start_ms: bar_ms(mb, from)?.round() as u64,
         rate, bars: (run + tail) as u32, semitones, beatmatched: true, out_tempo: target, ramp_ms: swap_at.round() as u64, tape_stop: false, roll_speed: 1.0,
-        style: None, tail_bars: tail as u32,
+        style: None, tail_bars: tail as u32, clash: apart,
     })
 }
 
@@ -454,7 +462,8 @@ pub fn shifted(m: &Measured, n: i32) -> Measured {
 }
 
 /// Where it's mixed sure, when the whole song isn't: its end's downbeat for the one going out (`end`), its
-/// start's for the next one, if that part's is sure (its bars counted from there, and as sure as it is)
+/// start's for the next one, if that part's is sure (its bars counted from there, and as sure as it is);
+/// then its beat 1 a beat later if its drop gaps fall on it (by_drop_gaps)
 pub fn local_downbeat(m: &Measured, end: bool) -> Measured {
     let r = &m.rhythm;
     let part = if end { r.tail_downbeat } else { r.head_downbeat };
@@ -463,10 +472,41 @@ pub fn local_downbeat(m: &Measured, end: bool) -> Measured {
             let n = (d as i32 - r.downbeat as i32).rem_euclid(4);
             let mut s = shifted(m, n);
             s.rhythm.downbeat_confidence = c;
-            s
+            by_drop_gaps(&s)
         }
-        _ => m.clone(),
+        _ => by_drop_gaps(m),
     }
+}
+
+/// A song's drop gaps: a beat near silent just before its main part comes back (6 dB under the 4 beats
+/// before it, 8 under the 4 after, each of those 6 louder, and those as loud as its body is), counted by
+/// where in its bar they fall (0: on its beat 1, 3: on its beat 4)
+pub fn drop_gaps(r: &omnipulse_core::rhythm::Rhythm) -> [usize; 4] {
+    let db = &r.beat_db;
+    let mut body: Vec<f32> = db.iter().copied().filter(|d| *d > -40.0).collect();
+    body.sort_by(|a, b| a.total_cmp(b));
+    let Some(&loud) = body.get(body.len() * 3 / 4) else { return [0; 4] };
+    let mean = |x: &[f32]| x.iter().sum::<f32>() / x.len() as f32;
+    let mut at = [0usize; 4];
+    for i in 4..db.len().saturating_sub(4) {
+        let (before, after) = (mean(&db[i - 4..i]), mean(&db[i + 1..i + 5]));
+        let quietest_after = db[i + 1..i + 5].iter().copied().fold(f32::MAX, f32::min);
+        if after > loud - 3.0 && quietest_after > db[i] + 6.0 && db[i] < before - 6.0 && db[i] < after - 8.0 {
+            at[(i as i64 - r.downbeat as i64).rem_euclid(4) as usize] += 1;
+        }
+    }
+    at
+}
+
+/// Its beat 1 a beat later when its drop gaps fall on it: the silent beat before a drop is the bar's last
+/// (beat 4), the drop on the one after it (as Shooting Stars', 2026-10-31: counted a beat early, its blend a
+/// beat out). Of your library's songs with clear drop gaps, 95 of 161 have them on beat 4 as counted, 19 on
+/// beat 1; on beat 2 or 3, left as counted (a half bar's a bigger claim, and a gap on 3 can lead into a
+/// pickup)
+pub fn by_drop_gaps(m: &Measured) -> Measured {
+    let g = drop_gaps(&m.rhythm);
+    let n: usize = g.iter().sum();
+    if n >= 2 && g[0] * 10 >= n * 7 { shifted(m, 1) } else { m.clone() }
 }
 
 /// A song counted at half time: every other beat a beat (from its bars' first), two of its bars a bar
@@ -505,6 +545,9 @@ pub fn handoff(p: &crate::plan::Plan, voices: bool) -> omnipulse_audio::Handoff 
     let tail = if p.tail_bars > 0 { p.tail_bars as usize } else { TAIL_BARS };
     let beat = p.swap_ms as f64 / ((p.bars as usize).saturating_sub(tail).max(1) * 4) as f64;
     let h = omnipulse_audio::Handoff::carry(p.ms, p.swap_ms, beat.round() as u64);
+    // (keys that clash: the melodies apart, as Ghost in the Machine's D major into Wish You Could Stay's E
+    // major, 8 bars together for its tempo, was rated)
+    let h = if p.clash { h.melodies_apart(p.swap_ms, beat.round() as u64) } else { h };
     if voices { h.with_voices(p.swap_ms, p.swap_ms / 2, p.ms.saturating_sub(p.swap_ms)) } else { h }
 }
 
@@ -567,7 +610,7 @@ pub fn roll(a: &Side, b: &Side, now_ms: u64) -> Option<crate::plan::Plan> {
     let speed = if ma.rhythm.bpm > 0.0 && mb.rhythm.bpm > 0.0 { (mb.rhythm.bpm / ma.rhythm.bpm).clamp(0.5, 2.0) } else { 1.0 };
     Some(crate::plan::Plan {
         at_ms: at.round() as u64, ms: len + 40, swap_ms: len, start_ms: start.round() as u64, rate: 1.0, bars: ROLL_BARS, semitones: 0,
-        beatmatched: false, out_tempo: 1.0, ramp_ms: 0, tape_stop: false, style: Some(ROLL), tail_bars: 0, roll_speed: speed,
+        beatmatched: false, out_tempo: 1.0, ramp_ms: 0, tape_stop: false, style: Some(ROLL), tail_bars: 0, roll_speed: speed, clash: false,
     })
 }
 
@@ -708,6 +751,29 @@ mod tests {
             let c: &'static Measured = Box::leak(Box::new(song(bpm, &levels(8, 48, 8), 0.6, "8A")));
             assert!(blend(&side(a), &side(c), 0).is_none(), "{bpm}");
         }
+    }
+
+    #[test]
+    fn a_drop_gap_on_beat_1_moves_it_a_beat_later() {
+        // 64 bars at 128, loud throughout, with a silent beat before each 16-bar phrase's drop
+        let mut m = song(128.0, &[-8.0; 64], 0.6, "8A");
+        let gaps_on = |m: &mut Measured, at: usize| {
+            m.rhythm.beat_db = vec![-8.0; m.rhythm.beats.len()];
+            for phrase in 1..4 { m.rhythm.beat_db[phrase * 64 + at] = -30.0; }
+        };
+        // (on beat 1 as counted: it's beat 4, the drop the beat after it)
+        gaps_on(&mut m, 0);
+        assert_eq!(drop_gaps(&m.rhythm), [3, 0, 0, 0]);
+        let s = local_downbeat(&m, true);
+        assert_eq!(s.rhythm.downbeat, 1);
+        assert_eq!(drop_gaps(&s.rhythm), [0, 0, 0, 3]);
+        // (moved once only: already on beat 4, it stays)
+        assert_eq!(local_downbeat(&s, true).rhythm.downbeat, 1);
+        // (on beat 4, or beat 3, as counted: left)
+        gaps_on(&mut m, 3);
+        assert_eq!(local_downbeat(&m, true).rhythm.downbeat, 0);
+        gaps_on(&mut m, 2);
+        assert_eq!(local_downbeat(&m, true).rhythm.downbeat, 0);
     }
 
     #[test]

@@ -73,7 +73,10 @@ mod tests {
             let (ta, tb) = (track(a_id.trim()), track(b_id.trim()));
             let ((ma, ana), (mb, anb)) = (measure(&ta), measure(&tb));
             let shift_of = |id: &str| std::env::var("OMNIPULSE_SMART_SHIFTS").ok().and_then(|v| v.split(',').find_map(|x| x.split_once(':').filter(|(k, _)| k.trim() == id).and_then(|(_, n)| n.trim().parse::<i32>().ok()))).unwrap_or(0);
-            let (ma, mb) = (ma.map(|m| shifted(&m, shift_of(a_id.trim()))), mb.map(|m| shifted(&m, shift_of(b_id.trim()))));
+            // (as the app has it: unless set by hand, its end's or its start's beat 1 where that's sure, and
+            // a beat later where its drop gaps fall on it)
+            let placed = |m: Measured, id: &str, end: bool| match shift_of(id) { 0 => local_downbeat(&m, end), n => shifted(&m, n) };
+            let (ma, mb) = (ma.map(|m| placed(m, a_id.trim(), true)), mb.map(|m| placed(m, b_id.trim(), false)));
             // (OMNIPULSE_SMART_PHRASES="id:bars": where its phrases start, moved, as Track Preferences does)
             let phrase_of = |id: &str| std::env::var("OMNIPULSE_SMART_PHRASES").ok().and_then(|v| v.split(',').find_map(|x| x.split_once(':').filter(|(k, _)| k.trim() == id).and_then(|(_, n)| n.trim().parse::<i32>().ok()))).unwrap_or(0);
             let with_phrase = |m: Option<Measured>, id: &str| m.map(|mut m| { m.rhythm.phrase_shift = phrase_of(id); m });
