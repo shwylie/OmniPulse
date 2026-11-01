@@ -425,6 +425,8 @@ pub fn blend_lengths(intro: usize, a_out: usize, ramp: f64, clash: bool, period_
 
 /// When (ms, as heard) the one playing has played `d` ms of itself, its tempo eased (mix::out_ramp: a
 /// smoothstep from 1 to `target`) over the time it takes to play `total` of itself
+pub fn ramp_time_pub(d: f64, total: f64, target: f64) -> f64 { ramp_time(d, total, target) }
+
 fn ramp_time(d: f64, total: f64, target: f64) -> f64 {
     // (its place at time t of L: t + (target - 1) L (q^3 - q^4 / 2), q = t / L; all of it by L, so
     // L = total / (1 + (target - 1) / 2); then t found by halves)
@@ -513,8 +515,8 @@ pub fn handoff(p: &crate::plan::Plan, voices: bool) -> omnipulse_audio::Handoff 
     let tail = if p.tail_bars > 0 { p.tail_bars as usize } else { TAIL_BARS };
     let beat = p.swap_ms as f64 / ((p.bars as usize).saturating_sub(tail).max(1) * 4) as f64;
     let h = omnipulse_audio::Handoff::carry(p.ms, p.swap_ms, beat.round() as u64);
-    // (keys that clash: the melodies apart, as Ghost in the Machine's D major into Wish You Could Stay's E
-    // major, 8 bars together for its tempo, was rated)
+    // (keys that clash, or either unsure: the next one in on its impact, its melody and its highs over the
+    // bar before it, as Ghost in the Machine's D major into Wish You Could Stay's E major wanted)
     let h = if p.clash { h.melodies_apart(p.swap_ms, beat.round() as u64) } else { h };
     if voices { h.with_voices(p.swap_ms, p.swap_ms / 2, p.ms.saturating_sub(p.swap_ms)) } else { h }
 }

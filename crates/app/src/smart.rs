@@ -203,6 +203,102 @@ mod tests {
         }
     }
 
+    /// Where each song's kicks fall against its measured beats (OMNIPULSE_SEEK_IDS): each kick's place between
+    /// its beat and the next (0: on the beat, 0.5: on the off-beat), as shares in tenths, and the median lag
+    /// (ms, +: the kicks after the beats) of the ones near a beat
+    #[test]
+    #[ignore]
+    fn grid_phase() {
+        use crate::track::{Src, Track};
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rate = 44_100u32;
+        for id in std::env::var("OMNIPULSE_SEEK_IDS").unwrap().split(',') {
+            let t = match id.strip_prefix("yt:") { Some(v) => Track { src: Src::YouTube(v.into()), key: id.into(), ..Default::default() }, None => Track { src: Src::SoundCloud(id.parse().unwrap()), key: id.into(), ..Default::default() } };
+            let m = omnipulse_core::rhythm::known(&format!("full:{id}")).expect("measured");
+            let src = rt.block_on(crate::player::open_source(&t, rt.handle().clone())).expect("it opens");
+            let x = omnipulse_audio::engine::render(src, rate, &[0.0; 10], 0.0, 1200.0).unwrap();
+            let kicks = kicks_of(&x, rate);
+            let beats: Vec<f64> = m.rhythm.beats.iter().map(|b| b + m.from_ms as f64).collect();
+            let mut hist = [0usize; 10];
+            let mut near = Vec::new();
+            for k in &kicks {
+                let i = beats.partition_point(|b| b <= k);
+                if i == 0 || i >= beats.len() { continue; }
+                let (b0, b1) = (beats[i - 1], beats[i]);
+                let ph = (k - b0) / (b1 - b0);
+                hist[((ph * 10.0) as usize).min(9)] += 1;
+                let d = if ph < 0.5 { k - b0 } else { k - b1 };
+                if d.abs() < 0.15 * (b1 - b0) { near.push(d); }
+            }
+            near.sort_by(|a, b| a.total_cmp(b));
+            let n: usize = hist.iter().sum();
+            println!("{id}: {:.2} BPM, {n} kicks; by place between beats (tenths) {:?}; near a beat, median {:+.1} ms", m.rhythm.bpm, hist.map(|h| (h * 100 / n.max(1)) as u32), near.get(near.len() / 2).copied().unwrap_or(0.0));
+        }
+    }
+
+    /// A click on every beat (2 ms of it), at `bpm`, for `secs`
+    struct Clicks { rate: u32, period: f64, len: u64, pos: u64 }
+    impl omnipulse_audio::Source for Clicks {
+        fn rate(&self) -> u32 { self.rate }
+        fn duration_ms(&self) -> Option<u64> { Some(self.len * 1000 / self.rate as u64) }
+        fn read(&mut self, out: &mut Vec<f32>) -> Result<bool, String> {
+            if self.pos >= self.len { return Ok(false); }
+            let end = (self.pos + 1024).min(self.len);
+            for f in self.pos..end {
+                let ph = (f as f64 % self.period) / self.rate as f64;
+                let v = if ph < 0.002 { 0.8 } else { 0.0 };
+                out.extend_from_slice(&[v, v]);
+            }
+            self.pos = end;
+            Ok(true)
+        }
+        fn seek(&mut self, ms: u64) -> Result<u64, String> { self.pos = ms * self.rate as u64 / 1000; Ok(ms) }
+    }
+
+    /// Each click's time (ms): where it first rises past half
+    fn click_times(x: &[f32], rate: u32) -> Vec<f64> {
+        let m: Vec<f32> = x.chunks(2).map(|f| f[0].abs()).collect();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < m.len() {
+            if m[i] > 0.2 { out.push(i as f64 * 1000.0 / rate as f64); i += rate as usize / 10; } else { i += 1; }
+        }
+        out
+    }
+
+    /// Two click tracks blended as smart_render does, with a big tempo ride (Shooting Stars' 128 into Rocket
+    /// Girl's 105): each heard alone through it, and B's clicks timed against A's (+: B late), a beat at a time
+    #[test]
+    #[ignore]
+    fn a_ride_keeps_the_beats_together() {
+        let rate = 44_100u32;
+        let (a_bpm, b_bpm) = (128.0, 105.0);
+        let (pa, pb) = (60_000.0 / a_bpm, 60_000.0 / b_bpm);
+        let r = pb / pa;
+        let target = 1.0 / r;
+        let (at, lead) = (60_000.0 * 64.0 / a_bpm, 4_000u64);
+        // (16 beats ridden, then 4 of A's at the new tempo)
+        let swap = super::ramp_time_pub(16.0 * pa, 16.0 * pa, target);
+        let ms = (swap + 4.0 * pa / target).round() as u64;
+        let held = |b_in: bool| { let far = 1_000_000_000; let rr = omnipulse_audio::Ramp { in_at: if b_in { 0 } else { far }, in_len: 1, out_at: far, out_len: 1 };
+            omnipulse_audio::Handoff { low: rr, mid: rr, high: rr, out_sweep: None, brake: None, spin: None, roll: None, out_voice: None, in_voice: None } };
+        let side = |b_in: bool| {
+            let mut sa = Clicks { rate, period: pa * rate as f64 / 1000.0, len: rate as u64 * 200, pos: 0 };
+            omnipulse_audio::Source::seek(&mut sa, at as u64 - lead).unwrap();
+            let b_tempo = omnipulse_audio::Tempo::new(r);
+            let mut sb = omnipulse_audio::Stretched::shifted(Box::new(Clicks { rate, period: pb * rate as f64 / 1000.0, len: rate as u64 * 200, pos: 0 }), b_tempo.clone(), 0).unwrap();
+            omnipulse_audio::Source::seek(&mut sb, 0).unwrap();
+            let a_tempo = omnipulse_audio::Tempo::new(1.0);
+            let share = ms as f64 / swap;
+            let ramp = { let a_tempo = a_tempo.clone(); move |x: f64| { a_tempo.set(omnipulse_mix::plan::out_ramp(target, x * share)); b_tempo.set(omnipulse_mix::plan::in_ramp(target, x * share)); } };
+            let dbs = if b_in { (-300.0, 0.0) } else { (0.0, -300.0) };
+            omnipulse_audio::engine::render_mix_keyed(Box::new(sa), Box::new(sb), dbs, rate, lead as f32 / 1000.0, ms, Some(held(b_in)), Some((&a_tempo, &ramp as &dyn Fn(f64))), None, (lead + ms) as f32 / 1000.0 + 4.0).unwrap()
+        };
+        let (ka, kb) = (click_times(&side(false), rate), click_times(&side(true), rate));
+        let d: Vec<String> = ka.iter().filter(|t| **t >= lead as f64 - 1.0).filter_map(|t| kb.iter().map(|b| b - t).min_by(|x, y| x.abs().total_cmp(&y.abs())).map(|x| format!("{:.1}s {:+.1}", t / 1000.0, x))).collect();
+        println!("ride {:.1}%, {ms} ms, swap {swap:.0}: B against A: {}", (r - 1.0) * 100.0, d.join(", "));
+    }
+
     /// Where a seek really lands, as heard: each song (OMNIPULSE_SEEK_IDS, as smart_render takes them) played
     /// from its start, against it opened and sought to 60 s, as is and through the stretcher (as the next
     /// one in a blend is, at its own tempo): the lag (ms, +: the sought one late) where they match

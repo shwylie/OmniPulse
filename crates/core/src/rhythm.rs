@@ -426,6 +426,33 @@ pub fn background_end() {
 /// A steady grid through a model's beats (as DJ software grids electronic music: one tempo all through):
 /// each beat numbered by its place at `bpm`, a straight line through them (least squares), and a beat on
 /// it every period from the first. Its beats one at a time can be out by tens of ms; the line isn't.
+/// How late Beat This!'s beats come against ours where they agree (within 40 ms, a quarter of them at
+/// least): the median; where they hardly do, the usual (14 ms, across songs)
+fn model_late(model: &[f64], ours: &[f64]) -> f64 {
+    let mut d: Vec<f64> = model.iter().filter_map(|t| { let i = ours.partition_point(|b| b <= t); [i.checked_sub(1), Some(i)].into_iter().flatten().filter_map(|k| ours.get(k)).map(|b| t - b).min_by(|x, y| x.abs().total_cmp(&y.abs())) }).filter(|d| d.abs() <= 40.0).collect();
+    if d.len() * 4 < model.len() { return 14.0; }
+    d.sort_by(|a, b| a.total_cmp(b));
+    d[d.len() / 2]
+}
+
+/// Our beats moved to where the model's are (ms, its lateness taken off): each by the median of how far the
+/// nearest of its is (within half a beat) over the 17 beats round it, where 8 of them have one, and that's
+/// 12 ms or more (less: as they are, within what either is sure of); its beats it missed or doubled, and a
+/// stretch it's on another pulse, don't move ours
+fn on_the_model(ours: &[f64], model: &[f64], period: f64) -> Vec<f64> {
+    let d: Vec<Option<f64>> = ours.iter().map(|b| {
+        let i = model.partition_point(|t| t <= b);
+        [i.checked_sub(1), Some(i)].into_iter().flatten().filter_map(|k| model.get(k)).map(|t| t - b).min_by(|x, y| x.abs().total_cmp(&y.abs())).filter(|x| x.abs() < period * 0.5)
+    }).collect();
+    ours.iter().enumerate().map(|(i, b)| {
+        let mut w: Vec<f64> = d[i.saturating_sub(8)..(i + 9).min(d.len())].iter().flatten().copied().collect();
+        if w.len() < 8 { return *b; }
+        w.sort_by(|x, y| x.total_cmp(y));
+        let m = w[w.len() / 2];
+        if m.abs() >= 12.0 { b + m } else { *b }
+    }).collect()
+}
+
 fn steady_grid(beats: &[f64], bpm: f64) -> Vec<f64> {
     let p0 = 60_000.0 / bpm;
     let t0 = beats[0];
@@ -623,6 +650,12 @@ fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
     let tracked_bpm = 60_000.0 / (period / FPS * 1000.0);
     let agrees = |m: f64| [1.0, 2.0, 0.5].iter().any(|k| ((tracked_bpm * k) / m - 1.0).abs() <= 0.03);
     if model.as_ref().is_some_and(|m| m.bpm > 0.0 && !agrees(m.bpm) && m.sampled) { model = model_windowed(mono, rate); }
+    // (on our pulse, or half of it: the whole song's run of Beat This!, to put our beats where its are: ours
+    // are one line tracked through it, and a song that jumps (Shooting Stars' half a beat at 2:15, on the
+    // off-beats from there, where it's mixed out) or that ours are late on (Last 7 Letters', 68 ms) was off
+    // the beat in a blend; rhythm v18)
+    let pulse = |m: &ModelBeats| if (tracked_bpm / m.bpm - 1.0).abs() <= 0.03 { Some(1) } else if (tracked_bpm / (2.0 * m.bpm) - 1.0).abs() <= 0.03 { Some(2) } else { None };
+    if model.as_ref().is_some_and(|m| m.bpm > 0.0 && m.sampled && pulse(m).is_some()) { model = model_windowed(mono, rate); }
     let (frames, from_model) = match &model {
         Some(m) if m.bpm > 0.0 && m.beats.len() >= 32 && !agrees(m.bpm) => (steady_grid(&m.beats, m.bpm).iter().map(|t| (t / 1000.0 * FPS).round() as usize).filter(|&f| f < o.len()).collect::<Vec<_>>(), true),
         _ => (frames, false),
@@ -630,6 +663,19 @@ fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
     if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() && from_model { eprintln!("rhythm debug: tracked at {tracked_bpm:.2} BPM, Beat This! at {:.2}: its beats used", model.as_ref().map_or(0.0, |m| m.bpm)); }
     if frames.len() < 4 { return None; }
     let beats: Vec<f64> = frames.iter().map(|&f| place(&o, f)).collect();
+    // (ours moved to where Beat This!'s are, where they're off from them: its beats on our pulse (halved, at
+    // half of it), less how late it comes)
+    // (its own grid too, where ours was on another pulse: a straight line through its beats, which wander)
+    let beats = match model.as_ref().filter(|m| !m.sampled && m.beats.len() >= 32).and_then(|m| if from_model { Some(1) } else { pulse(m) }.map(|k| (m, k))) {
+        Some((m, k)) => {
+            let mut mb: Vec<f64> = m.beats.clone();
+            if k == 2 { mb = m.beats.windows(2).flat_map(|w| [w[0], (w[0] + w[1]) / 2.0]).chain(m.beats.last().copied()).collect(); }
+            let late = model_late(&mb, &beats);
+            let mb: Vec<f64> = mb.iter().map(|b| b - late).collect();
+            on_the_model(&beats, &mb, period / FPS * 1000.0)
+        }
+        None => beats,
+    };
     // a straight grid through them: least squares of beat time against its number
     let n = beats.len() as f64;
     let (mi, mt) = ((n - 1.0) / 2.0, beats.iter().sum::<f64>() / n);
@@ -787,7 +833,9 @@ pub struct Measured {
 /// sections change too)
 /// (14: each song's start and end given a downbeat of their own, for mixing where the whole isn't sure)
 /// (15: Beat This!'s downbeats a half bar out settled by where the sections change)
-pub const VERSION: u32 = 15;
+/// (16: Beat This!'s beats in place of ours, briefly: its count wanders, so tempos came out wrong)
+/// (18: ours moved to where Beat This!'s are, where they're off from them, over the whole song; its own grid too)
+pub const VERSION: u32 = 18;
 
 // Each song in a small file of its own (state/rhythm/<its key's hash>.bin), read only when it's wanted:
 // the few numbers as JSON, then its beats (each as the gap since the one before, to a tenth of a ms), each
@@ -931,8 +979,8 @@ fn unwrite(key: &str) {
 
 /// Whether a measurement is of a method still used
 fn current(m: &Measured) -> bool {
-    // (13's and 14's are as good as these where the whole song's downbeat was sure: only the unsure measured again)
-    m.v == VERSION || ((13..VERSION).contains(&m.v) && m.rhythm.downbeat_confidence >= DOWNBEAT_TRUSTED)
+    // (18's beats are moved to the model's: every song before it measured again)
+    m.v == VERSION
 }
 
 /// A track's measurement (by its key), if it has one of this method (the part measured as it played: the
@@ -1019,6 +1067,30 @@ pub fn keys_mix(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_models_lateness_is_measured_where_it_agrees() {
+        // (28 ms late on most; a stretch half a beat out left out)
+        let ours: Vec<f64> = (0..100).map(|k| k as f64 * 500.0).collect();
+        let model: Vec<f64> = (0..100).map(|k| k as f64 * 500.0 + if k < 70 { 28.0 } else { 250.0 }).collect();
+        assert_eq!(super::model_late(&model, &ours), 28.0);
+        // (nowhere near: the usual)
+        let off: Vec<f64> = ours.iter().map(|t| t + 68.0).collect();
+        assert_eq!(super::model_late(&off, &ours), 14.0);
+    }
+
+    #[test]
+    fn ours_are_moved_to_the_models_where_they_are_off() {
+        // (500 ms beats: the model's 68 ms early throughout the first 40, half a beat later from beat 60 on, and
+        // 5 ms off (left) in between)
+        let ours: Vec<f64> = (0..100).map(|k| k as f64 * 500.0).collect();
+        let model: Vec<f64> = ours.iter().enumerate().map(|(k, t)| t + if k < 40 { -68.0 } else if k < 60 { 5.0 } else { 240.0 }).collect();
+        let m = super::on_the_model(&ours, &model, 500.0);
+        assert_eq!(m.len(), ours.len());
+        assert!((m[10] - (5_000.0 - 68.0)).abs() < 1e-9 && (m[50] - 25_000.0).abs() < 1e-9 && (m[80] - (40_000.0 + 240.0)).abs() < 1e-9, "{} {} {}", m[10], m[50], m[80]);
+        // (a model with nothing near: ours as they are)
+        assert_eq!(super::on_the_model(&ours, &[], 500.0), ours);
+    }
 
     #[test]
     fn a_measurement_reads_back_from_its_file() {
@@ -1147,6 +1219,33 @@ mod tests {
 
 /// OMNIPULSE_WAV=<16-bit stereo wav> cargo test -p omnipulse-core rhythm_of_a_wav -- --ignored --nocapture:
 /// the beat of each 12 s of it (a mix's beats in step show one clear tempo through it)
+#[cfg(test)]
+/// (OMNIPULSE_GRID: song keys, "yt:ID" or a SoundCloud id, by commas) each one's kept beats against Beat
+/// This!'s over the whole song: the share of its beats within 20 ms of ours, and the median offset (ms, +: its
+/// later), and the same for the half beat (ours on the off-beats)
+#[tokio::test]
+#[ignore]
+async fn grids_against_the_model() {
+    for key in std::env::var("OMNIPULSE_GRID").unwrap().split(',') {
+        let (kind, id) = match key.strip_prefix("yt:") { Some(v) => ("youtube", v), None => ("soundcloud", key) };
+        let Some(m) = known(&format!("full:{key}")) else { println!("{key}: not measured"); continue };
+        let Ok((mono, rate)) = crate::loudness::mono_start(kind, id, 1200.0).await else { println!("{key}: couldn't get it"); continue };
+        let Some(mb) = model_windowed(&mono, rate) else { println!("{key}: no model beats"); continue };
+        let ours: Vec<f64> = m.rhythm.beats.iter().map(|b| b + m.from_ms as f64).collect();
+        let near = |shift: f64| {
+            let mut d: Vec<f64> = mb.beats.iter().filter_map(|t| { let t = t - shift; let i = ours.partition_point(|b| *b <= t); [i.checked_sub(1), Some(i)].into_iter().flatten().filter_map(|k| ours.get(k)).map(|b| t - b).min_by(|x, y| x.abs().total_cmp(&y.abs())) }).collect();
+            d.sort_by(|a, b| a.total_cmp(b));
+            let within = d.iter().filter(|x| x.abs() <= 20.0).count() as f64 / d.len().max(1) as f64;
+            (within, d.get(d.len() / 2).copied().unwrap_or(0.0))
+        };
+        let (on, off) = (near(0.0), near(m.rhythm.period_ms / 2.0));
+        println!("{key}: ours {:.2} BPM, Beat This! {:.2}; within 20 ms: {:.0}% (median {:+.1} ms); a half beat out: {:.0}%", m.rhythm.bpm, mb.bpm, on.0 * 100.0, on.1, off.0 * 100.0);
+        // (and by stretch of 20 s: the median offset there, ms)
+        let by: Vec<String> = (0..((ours.last().copied().unwrap_or(0.0) / 20_000.0) as usize + 1)).filter_map(|k| { let (lo, hi) = (k as f64 * 20_000.0, (k + 1) as f64 * 20_000.0); let mut d: Vec<f64> = mb.beats.iter().filter(|t| **t >= lo && **t < hi).filter_map(|t| { let i = ours.partition_point(|b| b <= t); [i.checked_sub(1), Some(i)].into_iter().flatten().filter_map(|j| ours.get(j)).map(|b| t - b).min_by(|x, y| x.abs().total_cmp(&y.abs())) }).collect(); d.sort_by(|a, b| a.total_cmp(b)); d.get(d.len() / 2).map(|x| format!("{}s {:+.0}", k * 20, x)) }).collect();
+        println!("   by 20 s: {}", by.join(", "));
+    }
+}
+
 #[cfg(test)]
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]
