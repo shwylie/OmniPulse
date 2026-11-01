@@ -95,6 +95,15 @@ fn version_by(title: &str) -> Vec<String> {
     words[..at].iter().filter(|w| !matches!(w.as_str(), "the" | "a" | "s" | "official" | "extended" | "radio" | "club" | "original")).cloned().collect()
 }
 
+/// Who remixed a remix album's track ("TRON: Legacy Reconfigured", "... (Remixes)"): its credited artists after
+/// the first, by their words, when its title doesn't name who already (Spotify's Derezzed, Daft Punk and The
+/// Glitch Mob, is The Glitch Mob's remix: Daft Punk's own, 1:44 to its 4:22, isn't it)
+fn remixers(t: &Track) -> Vec<String> {
+    static ALBUM: OnceLock<Regex> = OnceLock::new();
+    if !rx(&ALBUM, r"(?i)\b(remix(es|ed)?|reconfigured|rework(s|ed)?|re-?imagined)\b").is_match(&t.album) || !version_by(&match_title(t)).is_empty() { return Vec::new(); }
+    t.artist.split(',').skip(1).flat_map(match_words).filter(|w| w != "the").collect()
+}
+
 /// "Artist - Song" (or Spotify's own), its artist and title, without bracketed tags
 pub fn guess_names(t: &Track) -> (String, String) {
     static DASH: OnceLock<Regex> = OnceLock::new();
@@ -176,10 +185,15 @@ pub fn score(t: &Track, c: &YtTrack) -> f32 {
     // (someone's remix (or edit, bootleg...): theirs, credited in the title or as an artist; not another's, nor
     // one that only says Remix)
     let by = version_by(&match_title(t));
+    let remixed = remixers(t);
+    let by = if by.is_empty() { remixed.clone() } else { by };
     if !by.is_empty() {
         let place: HashSet<String> = match_words(&format!("{} {}", c.artists, c.title)).into_iter().collect();
         if !by.iter().all(|w| place.contains(w)) { return 0.0; }
     }
+    // (a remix album's: what says it's a remix, and by whom, isn't more of a title: "(Remixed by The Glitch Mob)")
+    let got: HashSet<String> = if remixed.is_empty() { got } else { got.into_iter().filter(|w| !matches!(w.as_str(), "remix" | "remixed" | "mix" | "rework" | "reworked" | "edit" | "by") && !remixed.contains(w)).collect() };
+    if got.is_empty() { return 0.0; }
     let shared = want.iter().filter(|w| got.contains(*w)).count() as f32;
     let mut s = shared / want.len().max(got.len()) as f32;
     if s < 0.75 {
@@ -201,6 +215,8 @@ pub fn score(t: &Track, c: &YtTrack) -> f32 {
         s += if hits == feat.len() { 0.3 } else if hits > 0 { 0.1 } else { -0.3 };
     }
     for v in VERSION_WORDS {
+        // (a remix album's: its remix said so or not)
+        if !remixed.is_empty() && (v == "mix" || BY_WORDS.contains(&v)) { continue; }
         if want.contains(v) != got.contains(v) {
             s -= 0.6;
         }
@@ -228,7 +244,9 @@ pub async fn find(t: &Track) -> Option<Version> {
     // (one found by itself before who's featured counted ("fv"): looked for again, once; yours stay)
     let featured = !omnipulse_core::ranking::featured(&match_title(t)).0.is_empty() || t.artist.contains(',');
     // (and once more since never-the-song versions (instrumentals...) and explicit ones counted ("xv"))
-    let before = saved.as_ref().filter(|s| s["chosen"].as_bool() != Some(true) && ((featured && s["fv"].is_null()) || s["xv"].is_null() || s["rv"].is_null())).and_then(from_snap);
+    // (and once more since a remix album's remixers counted ("mv"))
+    let remixed = !remixers(t).is_empty();
+    let before = saved.as_ref().filter(|s| s["chosen"].as_bool() != Some(true) && ((featured && s["fv"].is_null()) || s["xv"].is_null() || s["rv"].is_null() || (remixed && s["mv"].is_null()))).and_then(from_snap);
     if before.is_none() {
         // (one found by itself that isn't by them after all, as a name shared with someone else let through
         // before: looked for again; yours stay)
@@ -243,8 +261,7 @@ pub async fn find(t: &Track) -> Option<Version> {
             return from_snap(&s["near"]).map(|yt| Version { yt, exact: false });
         }
     }
-    let (ga, gt) = guess_names(t);
-    let first = format!("{} {}", if ga.is_empty() { &t.artist } else { &ga }, gt);
+    let first = first_query(t);
     let found = match omnipulse_core::youtube::search(first.trim()).await {
         Ok(f) => f,
         Err(_) => return before.map(|yt| Version { yt, exact: true }),
@@ -271,18 +288,25 @@ pub async fn find(t: &Track) -> Option<Version> {
     let pick = pick.or(before.filter(|b| score(t, b) > 0.0));
     match pick {
         Some(c) => {
-            with_saved(|m| m.insert(t.key.clone(), { let mut s = snap(&c); s["fv"] = json!(1); s["xv"] = json!(1); s["rv"] = json!(1); s }));
+            with_saved(|m| m.insert(t.key.clone(), { let mut s = snap(&c); s["fv"] = json!(1); s["xv"] = json!(1); s["rv"] = json!(1); s["mv"] = json!(1); s }));
             save_all();
             Some(Version { yt: c, exact: true })
         }
         None => {
             // (the closest only if it's by the artist and its title's close: never another song)
             let near = ranked.iter().find(|(s, c)| *s > 0.0 && artist_hit(t, c)).map(|(_, c)| c.clone());
-            with_saved(|m| m.insert(t.key.clone(), json!({ "none": true, "at": omnipulse_core::now_secs() * 1000, "any": true, "xv": 1, "rv": 1, "near": near.as_ref().map(snap) })));
+            with_saved(|m| m.insert(t.key.clone(), json!({ "none": true, "at": omnipulse_core::now_secs() * 1000, "any": true, "xv": 1, "rv": 1, "mv": 1, "near": near.as_ref().map(snap) })));
             save_all();
             near.map(|yt| Version { yt, exact: false })
         }
     }
+}
+
+/// What it's looked for by first: its artist and title (a remix album's, with who remixed it)
+fn first_query(t: &Track) -> String {
+    let (ga, gt) = guess_names(t);
+    let by = if remixers(t).is_empty() { String::new() } else { t.artist.split(',').skip(1).map(str::trim).collect::<Vec<_>>().join(" ") };
+    format!("{} {} {}", if ga.is_empty() { &t.artist } else { &ga }, gt, by).trim().to_string()
 }
 
 /// A closest version heard to the end: it's the one from now on
@@ -316,6 +340,21 @@ mod tests {
         assert!(solo > 0.0);
         // (a song named with "with" in it isn't someone featured)
         assert!(score(&sc("Stay With Me", "Sam Smith", 172_000), &yt("Stay With Me", "Sam Smith", 172_000)) >= 1.0);
+    }
+
+    #[test]
+    fn a_remix_albums_track_is_the_remix() {
+        // (Spotify's Derezzed on TRON: Legacy Reconfigured, Daft Punk and The Glitch Mob: theirs, not an upload
+        // of Daft Punk's that doesn't name them)
+        let t = Track { src: Src::Spotify("d".into()), key: "sp:d".into(), title: "Derezzed".into(), artist: "Daft Punk, The Glitch Mob".into(), album: "TRON Legacy: Reconfigured".into(), ms: 262_240, ..Default::default() };
+        assert_eq!(score(&t, &yt("Daft Punk - Derezzed", "MUGEN", 256_000)), 0.0);
+        assert_eq!(score(&t, &yt("Derezzed", "Daft Punk", 104_000)), 0.0);
+        for c in [yt("Derezzed (Remixed by The Glitch Mob)", "Daft Punk", 262_000), yt("Derezzed - The Glitch Mob Remix", "Daft Punk", 262_000), yt("Derezzed", "Daft Punk, The Glitch Mob", 262_000)] {
+            assert!(score(&t, &c) >= 0.5 && artist_hit(&t, &c), "{}: {}", c.title, score(&t, &c));
+        }
+        // (an album that isn't one: the second artist's featured, as before)
+        let f = Track { album: "TRON: Legacy".into(), ..t.clone() };
+        assert!(score(&f, &yt("Derezzed", "Daft Punk", 262_000)) > 0.0);
     }
 
     #[test]
@@ -379,10 +418,9 @@ mod tests {
     #[ignore]
     fn live_scores() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        for (title, artist, ms) in [("I Will Not Break", "Disturbed", 292_058u64), ("We Don't Need You", "Tom Morello, VIC MENSA", 183_881), ("You Can Get It", "Arkells, K.Flay", 176_445), ("Don't Let Me Down - Illenium Remix", "The Chainsmokers, Daya, ILLENIUM", 218_933)] {
-            let t = Track { src: Src::Spotify("x".into()), key: "sp:x".into(), title: title.into(), artist: artist.into(), ms, ..Default::default() };
-            let (ga, gt) = guess_names(&t);
-            let q = format!("{ga} {gt}");
+        for (title, artist, ms, album) in [("I Will Not Break", "Disturbed", 292_058u64, ""), ("We Don't Need You", "Tom Morello, VIC MENSA", 183_881, ""), ("You Can Get It", "Arkells, K.Flay", 176_445, ""), ("Don't Let Me Down - Illenium Remix", "The Chainsmokers, Daya, ILLENIUM", 218_933, ""), ("Derezzed", "Daft Punk, The Glitch Mob", 262_240, "TRON Legacy: Reconfigured")] {
+            let t = Track { src: Src::Spotify("x".into()), key: "sp:x".into(), title: title.into(), artist: artist.into(), ms, album: album.into(), ..Default::default() };
+            let q = first_query(&t);
             let found = rt.block_on(omnipulse_core::youtube::search(&q)).unwrap();
             let mut found = found; found.extend(rt.block_on(omnipulse_core::youtube::search_videos(&q)).unwrap().into_iter().map(|mut c| { c.title = format!("[video] {}", c.title); c }));
             println!("== {q}");
