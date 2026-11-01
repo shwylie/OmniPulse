@@ -3473,6 +3473,7 @@ fn start(shared: &Shared) {
                 ui.set_track_loading(false);
                 match src {
                     Ok(src) => {
+                        START_FAILS.with(|f| f.set(0));
                         // a mix goes out of it next time only if it isn't Spotify's own playback
                         MIX_OUT_OK.with(|c| c.set(version.is_some() || !matches!(t.src, track::Src::Spotify(_))));
                         // the YouTube video it plays from (itself, or its version), for SponsorBlock
@@ -3566,7 +3567,27 @@ fn start(shared: &Shared) {
                             });
                         });
                     }
-                    Err(e) => ui.set_status(format!("Couldn't play \"{}\": {e}", t.title).into()),
+                    // (anything else: on to the next one, not silence (Seamless Mix has faded the one before out
+                    // already); not past 3 in a row, as when you're offline: then it stops, saying so)
+                    Err(e) => {
+                        let run = START_FAILS.with(|f| { f.set(f.get() + 1); f.get() });
+                        omnipulse_core::diag::note(&format!("couldn't play \"{}\": {e}", t.title));
+                        if run >= START_FAILS_MAX {
+                            START_FAILS.with(|f| f.set(0));
+                            ui.set_status(format!("Couldn't play \"{}\": {e}. Stopped after {run} songs in a row didn't play.", t.title).into());
+                        } else {
+                            let note = format!("Skipped \"{}\": {e}.", t.title);
+                            let s2 = shared.clone();
+                            slint::Timer::single_shot(std::time::Duration::from_millis(400), move || {
+                                step(&s2, 1);
+                                let n = note.clone();
+                                let s3 = s2.clone();
+                                slint::Timer::single_shot(std::time::Duration::from_millis(1200), move || {
+                                    if let Some(ui) = s3.borrow().ui.upgrade() { ui.set_status(n.into()); }
+                                });
+                            });
+                        }
+                    }
                 }
             });
         });
@@ -4518,7 +4539,12 @@ fn preload_due(pos: u64, dur: u64) -> bool {
 thread_local! {
     /// the track looked for last (so it's done once)
     static PRELOADED: RefCell<String> = const { RefCell::new(String::new()) };
+    /// songs in a row that couldn't be played (skipped past, up to START_FAILS_MAX)
+    static START_FAILS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
+
+/// Songs in a row that don't play before it stops trying (offline, say)
+const START_FAILS_MAX: u32 = 3;
 
 fn preload_next(shared: &Shared) {
     let next = {
@@ -4544,10 +4570,35 @@ fn preload_next(shared: &Shared) {
     if !via_yt && yt_id(&next).is_none() { return; }   // (the others start at once anyway)
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
     if let Some(ui) = weak.upgrade() { ui.set_preloading(true); }
+    // (what would play it if YouTube Music has no version: Spotify's own playback, if it plays here)
+    let spotify_after = sp_plays_here() && (matches!(next.src, track::Src::Spotify(_)) || next.go_plus);
     rt.spawn(async move {
         let id = if via_yt { versions::find(&next).await.map(|v| v.yt.id) } else { yt_id(&next) };
-        if let Some(id) = id { let _ = omnipulse_core::youtube::stream_url(&id, false).await; }
-        let _ = weak.upgrade_in_event_loop(|ui| ui.set_preloading(false));
+        // (no version to play it from: it would be silence when it came up (a mix fading the one playing out
+        // into nothing, then nothing); left out now, the one after it got ready instead)
+        let why = match &id {
+            None if via_yt && !spotify_after => Some("there's no version of it on YouTube Music".to_string()),
+            Some(id) => { let _ = omnipulse_core::youtube::stream_url(id, false).await; None }
+            None => None,
+        };
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            ui.set_preloading(false);
+            let Some(why) = why else { return };
+            SHARED.with(|s| {
+                let Some(shared) = s.borrow().clone() else { return };
+                {
+                    let mut a = shared.borrow_mut();
+                    let Some(i) = a.queue.qi.map(|i| i + 1).filter(|&i| a.queue.items.get(i).is_some_and(|q| q.t.key == next.key)) else { return };
+                    a.queue.remove(i);
+                    paint_queue(&mut a);
+                    save_session(&a);
+                }
+                omnipulse_core::diag::note(&format!("left out \"{}\" coming up: {why}", next.title));
+                ui.set_status(format!("Left out \"{}\", coming up next: {why}.", next.title).into());
+                PRELOADED.with(|p| p.borrow_mut().clear());
+                preload_next(&shared);
+            });
+        });
     });
 }
 
