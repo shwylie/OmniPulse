@@ -202,6 +202,25 @@ function reply(to, text, platform) {
   lines.forEach((line) => s.send((to && p !== "all" ? "@reply-parent-msg-id=" + to + " " : "") + "PRIVMSG #" + S().login + " :" + line.slice(0, 480)));
 }
 
+// What you type in the Chat Dock: said as you (your channel's own account, never the bot's), and taken as
+// yours, so your commands run as if you'd typed them in chat
+function sayAsMe(text, platform) {
+  const lines = String(text).split("\n").map((l) => l.trim()).filter(Boolean);
+  // (Kick sends it back, and as it's not one of the bot's own, it's taken as yours then)
+  if ((platform === "kick" || platform === "all") && kick && S().kickToken) {
+    const channel = Number(S().kickUserId || 0);
+    lines.forEach((line) => kickApi("POST", "chat", { content: kickEmotesIn(line).slice(0, 500), type: "user", broadcaster_user_id: channel }, false, "channel").catch((e) => OmniPulse.log("kick chat: " + e.message)));
+  }
+  if (platform === "kick" || !chat) return;
+  const login = String(S().login || "").toLowerCase();
+  lines.forEach((line) => {
+    line = line.slice(0, 480);
+    chat.send("PRIVMSG #" + S().login + " :" + line);
+    // (Twitch never sends your own message back to you: shown and run here, as heard)
+    onChat({ command: "PRIVMSG", platform: "twitch", nick: login, text: line, tags: { "display-name": myName || S().login, badges: "broadcaster/1", mod: "0", "user-id": String(S().userId || ""), id: "" } });
+  });
+}
+
 // ---------- commands ----------
 const cooldowns = {};
 
@@ -2982,7 +3001,7 @@ async function dockDo(cmd) {
     }
     case "say": {
       const text = String(cmd.text || "").trim().slice(0, 500);
-      if (text) reply(null, text, cmd.platform === "kick" || cmd.platform === "twitch" ? cmd.platform : "all");
+      if (text) sayAsMe(text, cmd.platform === "kick" || cmd.platform === "twitch" ? cmd.platform : "all");
       return "";
     }
     case "delete":

@@ -71,7 +71,7 @@
 
   /* the moderation buttons: on every message (not yours), clearer on the one under the mouse */
   .mod { display: inline-flex; gap: 2px; float: right; margin: 0 0 2px 8px; opacity: 0.6; }
-  .msg:hover .mod, .mod:focus-within { opacity: 1; }
+  .msg:hover .mod, .mod:focus-within, .mod:has(.sure) { opacity: 1; }
   body.modhover .mod { display: none; }
   body.modhover .msg:hover .mod, body.modhover .mod:focus-within { display: inline-flex; }
   /* icon buttons (their tips are the dock's one #tip) */
@@ -79,7 +79,11 @@
   .ib svg { width: 14px; height: 14px; fill: currentColor; }
   .ib .w { font-size: 9.5px; font-weight: 700; }
   .ib:hover { color: var(--text); border-color: var(--dim); }
-  .mod .ib.ban:hover, .mod .ib.sure { color: #fff; background: var(--danger); border-color: var(--danger); }
+  .mod .ib.ban:hover { color: var(--danger); border-color: var(--danger); }
+  /* a ban clicked once: lit and glowing, saying so, till it's clicked again (or 3 s pass) */
+  .mod .ib.sure, .mod .ib.sure:hover { color: #fff; background: var(--danger); border-color: var(--danger); animation: armed 0.9s ease-in-out infinite; }
+  .mod .ib.sure .w { font-size: 10px; }
+  @keyframes armed { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 45%, transparent), 0 0 10px var(--danger); } }
   .mod .ib.unban:hover { color: #111; background: var(--ok); border-color: var(--ok); }
   .mod .ib.del:hover { color: #fff; background: #5b6172; }
   form .ib { padding: 0 10px; background: var(--accent); color: #111; border-color: var(--accent); }
@@ -489,8 +493,11 @@
     box.append(t);
     // (a ban: asked twice, unless that's switched off)
     box.append(iconButton("ban", "Ban " + m.user, "", "ban", (b) => {
-      if (opt.confirm && !b.classList.contains("sure")) { b.classList.add("sure"); b.dataset.tip = "Click again to ban " + m.user; setTimeout(() => { b.classList.remove("sure"); b.dataset.tip = "Ban " + m.user; }, 3000); return; }
-      b.classList.remove("sure"); b.dataset.tip = "Ban " + m.user;
+      // (lit, with "Ban?" beside its icon, till it's clicked again or 3 s pass)
+      const word = (on) => { let w = b.querySelector(".w"); if (on && !w) { w = document.createElement("span"); w.className = "w"; b.append(w); } if (w) { if (on) w.textContent = "Ban?"; else w.remove(); } };
+      const off = () => { b.classList.remove("sure"); word(false); b.dataset.tip = "Ban " + m.user; };
+      if (opt.confirm && !b.classList.contains("sure")) { b.classList.add("sure"); word(true); b.dataset.tip = "Click again to ban " + m.user; setTimeout(off, 3000); return; }
+      off();
       ask("ban");
     }));
     box.append(iconButton("undo", "Let " + m.user + " back in (after a ban or time-out)", "", "unban", () => ask("unban")));
