@@ -426,12 +426,33 @@ pub fn widget_state(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur
             o.insert("lyricsOutputs".into(), Value::Object(outs));
         }
     }
+    // (the Waveform design's, where it's in use: the song's shape)
+    let wave_on = prefs["widgetDesign"].as_str() == Some("wave") || outputs_of(prefs, "widget").iter().any(|o| o.get("widgetDesign").and_then(|d| d.as_str()) == Some("wave"));
+    if let (true, Some(o), Some(t)) = (wave_on, state.as_object_mut(), t) {
+        let db = core::rhythm::known(&format!("full:{}", t.key)).or_else(|| core::rhythm::known(&t.key)).map(|m| m.rhythm.bar_db).unwrap_or_default();
+        o.insert("wave".into(), json!(wave_bars(&db, WAVE_BARS)));
+    }
     if let (Some(o), Some(x)) = (state.as_object_mut(), CROSSFADE.lock().ok().and_then(|c| c.clone())) { o.insert("crossfade".into(), x); }
     if let (Some(o), Some(x)) = (state.as_object_mut(), NEXT.lock().ok().and_then(|c| c.clone())) { o.insert("next".into(), x); }
     if let (Some(o), Some(x)) = (state.as_object_mut(), SUITE.lock().ok().and_then(|c| c.clone())) { o.insert("suite".into(), x); }
     // (the Social Plug's platforms and look, with it on)
     if set(prefs, "socials") { if let Some(o) = state.as_object_mut() { o.insert("socials".into(), crate::socials::widget_json(prefs)); } }
     state
+}
+
+/// How many bars the Waveform design's waveform has
+const WAVE_BARS: usize = 36;
+
+/// A song's shape in `n` bars (0.15 to 1), from its bars' loudness as measured: each the average of its share
+/// of them, 24 dB under the loudest bar the lowest, as the seek bar's waveform; nothing measured, none
+fn wave_bars(db: &[f32], n: usize) -> Vec<f32> {
+    if db.is_empty() || n == 0 { return Vec::new(); }
+    let top = db.iter().copied().fold(f32::MIN, f32::max);
+    (0..n).map(|i| {
+        let (a, b) = (i * db.len() / n, ((i + 1) * db.len() / n).max(i * db.len() / n + 1).min(db.len()));
+        let x = db[a.min(db.len() - 1)..b].iter().sum::<f32>() / (b - a.min(db.len() - 1)).max(1) as f32;
+        (((x - (top - 24.0)) / 24.0).clamp(0.15, 1.0) * 100.0).round() / 100.0
+    }).collect()
 }
 
 /// The Lyrics Widget's look, as these settings have it (its lines aside)
@@ -512,6 +533,16 @@ pub fn accents(px: &slint::SharedPixelBuffer<slint::Rgba8Pixel>) -> (String, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_songs_waveform_is_its_bars_loudness() {
+        // (quiet intro, loud middle, quiet end: in 4 bars, the loudest full, 24 dB under it the lowest)
+        let db = [-30.0, -30.0, -6.0, -6.0, -6.0, -6.0, -18.0, -18.0];
+        assert_eq!(wave_bars(&db, 4), vec![0.15, 1.0, 1.0, 0.5]);
+        // (more bars than measured: each one still from one of them)
+        assert_eq!(wave_bars(&[-6.0, -18.0], 4).len(), 4);
+        assert!(wave_bars(&[], 4).is_empty());
+    }
 
     /// Neon Sign, Frosted Glass and Minimal: a Card in that theme (Neon flickering on); done again, the same
     #[test]

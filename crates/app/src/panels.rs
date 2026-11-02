@@ -293,7 +293,7 @@ fn sel(key: &str, label: &str, note: &str, opts: &[(Value, &str)]) -> Value {
 /// A widget's layout: picked from sketches of each (the page draws them, in the options' order)
 fn design(key: &str, label: &str) -> Value {
     let mut v = sel(key, label, "", &[(json!("card"), "Card"), (json!("bar"), "Slim Bar"), (json!("square"), "Square"), (json!("text"), "Text Only"), (json!("pill"), "Pill"), (json!("vinyl"), "Vinyl"), (json!("poster"), "Poster"), (json!("ticker"), "Ticker"),
-        (json!("split"), "Split"), (json!("lower"), "Lower Third"), (json!("cassette"), "Cassette"), (json!("equaliser"), "Equaliser"), (json!("nownext"), "Now and Next"), (json!("polaroid"), "Polaroid"), (json!("mini"), "Mini"), (json!("vertical"), "Vertical")]);
+        (json!("split"), "Split"), (json!("lower"), "Lower Third"), (json!("cassette"), "Cassette"), (json!("equaliser"), "Equaliser"), (json!("nownext"), "Now and Next"), (json!("polaroid"), "Polaroid"), (json!("mini"), "Mini"), (json!("vertical"), "Vertical"), (json!("wave"), "Waveform")]);
     v["type"] = json!("designpick");
     v
 }

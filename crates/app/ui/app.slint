@@ -2791,9 +2791,19 @@ component DesignSketch inherits VerticalLayout {
             Rectangle { x: 4px; y: 4px; width: 22px; height: 22px; border-radius: 3px; background: Theme.text.with-alpha(0.5); }
             Rectangle { x: 5px; y: 31px; width: 20px; height: 3px; border-radius: 2px; background: Theme.text.with-alpha(0.85); }
             Rectangle { x: 8px; y: 37px; width: 14px; height: 3px; border-radius: 2px; background: Theme.text.with-alpha(0.45); } }
+        // waveform: the cover, the song in a panel, its waveform between the times in another, the progress under
+        if root.k == 16: Rectangle { x: 10px; y: 9px; width: parent.width - 20px; height: 42px;
+            Rectangle { x: 0; y: 0; width: 30px; height: 30px; border-radius: 4px; background: Theme.text.with-alpha(0.5); }
+            Rectangle { x: 34px; y: 0; width: parent.width - 34px; height: 14px; border-radius: 3px; background: sk.fill;
+                Rectangle { x: 4px; y: 4px; width: 45%; height: 3px; border-radius: 1px; background: Theme.text.with-alpha(0.85); }
+                Rectangle { x: 4px; y: 9px; width: 28%; height: 2px; border-radius: 1px; background: Theme.text.with-alpha(0.45); } }
+            Rectangle { x: 34px; y: 17px; width: parent.width - 34px; height: 13px; border-radius: 3px; background: sk.fill;
+                for b in 12: Rectangle { x: 6px + b * (parent.width - 12px) / 12; width: (parent.width - 12px) / 12 * 0.5; height: parent.height * (0.25 + 0.45 * abs(sin(b * 47deg))); y: (parent.height - self.height) / 2; border-radius: 1px; background: Theme.text.with-alpha(b < 7 ? 0.85 : 0.35); } }
+            Rectangle { x: 0; y: 36px; width: parent.width; height: 3px; border-radius: 1px; background: sk.fill;
+                Rectangle { x: 0; width: parent.width * 0.6; border-radius: 1px; background: Theme.text.with-alpha(0.8); } } }
         dsa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.clicked(); } }
         // (its recommended Browser source size in OBS, as you point at it: its own shape, sharp at 1080p)
-        TipSpot { hover: dsa.has-hover; tip: root.name + ". Recommended Browser source size: " + ["920 × 260", "1120 × 128", "600 × 760", "920 × 180", "960 × 160", "920 × 300", "960 × 540", "1280 × 96", "1040 × 340", "1240 × 180", "840 × 440", "1040 × 300", "920 × 300", "600 × 720", "440 × 440", "480 × 840"][root.k] + " px."; }
+        TipSpot { hover: dsa.has-hover; tip: root.name + ". Recommended Browser source size: " + ["920 × 260", "1120 × 128", "600 × 760", "920 × 180", "960 × 160", "920 × 300", "960 × 540", "1280 × 96", "1040 × 340", "1240 × 180", "840 × 440", "1040 × 300", "920 × 300", "600 × 720", "440 × 440", "480 × 840", "840 × 300"][root.k] + " px."; }
     }
     Text { text: root.name; color: root.on ? Theme.text : Theme.muted; font-size: 12px; font-weight: root.on ? 700 : 400; horizontal-alignment: center; }
 }
@@ -2882,7 +2892,7 @@ component WidgetPreview inherits Rectangle {
         : root.d == "polaroid" ? 190px * root.tc : root.d == "cassette" ? 300px * root.tc : root.d == "bar" || root.d == "ticker" ? min(root.width - 48px, 480px) : min(root.width - 48px, 400px);
     property <length> ch: root.d == "square" ? 246px * root.tc : root.d == "vertical" ? 240px * root.tc : root.d == "poster" ? 220px * root.tc : root.d == "mini" ? 140px * root.tc
         : root.d == "polaroid" ? 220px * root.tc + root.fs * 1.4 : root.d == "cassette" ? 150px * root.tc
-        : (root.d == "bar" ? 46px : root.d == "ticker" ? 32px : root.d == "text" ? 82px : root.d == "pill" ? 80px : root.d == "nownext" ? 124px : 100px) * root.t;
+        : (root.d == "bar" ? 46px : root.d == "ticker" ? 32px : root.d == "text" ? 82px : root.d == "pill" ? 80px : root.d == "nownext" ? 124px : root.d == "wave" ? 143px : 100px) * root.t;
     height: max(190px, root.ch + 52px);
     border-radius: 14px;
     border-width: 1px;

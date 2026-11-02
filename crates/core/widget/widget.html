@@ -12,7 +12,7 @@
   theme (its panel, colours and animations) in the app's Settings; any theme goes with any layout.
   Every layout scales to whatever size you give the source:
     Card 460x130, Slim bar 560x64, Square 300x380, Text Only 460x90, Pill 480x80,
-    Vinyl 460x150, Poster 480x270, Ticker 640x48 (the sizes they were drawn at).
+    Vinyl 460x150, Poster 480x270, Ticker 640x48, Waveform 420x150 (the sizes they were drawn at).
   It only displays what the app is playing; it never plays audio.
   You can edit the look below; the widget reloads itself when the app is restarted with changes.
 -->
@@ -144,6 +144,33 @@
   body.lower #card.tuck { transform: translateX(-104%); }
   body.right.lower #card::before { left: auto; right: 0; }
   body.right.lower #card.tuck { transform: translateX(104%); }
+
+  /* Waveform: the cover on the left; the song in a panel, its waveform between the times in another (lit as
+     far as it's played), the progress along the bottom. Its panels take the theme's colour */
+  #wv { display: none; }
+  body.wave { --pn: color-mix(in srgb, var(--hi) 28%, rgba(22, 16, 10, 0.84)); --ink: color-mix(in srgb, var(--hi) 45%, #fff6e8); }
+  body.wave.th-solid { --pn: rgba(13, 13, 19, 0.92); --ink: #fff; }
+  body.wave.th-paper { --pn: #f7f4ee; --ink: #1d1b22; }
+  body.wave.th-neon { --pn: rgba(6, 3, 16, 0.72); --ink: var(--hi); }
+  body.wave.th-frosted { --pn: rgba(255, 255, 255, 0.16); --ink: #fff; }
+  body.wave.th-clear { --pn: rgba(0, 0, 0, 0.35); --ink: #fff; }
+  body.wave #card { padding: 0.5rem 0.5rem 1.15rem; gap: 0.5rem; align-items: stretch; }
+  /* (the colours theme: no card behind the panels; the others frame them in theirs) */
+  body.wave.th-colours #card { background: transparent; }
+  body.wave #art { height: auto; align-self: stretch; max-width: 40%; border-radius: 0.5rem; }
+  body.wave #info { justify-content: flex-start; color: var(--ink); }
+  body.wave #title { background: var(--pn); border-radius: 0.5rem 0.5rem 0 0; padding: 0.5rem 0.75rem 0.1rem; font-size: 1.15em; }
+  body.wave #who { margin: 0; background: var(--pn); border-radius: 0 0 0.5rem 0.5rem; padding: 0 0.75rem 0.5rem; }
+  body.wave #artist { color: color-mix(in srgb, var(--ink) 75%, transparent); }
+  body.wave #who svg path { fill: var(--ink); }
+  body.wave.sharp #title { border-radius: 0; } body.wave.sharp #who, body.wave.sharp #times { border-radius: 0; }
+  body.wave #times { margin: auto 0 0; align-items: center; gap: 0.7rem; background: var(--pn); border-radius: 0.5rem; padding: 0.45rem 0.75rem; font-size: 0.8em; font-weight: 700; color: var(--ink); }
+  body.wave #wv { display: flex; flex: 1; height: 1.7em; align-items: center; gap: 0.16rem; min-width: 0; }
+  body.wave #wv i { flex: 1; min-width: 0.12rem; height: var(--h, 30%); border-radius: 1rem; background: var(--ink); opacity: 0.4; transition: opacity 0.3s; }
+  body.wave #wv i.on { opacity: 1; }
+  body.wave #track { position: absolute; left: 0.5rem; right: 0.5rem; bottom: 0.35rem; height: 0.4rem; margin: 0; border-radius: 1rem; background: var(--pn); }
+  body.wave #bar { background: var(--ink); border-radius: 1rem; }
+  body.wave.sharp #track, body.wave.sharp #bar { border-radius: 0; }
 
   /* Cassette: a tape, the song on its label, the reels turning as it plays */
   #reels { display: none; }
@@ -467,7 +494,7 @@
     <div id="who"><svg viewBox="0 0 24 24"><path id="platIcon" d=""/></svg><div id="artist" class="marq"><span></span></div></div>
     <div id="xf"><img id="xfA" alt=""><div id="xfT"><div id="xfF"></div><div id="xfK"></div></div><img id="xfB" alt=""><span id="xfL"></span></div>
     <div id="track"><div id="bar"></div></div>
-    <div id="times"><span id="cur">0:00</span><span id="dur">0:00</span></div>
+    <div id="times"><span id="cur">0:00</span><div id="wv"></div><span id="dur">0:00</span></div>
   </div>
   <div id="reels"><i></i><i></i></div>
   <div id="eq"></div>
@@ -488,7 +515,7 @@
   const BASE = {
     card: [460, 130], bar: [560, 64], square: [300, 380], text: [460, 90],
     pill: [480, 80], vinyl: [460, 150], poster: [480, 270], ticker: [640, 48],
-    split: [520, 170], lower: [620, 90], cassette: [420, 220], equaliser: [520, 150],
+    split: [520, 170], lower: [620, 90], cassette: [420, 220], equaliser: [520, 150], wave: [420, 150],
     nownext: [460, 150], polaroid: [300, 360], mini: [220, 220], vertical: [240, 420],
   };
   // (the designs from before layouts and themes were apart: a card in that theme)
@@ -677,12 +704,35 @@
     root.setProperty("--hi", s.accent || "#8e9bff");
   }
 
+  // Waveform: the song's shape (its bars' loudness, as the app measured it), drawn once a song, mirrored;
+  // none measured yet: an even row. Lit as far as it's played
+  let waveFor = null;
+  function waveTick(pos) {
+    const box = $("wv");
+    const shape = Array.isArray(s.wave) && s.wave.length ? s.wave : null;
+    const key = (s.title || "") + "|" + (shape ? shape.join(",") : "");
+    if (key !== waveFor) {
+      waveFor = key;
+      const n = shape ? shape.length : 28;
+      box.innerHTML = "";
+      for (let i = 0; i < n; i++) {
+        const b = document.createElement("i");
+        b.style.setProperty("--h", Math.round((shape ? Math.max(0.15, Math.min(1, shape[i])) : 0.3) * 100) + "%");
+        box.appendChild(b);
+      }
+    }
+    const bars = box.children;
+    const lit = s.duration_ms ? Math.floor((pos / s.duration_ms) * bars.length) : 0;
+    for (let i = 0; i < bars.length; i++) bars[i].classList.toggle("on", i < lit);
+  }
+
   function tick() {
     if (!s || !s.title) return;
     const pos = position();
     $("cur").textContent = fmt(pos);
     $("dur").textContent = fmt(s.duration_ms || 0);
     $("bar").style.width = (s.duration_ms ? Math.min(100, (pos / s.duration_ms) * 100) : 0) + "%";
+    if (design === "wave") waveTick(pos);
     const xf = s.crossfade;
     if (xf && xf.ms > 0) {
       const p = Math.max(0, Math.min(1, (Date.now() - xf.started_at) / xf.ms));
