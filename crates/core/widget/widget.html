@@ -145,9 +145,10 @@
   body.right.lower #card::before { left: auto; right: 0; }
   body.right.lower #card.tuck { transform: translateX(104%); }
 
-  /* Waveform: the cover on the left; the song in a panel, its waveform between the times in another (lit as
-     far as it's played), the progress along the bottom. Its panels take the theme's colour */
-  #wv { display: none; }
+  /* Waveform: the cover on the left; one panel beside it, the song at its top (and who asked for it, on a
+     line of its own), its waveform between the times at its foot (lit as far as it's played); the progress
+     along the bottom. The panel takes the theme's colour */
+  #wv, #req { display: none; }
   body.wave { --pn: color-mix(in srgb, var(--hi) 28%, rgba(22, 16, 10, 0.84)); --ink: color-mix(in srgb, var(--hi) 45%, #fff6e8); }
   body.wave.th-solid { --pn: rgba(13, 13, 19, 0.92); --ink: #fff; }
   body.wave.th-paper { --pn: #f7f4ee; --ink: #1d1b22; }
@@ -155,22 +156,22 @@
   body.wave.th-frosted { --pn: rgba(255, 255, 255, 0.16); --ink: #fff; }
   body.wave.th-clear { --pn: rgba(0, 0, 0, 0.35); --ink: #fff; }
   body.wave #card { padding: 0.5rem 0.5rem 1.15rem; gap: 0.5rem; align-items: stretch; }
-  /* (the colours theme: no card behind the panels; the others frame them in theirs) */
+  /* (the colours theme: no card behind the panel; the others frame it in theirs) */
   body.wave.th-colours #card { background: transparent; }
   body.wave #art { height: auto; align-self: stretch; max-width: 40%; border-radius: 0.5rem; }
-  body.wave #info { justify-content: flex-start; color: var(--ink); }
-  body.wave #title { background: var(--pn); border-radius: 0.5rem 0.5rem 0 0; padding: 0.5rem 0.75rem 0.1rem; font-size: 1.15em; }
-  body.wave #who { margin: 0; background: var(--pn); border-radius: 0 0 0.5rem 0.5rem; padding: 0 0.75rem 0.5rem; }
+  body.wave #info { justify-content: flex-start; color: var(--ink); background: var(--pn); border-radius: 0.5rem; padding: 0.55rem 0.75rem 0.5rem; }
+  body.wave #title { font-size: 1.15em; }
+  body.wave #who { margin-top: 0.1rem; }
   body.wave #artist { color: color-mix(in srgb, var(--ink) 75%, transparent); }
   body.wave #who svg path { fill: var(--ink); }
-  body.wave.sharp #title { border-radius: 0; } body.wave.sharp #who, body.wave.sharp #times { border-radius: 0; }
-  body.wave #times { margin: auto 0 0; align-items: center; gap: 0.7rem; background: var(--pn); border-radius: 0.5rem; padding: 0.45rem 0.75rem; font-size: 0.8em; font-weight: 700; color: var(--ink); }
+  body.wave #req.has { display: block; margin-top: 0.3rem; font-size: 0.78em; color: color-mix(in srgb, var(--ink) 70%, transparent); }
+  body.wave #times { margin: auto 0 0; padding-top: 0.35rem; align-items: center; gap: 0.7rem; font-size: 0.8em; font-weight: 700; color: var(--ink); }
   body.wave #wv { display: flex; flex: 1; height: 1.7em; align-items: center; gap: 0.16rem; min-width: 0; }
   body.wave #wv i { flex: 1; min-width: 0.12rem; height: var(--h, 30%); border-radius: 1rem; background: var(--ink); opacity: 0.4; transition: opacity 0.3s; }
   body.wave #wv i.on { opacity: 1; }
   body.wave #track { position: absolute; left: 0.5rem; right: 0.5rem; bottom: 0.35rem; height: 0.4rem; margin: 0; border-radius: 1rem; background: var(--pn); }
   body.wave #bar { background: var(--ink); border-radius: 1rem; }
-  body.wave.sharp #track, body.wave.sharp #bar { border-radius: 0; }
+  body.wave.sharp #info, body.wave.sharp #track, body.wave.sharp #bar { border-radius: 0; }
 
   /* Cassette: a tape, the song on its label, the reels turning as it plays */
   #reels { display: none; }
@@ -492,6 +493,7 @@
   <div id="info">
     <div id="title" class="marq"><span></span></div>
     <div id="who"><svg viewBox="0 0 24 24"><path id="platIcon" d=""/></svg><div id="artist" class="marq"><span></span></div></div>
+    <div id="req" class="marq"><span></span></div>
     <div id="xf"><img id="xfA" alt=""><div id="xfT"><div id="xfF"></div><div id="xfK"></div></div><img id="xfB" alt=""><span id="xfL"></span></div>
     <div id="track"><div id="bar"></div></div>
     <div id="times"><span id="cur">0:00</span><div id="wv"></div><span id="dur">0:00</span></div>
@@ -559,7 +561,10 @@
     lookCls = cls;
     const alerting = document.body.classList.contains("alerting");
     document.body.className = cls + (alerting ? " alerting" : "");
+    const was = design;
     design = d;
+    // (into or out of the Waveform design: who asked for it moves between the artist's line and its own)
+    if ((was === "wave") !== (d === "wave") && s && s.title) { setText($("artist"), artistLine()); measure($("artist")); reqLine(); }
     fit();
   }
 
@@ -613,12 +618,22 @@
   // the artist, then who requested it (a song request), or for a few seconds after it's liked, a word for them
   function artistLine() {
     if (s.like_note) return s.like_note;
+    // (the Waveform design: who asked for it on a line of its own, reqLine)
+    if (design === "wave") return s.artist || "";
     return (s.artist || "") + (s.requested_by ? (s.artist ? "  \u00b7  " : "") + "requested by " + s.requested_by : "");
   }
+  // Who asked for it, on a line of its own (the Waveform design's, with room for it)
+  function reqLine() {
+    const has = design === "wave" && !!(s && s.requested_by) && !(s && s.like_note);
+    $("req").classList.toggle("has", has);
+    if (has) { setText($("req"), "Requested by " + s.requested_by); measure($("req")); }
+  }
+
 
   function fill() {
     setText($("title"), s.title);
     setText($("artist"), artistLine());
+    reqLine();
     const p = PLATFORMS[s.platform] || PLATFORMS.soundcloud;
     $("platIcon").setAttribute("d", p.d);
     $("platIcon").setAttribute("fill", p.color);
