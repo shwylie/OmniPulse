@@ -519,7 +519,7 @@ async fn spotify_api_now(method: String, path: String, body: Option<Value>) -> R
             429 => {
                 let wait = retry_after(&res);
                 set_cool_until(via, now_secs() + wait);
-                crate::diag::note(&format!("spotify: rate limited ({}) for {wait} s", if via == Via::App { "your app's keys" } else { "Spotify's sign-in" }));
+                crate::diag::note(&format!("spotify: rate limited ({}) for {wait} s, asking {method} {}", if via == Via::App { "your app's keys" } else { "Spotify's sign-in" }, path.split('?').next().unwrap_or("")));
                 // (the other sign-in has an allowance of its own: on with that)
                 if let Some(o) = other_via(via).filter(|_| tries < 3) {
                     via = o;
