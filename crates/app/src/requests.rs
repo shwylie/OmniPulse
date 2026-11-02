@@ -255,6 +255,21 @@ pub async fn find(plat: &str, q: &str, local: &[Track]) -> Vec<Track> {
     }
 }
 
+/// The track id in a Spotify song's link ("open.spotify.com/track/<id>", "/intl-de/track/<id>?si=...") or uri
+fn spotify_track_id(q: &str) -> Option<String> {
+    let rest = if q.contains("open.spotify.com/") { q.split("/track/").nth(1)? } else { q.strip_prefix("spotify:track:")? };
+    let id: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+    (id.len() >= 16).then_some(id)
+}
+
+/// A Spotify song by its id: from Spotify's Web API where it's signed in, else from its public page
+async fn sp_link_track(id: &str, signed_in: bool) -> Option<Track> {
+    if signed_in {
+        if let Some(t) = core::spotify::spotify_api("GET".into(), format!("/tracks/{id}?market=from_token"), None).await.ok().and_then(|v| Track::spotify(&v)) { return Some(t); }
+    }
+    core::spotify::embed_track(id).await.ok().and_then(|v| Track::spotify(&v))
+}
+
 /// Whether a track is by `artist` (the first name of it, as "Rick Astley" of "Rick Astley, X"): its artist,
 /// or the "Artist - " an uploader puts in front of its title
 fn same_artist(t: &Track, artist: &str) -> bool {
@@ -273,6 +288,15 @@ fn same_artist(t: &Track, artist: &str) -> bool {
 /// Err is the reply's key (notFound / empty / notSafe).
 pub async fn pick(q: &str, plats: &[&'static str], likes: &[Track], local: &[Track], prefer_radio: bool, safe: &(dyn Fn(&Track) -> bool + Sync)) -> Result<Track, &'static str> {
     let is_link = q.starts_with("http://") || q.starts_with("https://");
+    // a Spotify song's link: that song, from Spotify (signed in) or its public page (not: Spotify off, or
+    // not signed in here, it found nothing); it plays from YouTube Music if Spotify can't play it here
+    if let Some(id) = spotify_track_id(q) {
+        return match sp_link_track(&id, plats.contains(&"spotify")).await {
+            Some(t) if safe(&t) => Ok(t),
+            Some(_) => Err("notSafe"),
+            None => Err("notFound"),
+        };
+    }
     let order: Vec<&str> = if q.contains("soundcloud.com/") {
         plats.iter().copied().filter(|p| *p == "soundcloud").collect()
     } else if q.contains("open.spotify.com/") {
@@ -347,6 +371,15 @@ pub async fn pick(q: &str, plats: &[&'static str], likes: &[Track], local: &[Tra
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spotify_links_give_their_track_id() {
+        assert_eq!(spotify_track_id("https://open.spotify.com/track/2M71Inc9camxaIGtmQ6I87").as_deref(), Some("2M71Inc9camxaIGtmQ6I87"));
+        assert_eq!(spotify_track_id("https://open.spotify.com/intl-de/track/2M71Inc9camxaIGtmQ6I87?si=abc").as_deref(), Some("2M71Inc9camxaIGtmQ6I87"));
+        assert_eq!(spotify_track_id("spotify:track:2M71Inc9camxaIGtmQ6I87").as_deref(), Some("2M71Inc9camxaIGtmQ6I87"));
+        assert_eq!(spotify_track_id("https://open.spotify.com/album/2M71Inc9camxaIGtmQ6I87"), None);
+        assert_eq!(spotify_track_id("all of me"), None);
+    }
 
     #[test]
     fn accents_dont_matter() {

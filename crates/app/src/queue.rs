@@ -31,6 +31,18 @@ impl QItem {
     }
 }
 
+thread_local! {
+    /// the song a mix has lined up to come in next (Seamless Mix: got ready, its blend set in the player): it
+    /// stays next, whatever's queued meanwhile (a request just before a blend went in ahead of it, and the
+    /// queue and what was heard parted ways: the request was lost)
+    static HELD: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// A mix has lined `key` up to come in next
+pub fn hold(key: &str) { HELD.with(|h| *h.borrow_mut() = key.to_string()); }
+/// It's in, or it won't be
+pub fn release() { HELD.with(|h| h.borrow_mut().clear()); }
+
 #[derive(Default)]
 pub struct Queue {
     pub items: Vec<QItem>,
@@ -40,6 +52,14 @@ pub struct Queue {
 }
 
 impl Queue {
+    /// The first place something can go in after what's playing: past the song a mix has lined up, if
+    /// that's the next one
+    fn first_free(&self) -> usize {
+        let next = self.qi.map_or(0, |i| i + 1).min(self.items.len());
+        let held = HELD.with(|h| { let h = h.borrow(); !h.is_empty() && self.items.get(next).is_some_and(|q| q.t.key == *h) });
+        next + held as usize
+    }
+
     pub fn current(&self) -> Option<&Track> {
         self.qi.and_then(|i| self.items.get(i)).map(|q| &q.t)
     }
@@ -70,7 +90,7 @@ impl Queue {
     /// The same song further on in the list that's playing (or among autoplay's picks): taken out, as
     /// it's queued now (what you queued, and chat requests, stay where they are)
     fn take_from_list(&mut self, key: &str) {
-        let from = self.qi.map_or(0, |i| i + 1);
+        let from = self.first_free();
         let mut i = from;
         while i < self.items.len() {
             let q = &self.items[i];
@@ -80,7 +100,7 @@ impl Queue {
 
     pub fn play_next(&mut self, t: Track) {
         self.take_from_list(&t.key);
-        let at = self.qi.map_or(0, |i| i + 1).min(self.items.len());
+        let at = self.first_free();
         self.items.insert(at, QItem::queued(t));
         if self.qi.is_none() {
             self.qi = Some(0);
@@ -90,7 +110,7 @@ impl Queue {
     /// Where Add to Queue puts a track (as the web app's queuedEnd): after what's playing and anything
     /// else you've queued, ahead of the rest of the list that's playing (and of autoplay's picks)
     pub fn queued_end(&self) -> usize {
-        let mut i = self.qi.map_or(0, |q| q + 1).min(self.items.len());
+        let mut i = self.first_free();
         while i < self.items.len() && (self.items[i].queued || !self.items[i].by.is_empty()) { i += 1; }
         i
     }
@@ -142,12 +162,13 @@ impl Queue {
     /// Moves a queued track to play next
     pub fn move_next(&mut self, i: usize) {
         let Some(cur) = self.qi else { return };
-        if i <= cur || i >= self.items.len() {
+        let at = self.first_free();
+        if i <= cur || i < at || i >= self.items.len() {
             return;
         }
         let mut q = self.items.remove(i);
         q.auto = false;
-        self.items.insert(cur + 1, q);
+        self.items.insert(at, q);
     }
 
     pub fn remove(&mut self, i: usize) {
@@ -461,6 +482,26 @@ mod tests {
         // (each one's own order kept)
         let scs: Vec<&String> = out.iter().filter(|k| k.starts_with('s')).collect();
         assert_eq!(scs, ["s1", "s2", "s3", "s4"]);
+    }
+
+    #[test]
+    fn a_song_a_mix_has_lined_up_stays_next() {
+        let t = |k: &str| Track { key: k.into(), title: k.into(), ..Default::default() };
+        let mut q = Queue::default();
+        q.set_list((0..5).map(|i| t(&format!("l{i}"))).collect(), 0);
+        super::hold("l1");
+        q.add_request(t("req"), "viewer");
+        q.play_next(t("now"));
+        q.add(t("mine"));
+        let last = q.items.len() - 1;
+        q.move_next(last);
+        super::release();
+        let keys: Vec<&str> = q.items.iter().map(|x| x.t.key.as_str()).collect();
+        assert_eq!(&keys[..2], &["l0", "l1"], "{keys:?}");
+        for k in ["req", "now", "mine", "l4"] { assert!(keys.iter().position(|x| *x == k).unwrap() > 1, "{keys:?}"); }
+        // (released: next again, as before)
+        q.play_next(t("after"));
+        assert_eq!(q.items[1].t.key, "after");
     }
 
     #[test]

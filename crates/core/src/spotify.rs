@@ -621,3 +621,56 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
+
+/// A Spotify track's details from its public embed page (open.spotify.com/embed/track/<id>), with no account:
+/// shaped as the Web API's (name, artists, duration, cover), for a link when Spotify isn't signed in here
+pub async fn embed_track(id: &str) -> Result<Value, String> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) { return Err("not a Spotify track id".into()); }
+    let html = reqwest::Client::new().get(format!("https://open.spotify.com/embed/track/{id}"))
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        .timeout(Duration::from_secs(10))
+        .send().await.map_err(|e| e.to_string())?
+        .error_for_status().map_err(|e| e.to_string())?
+        .text().await.map_err(|e| e.to_string())?;
+    embed_json(&html, id)
+}
+
+fn embed_json(html: &str, id: &str) -> Result<Value, String> {
+    let start = html.find(r#"<script id="__NEXT_DATA__" type="application/json">"#).ok_or("Spotify's page had no track on it")?;
+    let rest = &html[start..];
+    let body = &rest[rest.find('>').map_or(0, |i| i + 1)..rest.find("</script>").unwrap_or(rest.len())];
+    let v: Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    let e = &v["props"]["pageProps"]["state"]["data"]["entity"];
+    let name = e["name"].as_str().or(e["title"].as_str()).ok_or("Spotify's page had no track on it")?;
+    let artists: Vec<Value> = e["artists"].as_array().map(|a| a.iter().filter_map(|x| x["name"].as_str()).map(|n| serde_json::json!({ "name": n })).collect()).unwrap_or_default();
+    // (its cover, the largest)
+    let cover = e["visualIdentity"]["image"].as_array().and_then(|i| i.iter().max_by_key(|x| x["maxWidth"].as_u64().unwrap_or(0))).and_then(|x| x["url"].as_str());
+    Ok(serde_json::json!({
+        "id": id, "uri": format!("spotify:track:{id}"), "name": name, "artists": artists,
+        "duration_ms": e["duration"].as_u64().unwrap_or(0), "explicit": e["isExplicit"].as_bool().unwrap_or(false),
+        "album": { "name": "", "images": cover.map(|u| vec![serde_json::json!({ "url": u })]).unwrap_or_default() },
+    }))
+}
+
+#[cfg(test)]
+mod embed_tests {
+    /// (the live page: OMNIPULSE_SP_ID, a track id)
+    #[tokio::test]
+    #[ignore]
+    async fn a_live_embed_page() {
+        let v = super::embed_track(&std::env::var("OMNIPULSE_SP_ID").unwrap()).await.unwrap();
+        println!("{} | {} | {} ms | {}", v["name"], v["artists"], v["duration_ms"], v["album"]["images"][0]["url"]);
+    }
+
+    #[test]
+    fn a_track_is_read_from_its_embed_page() {
+        let html = r#"<html><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"state":{"data":{"entity":{"type":"track","name":"All of Me","artists":[{"name":"Big Gigantic"},{"name":"Logic"},{"name":"ROZES"}],"duration":228169,"isExplicit":true,"visualIdentity":{"image":[{"url":"small","maxWidth":64},{"url":"big","maxWidth":640}]}}}}}}}</script></html>"#;
+        let v = super::embed_json(html, "2M71Inc9camxaIGtmQ6I87").unwrap();
+        assert_eq!(v["name"], "All of Me");
+        assert_eq!(v["artists"][2]["name"], "ROZES");
+        assert_eq!(v["duration_ms"], 228169);
+        assert_eq!(v["uri"], "spotify:track:2M71Inc9camxaIGtmQ6I87");
+        assert_eq!(v["album"]["images"][0]["url"], "big");
+        assert!(super::embed_json("<html></html>", "x").is_err());
+    }
+}

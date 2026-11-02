@@ -3424,7 +3424,7 @@ fn start(shared: &Shared) {
     STATUS_HOLD.with(|h| *h.borrow_mut() = None);
     // a track a mix brought in: it's playing already (not loaded again)
     let mixed = MIXED_IN.with(|m| m.borrow_mut().take()).filter(|(k, _)| *k == t.key);
-    if mixed.is_none() { MIX.with(|m| *m.borrow_mut() = None); }
+    if mixed.is_none() { MIX.with(|m| *m.borrow_mut() = None); queue::release(); }
     // (Seamless Mix or Smart Transitions on: Spotify songs from their YouTube Music version, so they can be
     // mixed: Spotify's own player plays one song at a time, never two crossfading)
     let mix_on_now = smart_on(&shared.borrow().web.prefs);
@@ -4145,6 +4145,8 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
         plan
     };
     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Opening(next.key.clone())));
+    // (it stays next now: anything queued meanwhile goes after it)
+    queue::hold(&next.key);
     let cur_key = cur.key.clone();
     let (rt, weak, prefs) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), a.web.prefs.clone()) };
     let h = rt.clone();
@@ -4198,6 +4200,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                 Err(e) => {
                     omnipulse_core::diag::note(&format!("Seamless Mix couldn't get the next song ready: {e}"));
                     MIX.with(|m| *m.borrow_mut() = None);
+                    queue::release();
                     // (Smart Transitions: a fade instead)
                     if smart { SMART_PAIR.with(|s| { if let Some(x) = s.borrow_mut().as_mut() { x.2 = None; x.3 = format!("couldn't be got ready: {e}"); } }); }
                 }
@@ -4454,6 +4457,7 @@ fn mix_show_end(shared: &Shared) {
 /// A mix's moment came: the next track is coming in (the queue moves on, without loading it again)
 fn mix_started(shared: &Shared) {
     let Some(MixPhase::Waiting { key, plan, tempo, version, out, pitch }) = MIX.with(|m| m.borrow_mut().take()) else { return };
+    queue::release();
     // (where the mix begins in the one going out: its place, shown, from there)
     let plan_at = plan.at_ms;
     let at = shared.borrow().queue.qi.map(|i| i + 1).filter(|&n| shared.borrow().queue.items.get(n).is_some_and(|q| q.t.key == key));
