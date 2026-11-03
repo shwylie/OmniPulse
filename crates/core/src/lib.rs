@@ -51,6 +51,8 @@ pub mod spotify_library;
 #[cfg(all(feature = "spotify", not(feature = "desktop")))]
 pub mod spotify_session;
 #[cfg(feature = "desktop")]
+pub mod pot;
+#[cfg(feature = "desktop")]
 pub mod tools;
 #[cfg(feature = "desktop")]
 pub mod widget;

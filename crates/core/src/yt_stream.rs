@@ -46,17 +46,52 @@ pub fn on_path(name: &str) -> bool {
 // asking again keeps it asking (2026-11-03: twenty songs in a minute, each failing and moving on to the
 // next, each another request). 5 minutes, twice as long each time it asks again, up to 30; back to 5 once
 // a lookup works.
+// With PO tokens set up (crate::pot), YouTube asking first moves lookups onto its web client with a token
+// for TOKENS_SECS, the song asked about again at once; it's only left alone if it asks even then.
 const BOT_FIRST_SECS: u64 = 300;
 const BOT_MOST_SECS: u64 = 1800;
-// (until when, and how long next time; each test's own, as they run side by side)
+const TOKENS_SECS: u64 = 6 * 3600;
+// (until when it's left alone, how long next time, and until when tokens are used; each test's own, as
+// they run side by side)
+type Bot = (u64, u64, u64);
 #[cfg(not(test))]
-static BOT: std::sync::Mutex<(u64, u64)> = std::sync::Mutex::new((0, BOT_FIRST_SECS));
+static BOT: std::sync::Mutex<Bot> = std::sync::Mutex::new((0, BOT_FIRST_SECS, 0));
 #[cfg(not(test))]
-fn bot_state<T>(f: impl FnOnce(&mut (u64, u64)) -> T) -> T { f(&mut BOT.lock().unwrap_or_else(|e| e.into_inner())) }
+fn bot_state<T>(f: impl FnOnce(&mut Bot) -> T) -> T { f(&mut BOT.lock().unwrap_or_else(|e| e.into_inner())) }
 #[cfg(test)]
-thread_local! { static BOT: std::cell::RefCell<(u64, u64)> = const { std::cell::RefCell::new((0, BOT_FIRST_SECS)) }; }
+thread_local! {
+    static BOT: std::cell::RefCell<Bot> = const { std::cell::RefCell::new((0, BOT_FIRST_SECS, 0)) };
+    /// (whether a test has tokens set up)
+    static TEST_TOKENS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 #[cfg(test)]
-fn bot_state<T>(f: impl FnOnce(&mut (u64, u64)) -> T) -> T { BOT.with(|b| f(&mut b.borrow_mut())) }
+fn bot_state<T>(f: impl FnOnce(&mut Bot) -> T) -> T { BOT.with(|b| f(&mut b.borrow_mut())) }
+
+/// PO tokens set up (a test's: as it says)
+fn tokens_ready() -> bool {
+    #[cfg(test)]
+    { TEST_TOKENS.with(|t| t.get()) }
+    #[cfg(not(test))]
+    { crate::pot::ready() }
+}
+
+/// Their setup started, if they aren't (never in a test)
+fn tokens_set_up() {
+    #[cfg(not(test))]
+    crate::pot::start_setup();
+}
+
+/// Lookups are using tokens, since YouTube asked
+fn tokens_on() -> bool {
+    tokens_ready() && bot_state(|b| b.2) > crate::now_secs()
+}
+
+/// What makes yt-dlp's lookup a token's: its plugin, its script, and YouTube's web client (which sends one)
+fn tokens_args() -> Vec<String> {
+    let mut a = crate::pot::ytdlp_args();
+    a.extend(["--extractor-args".into(), "youtube:player_client=mweb".into()]);
+    a
+}
 
 /// How long YouTube is still being left alone (seconds), after it asked for its bot check
 pub fn bot_wait() -> Option<u64> {
@@ -76,18 +111,45 @@ fn bot_check(why: &str) -> bool {
 
 /// YouTube's bot check met: left alone from now, for longer each time
 fn bot_hold() -> u64 {
-    let step = bot_state(|b| { let step = b.1; *b = (crate::now_secs() + step, (step * 2).min(BOT_MOST_SECS)); step });
+    let step = bot_state(|b| { let step = b.1; b.0 = crate::now_secs() + step; b.1 = (step * 2).min(BOT_MOST_SECS); step });
     crate::diag::note(&format!("youtube: its bot check; leaving it alone for {} s", step));
     step
 }
 
+/// Why a lookup didn't work: YouTube's bot check, or anything else (said)
+enum Fail { Bot, Other(String) }
+
 async fn run(program: impl AsRef<OsStr>, target: String, label: &str, format: &str) -> Result<String, String> {
-    let query = label;
     if let Some(wait) = bot_wait() { return Err(bot_said(wait) + "."); }
-    let mut cmd = tokio::process::Command::new(program.as_ref());
+    let tokens = tokens_on();
+    let first = run_once(program.as_ref(), &target, label, format, tokens).await;
+    let r = match first {
+        // (YouTube asking, tokens set up: on to them for a while, and this one asked again with one)
+        Err(Fail::Bot) if !tokens && tokens_ready() => {
+            bot_state(|b| b.2 = crate::now_secs() + TOKENS_SECS);
+            crate::diag::note("youtube: its bot check; lookups use PO tokens for a while");
+            run_once(program.as_ref(), &target, label, format, true).await
+        }
+        r => r,
+    };
+    match r {
+        Ok(url) => { bot_state(|b| b.1 = BOT_FIRST_SECS); Ok(url) }
+        Err(Fail::Bot) => {
+            // (no tokens yet: set up now, for next time)
+            if !tokens_ready() { tokens_set_up(); }
+            Err(bot_said(bot_hold()) + ".")
+        }
+        Err(Fail::Other(e)) => Err(e),
+    }
+}
+
+async fn run_once(program: &OsStr, target: &str, label: &str, format: &str, tokens: bool) -> Result<String, Fail> {
+    let query = label;
+    let mut cmd = tokio::process::Command::new(program);
     cmd.arg(target)
         // (its address, and when YouTube lets it be used: an address used before then is refused, 403)
         .args(["--print", "%(available_at|0)s %(url)s", "-f", format, "--no-playlist", "--no-warnings"])
+        .args(if tokens { tokens_args() } else { Vec::new() })
         .args(js_runtime_args())
         .args(crate::tools::cache_args())
         .envs(crate::tools::cache_env())
@@ -98,28 +160,27 @@ async fn run(program: impl AsRef<OsStr>, target: String, label: &str, format: &s
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000);   // CREATE_NO_WINDOW: no console window flashing up
 
-    let child = cmd.spawn().map_err(|e| {
+    let child = cmd.spawn().map_err(|e| Fail::Other(
         if e.kind() == std::io::ErrorKind::NotFound {
             "yt-dlp isn't set up yet: Settings > Integrations > YouTube Music > Set up.".to_string()
         } else {
             format!("Couldn't start yt-dlp: {e}")
         }
-    })?;
+    ))?;
     let out = tokio::time::timeout(TIMEOUT, child.wait_with_output())
         .await
-        .map_err(|_| format!("yt-dlp took longer than {} seconds and was stopped.", TIMEOUT.as_secs()))?
-        .map_err(|e| format!("yt-dlp failed: {e}"))?;
+        .map_err(|_| Fail::Other(format!("yt-dlp took longer than {} seconds and was stopped.", TIMEOUT.as_secs())))?
+        .map_err(|e| Fail::Other(format!("yt-dlp failed: {e}")))?;
 
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         // yt-dlp prints "ERROR: ..." lines; the last one is usually the useful one
         let why = stderr.lines().rev().find(|l| l.contains("ERROR")).or_else(|| stderr.lines().rev().find(|l| !l.trim().is_empty()))
             .unwrap_or("no details").trim();
-        if bot_check(why) { return Err(bot_said(bot_hold()) + "."); }
+        if bot_check(why) { return Err(Fail::Bot); }
         let code = out.status.code().map(|c| c.to_string()).unwrap_or_else(|| "a signal".into());
-        return Err(format!("yt-dlp couldn't resolve \"{query}\" (exit {code}): {why}"));
+        return Err(Fail::Other(format!("yt-dlp couldn't resolve \"{query}\" (exit {code}): {why}")));
     }
-    bot_state(|b| b.1 = BOT_FIRST_SECS);
     // a line per format: when it can be used, then its address; with an audio-only format there's one,
     // but the first is taken to be safe
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -133,7 +194,7 @@ async fn run(program: impl AsRef<OsStr>, target: String, label: &str, format: &s
             (u.starts_with("http://") || u.starts_with("https://")).then(|| (a.parse::<u64>().unwrap_or(0), u.to_string()))
         })
         .next()
-        .ok_or_else(|| format!("yt-dlp found nothing to play for \"{query}\"."))?;
+        .ok_or_else(|| Fail::Other(format!("yt-dlp found nothing to play for \"{query}\".")))?;
     // YouTube hands out its streams a few seconds before they work (yt-dlp waits for them too): waited
     // for here, so whatever opens it next isn't refused (never more than 15 s)
     let wait = at.saturating_sub(crate::now_secs()).min(15);
@@ -257,6 +318,37 @@ mod tests {
         bot_state(|b| b.0 = 0);
         assert!(resolve_with(&ok, "x").await.is_ok());
         assert!(resolve_with(&p, "x").await.unwrap_err().contains("5 min"));
+    }
+
+    #[tokio::test]
+    async fn with_tokens_set_up_youtube_asking_moves_lookups_onto_them() {
+        TEST_TOKENS.with(|t| t.set(true));
+        // (YouTube asks unless it's its web client, with a token)
+        let p = fake("tokens", "echo %* | findstr /c:\"player_client=mweb\" >nul && (echo https://rr1.googlevideo.com/videoplayback?id=tok & exit /b 0)\r\necho ERROR: [youtube] abc: Sign in to confirm you're not a bot. 1>&2\r\nexit /b 1");
+        // (asked: this one again with a token, at once, and it works; YouTube isn't left alone)
+        assert_eq!(resolve_with(&p, "x").await.unwrap(), "https://rr1.googlevideo.com/videoplayback?id=tok");
+        assert!(bot_wait().is_none() && tokens_on());
+        // (the next one with a token from the start)
+        assert_eq!(resolve_with(&p, "y").await.unwrap(), "https://rr1.googlevideo.com/videoplayback?id=tok");
+        // (asking even with a token: left alone then)
+        let always = fake("tokens-bot", "echo ERROR: [youtube] abc: Sign in to confirm you're not a bot. 1>&2\r\nexit /b 1");
+        assert!(resolve_with(&always, "z").await.unwrap_err().contains("paused"));
+        assert!(bot_wait().is_some());
+    }
+
+    /// (for real: PO tokens set up in OmniPulse's own folder, as the app does it, then one lookup with a token)
+    /// cargo test -p omnipulse-core --features desktop --lib tokens_for_real -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn tokens_for_real() {
+        let t0 = std::time::Instant::now();
+        crate::pot::setup().await.expect("set up");
+        assert!(crate::pot::ready());
+        println!("set up in {:.0} s", t0.elapsed().as_secs_f64());
+        let t1 = std::time::Instant::now();
+        let url = run_once(crate::tools::ytdlp_program().as_ref(), "https://music.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ", "ba[ext=m4a]/ba", true).await;
+        let url = match url { Ok(u) => u, Err(Fail::Bot) => panic!("YouTube asked even with a token"), Err(Fail::Other(e)) => panic!("{e}") };
+        println!("a lookup with a token in {:.0} s: {}...", t1.elapsed().as_secs_f64(), &url[..60.min(url.len())]);
     }
 
     #[tokio::test]
