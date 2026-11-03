@@ -119,6 +119,11 @@ fn bot_hold() -> u64 {
 /// Why a lookup didn't work: YouTube's bot check, or anything else (said)
 enum Fail { Bot, Other(String) }
 
+/// yt-dlp found no format it could use: as when YouTube gave a request only its newer streaming (SABR)
+fn sabr(why: &str) -> bool {
+    why.contains("Requested format is not available")
+}
+
 async fn run(program: impl AsRef<OsStr>, target: String, label: &str, format: &str) -> Result<String, String> {
     if let Some(wait) = bot_wait() { return Err(bot_said(wait) + "."); }
     let tokens = tokens_on();
@@ -130,6 +135,12 @@ async fn run(program: impl AsRef<OsStr>, target: String, label: &str, format: &s
             crate::diag::note("youtube: its bot check; lookups use PO tokens for a while");
             run_once(program.as_ref(), &target, label, format, true).await
         }
+        r => r,
+    };
+    // (with a token, its web client's formats now and then come without their addresses, YouTube trying its
+    // newer streaming on that request (SABR): asked once more, as the next request mostly isn't)
+    let r = match r {
+        Err(Fail::Other(e)) if tokens_on() && sabr(&e) => run_once(program.as_ref(), &target, label, format, true).await,
         r => r,
     };
     match r {
@@ -342,13 +353,19 @@ mod tests {
     #[ignore]
     async fn tokens_for_real() {
         let t0 = std::time::Instant::now();
-        crate::pot::setup().await.expect("set up");
+        if !crate::pot::ready() { crate::pot::setup().await.expect("set up"); }
         assert!(crate::pot::ready());
         println!("set up in {:.0} s", t0.elapsed().as_secs_f64());
-        let t1 = std::time::Instant::now();
-        let url = run_once(crate::tools::ytdlp_program().as_ref(), "https://music.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ", "ba[ext=m4a]/ba", true).await;
-        let url = match url { Ok(u) => u, Err(Fail::Bot) => panic!("YouTube asked even with a token"), Err(Fail::Other(e)) => panic!("{e}") };
-        println!("a lookup with a token in {:.0} s: {}...", t1.elapsed().as_secs_f64(), &url[..60.min(url.len())]);
+        // (a few songs, each with a token, and how each went: YouTube's newer streaming, or its bot check even
+        // with one, can come up on any request)
+        let mut worked = 0;
+        for id in ["dQw4w9WgXcQ", "fG_TXsA2yjk", "t9w8W1EOlA0"] {
+            let t1 = std::time::Instant::now();
+            let r = run_once(crate::tools::ytdlp_program().as_ref(), &format!("https://music.youtube.com/watch?v={id}"), id, "ba[ext=m4a]/ba", true).await;
+            let said = match &r { Ok(u) => { worked += 1; format!("worked: {}...", &u[..50.min(u.len())]) }, Err(Fail::Bot) => "YouTube asked even with a token".into(), Err(Fail::Other(e)) => e.clone() };
+            println!("{id} in {:.0} s: {said}", t1.elapsed().as_secs_f64());
+        }
+        assert!(worked > 0, "none worked with a token");
     }
 
     #[tokio::test]
