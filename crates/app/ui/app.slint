@@ -175,6 +175,8 @@ export global PanelLook {
     in-out property <color> ink;
     in-out property <bool> bg-on;
     in-out property <color> bg;
+    // (the font picked for its theme, a Google Font fetched for the preview: "" for the theme's own)
+    in-out property <string> font;
 }
 /// A webcam overlay's piece, for its preview: the camera, or a part (fractions of the canvas)
 export struct CamRect { id: string, label: string, x: float, y: float, w: float, h: float }
@@ -3480,7 +3482,7 @@ component PanelPreview inherits Rectangle {
                 // (room at the top for a title bar; room on the right for its art; its type)
                 property <length> top: self.th == "y2k" ? 22px : self.th == "terminal" ? 18px : 0px;
                 property <length> keep: self.th == "ticket" ? 66px : self.th == "bauhaus" ? 104px : self.th == "synthwave" ? 50px : 0px;
-                property <string> ff: self.th == "pixel" || self.th == "terminal" ? "Cascadia Mono" : self.th == "paper" ? "Ink Free" : self.th == "bauhaus" || self.th == "cyber" || self.th == "ticket" ? "Bahnschrift" : self.th == "watercolour" ? "Georgia" : "";
+                property <string> ff: PanelLook.font != "" ? PanelLook.font : self.th == "pixel" || self.th == "terminal" ? "Cascadia Mono" : self.th == "paper" ? "Ink Free" : self.th == "bauhaus" || self.th == "cyber" || self.th == "ticket" ? "Bahnschrift" : self.th == "watercolour" ? "Georgia" : "";
                 property <bool> upper: self.th == "pixel" || self.th == "bauhaus" || self.th == "cyber";
                 property <string> shown-title: (self.th == "terminal" ? "> " : "") + (self.upper ? p.title.to-uppercase() : p.title) + (self.th == "terminal" ? " \u{2588}" : "");
                 width: 320px;
@@ -4595,11 +4597,12 @@ component BotFieldRow inherits VerticalLayout {
         }
         if root.f.extra != "": IconButton { d: Icons.open; size: 30px; tint: Theme.accent; tip: root.f.note != "" ? root.f.note : "Open it in your browser"; clicked => { root.act("url:" + root.f.extra); } }
     }
-    if root.f.kind == "text" || root.f.kind == "password" || root.f.kind == "number": VerticalLayout {
+    // (textenter: kept only as Enter is pressed (a font's name, not each letter of it on its way), with Use beside it)
+    if root.f.kind == "text" || root.f.kind == "password" || root.f.kind == "number" || root.f.kind == "textenter": VerticalLayout {
         spacing: 4px;
         Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
         if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-        Rectangle {
+        HorizontalLayout { spacing: 8px; Rectangle {
             clip: true;
             height: 36px;
             border-radius: 9px;
@@ -4607,7 +4610,7 @@ component BotFieldRow inherits VerticalLayout {
             border-width: 1px;
             border-color: inp.has-focus ? Theme.accent : Theme.line;
             if root.f.changed || inp.touched: Pulse { r: 9px; }
-            inp := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } } 
+            inp := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } }
                 in-out property <bool> touched;
                 x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx));
                 width: max(parent.width - 24px, self.preferred-width + 4px);
@@ -4618,9 +4621,12 @@ component BotFieldRow inherits VerticalLayout {
                 single-line: true;
                 input-type: root.f.kind == "password" ? InputType.password : root.f.kind == "number" ? InputType.decimal : InputType.text;
                 text: root.f.value;
-                edited => { self.touched = true; root.set(root.f.key, self.text); }
+                edited => { if (root.f.kind != "textenter") { self.touched = true; root.set(root.f.key, self.text); } }
+                accepted => { if (root.f.kind == "textenter") { self.touched = true; root.set(root.f.key, self.text); } }
             }
             if inp.text == "" && root.f.extra != "": Text { x: 12px; text: root.f.extra; color: Theme.muted.with-alpha(0.6); font-size: 13px; vertical-alignment: center; }
+        }
+        if root.f.kind == "textenter": VerticalLayout { alignment: center; Pill { label: "Use It"; clicked => { inp.touched = true; root.set(root.f.key, inp.text); } } }
         }
     }
     // (actions side by side: a button each, done here, now)

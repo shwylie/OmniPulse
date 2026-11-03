@@ -263,7 +263,7 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         let picked = if now.is_empty() || FONTS.contains(&now.as_str()) { format!("{theme}:{now}") } else { String::new() };
         let fonts = vec![
             f("chips", "fontPick", "Font", "For this theme. Each theme keeps its own.", &picked, &opts),
-            f("text", "fontCustom", "Or any Google Font", "Type the font's name as fonts.google.com shows it, like Lobster, then press Enter.", if picked.is_empty() { &now } else { "" }, "Lobster"),
+            f("textenter", "fontCustom", "Or any Google Font", "Type its name as fonts.google.com shows it, like Lobster, then press Enter or click Use It.", if picked.is_empty() { &now } else { "" }, "Lobster"),
         ];
         let after = v.iter().position(|x| x.key == "suiteColors").filter(|c| *c > at).map(|c| c + if s(cur, "suiteColors") == "custom" { 3 } else { 1 }).unwrap_or(at + 1);
         v.splice(after..after, fonts);

@@ -412,6 +412,22 @@
     cv.toBlob((b) => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = name.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-").toLowerCase() + ".png"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }, "image/png");
   }
   let sig = "", made = [];
+  // A Google Font's stylesheet, added once: resolved when it's in (or failed), so its font can be asked for
+  const sheets = {};
+  function fontSheet(name) {
+    const id = "gf-" + name.replace(/ /g, "-");
+    if (sheets[id]) return sheets[id];
+    sheets[id] = new Promise((done) => {
+      const l = document.createElement("link"); l.rel = "stylesheet"; l.id = id;
+      l.href = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(name).replace(/%20/g, "+") + ":ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500;1,700&display=swap";
+      l.onload = l.onerror = () => done();
+      document.head.appendChild(l);
+      setTimeout(done, 6000);
+    });
+    return sheets[id];
+  }
+  // (a font come in after they were drawn: drawn again)
+  if (document.fonts) document.fonts.addEventListener("loadingdone", () => { sig = ""; });
   async function poll() {
     try {
       const s = await (await fetch("/now.json", { cache: "no-store" })).json();
@@ -421,13 +437,11 @@
         SCALE = Number(set.scale) === 1 ? 1 : 2;
         // (its font: loaded before they're drawn, as a canvas draws only what's loaded)
         SET_FONT = String(set.font || "").replace(/[^A-Za-z0-9 ]/g, "").trim();
-        if (SET_FONT && !document.getElementById("gf-" + SET_FONT.replace(/ /g, "-"))) {
-          const l = document.createElement("link"); l.rel = "stylesheet"; l.id = "gf-" + SET_FONT.replace(/ /g, "-");
-          l.href = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(SET_FONT).replace(/%20/g, "+") + ":wght@400;500;600;700;800&display=swap";
-          document.head.appendChild(l);
-        }
-        if (SET_FONT) { try { await Promise.all(["500 14px", "800 28px"].map((w) => document.fonts.load(w + ' "' + SET_FONT + '"'))); } catch (e) {} }
-        const next = JSON.stringify(set);
+        // (its stylesheet waited for first: asked before that, the font isn't known yet and "loads" at once, empty,
+        // and the panels were drawn in the fallback, never again once it came)
+        if (SET_FONT) await fontSheet(SET_FONT);
+        if (SET_FONT) { try { await Promise.all(["400 14px", "500 14px", "700 14px", "800 28px", "italic 500 14px"].map((w) => document.fonts.load(w + ' "' + SET_FONT + '"'))); } catch (e) {} }
+        const next = JSON.stringify(set) + "|" + (SET_FONT && document.fonts.check('500 14px "' + SET_FONT + '"') ? "font" : "");
         if (next !== sig) {
           sig = next;
           const list = $("list"); list.innerHTML = ""; made = [];

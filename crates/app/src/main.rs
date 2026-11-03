@@ -7468,6 +7468,8 @@ fn bot_paint(shared: &Shared) {
         g.set_items(ModelRc::from(Rc::new(VecModel::from(items))));
         let or = |k: &str, d: &str| cur.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty()).unwrap_or(d).to_string();
         g.set_theme(or("panelTheme", "dark").into());
+        // (its theme's font, if one's picked: a Google Font, fetched for the preview first)
+        { let name = botpage::theme_font(&cur, &or("panelTheme", "dark")); let rt = shared.borrow().rt.clone(); g.set_font(if name.is_empty() { "".into() } else { webfonts::family(&rt, &name, fonts_ready).into() }); }
         g.set_shape(or("panelShape", "rounded").into());
         g.set_height(or("panelHeight", "medium").into());
         g.set_icons(cur.get("panelIcons").and_then(|v| v.as_bool()) != Some(false));
@@ -7609,7 +7611,7 @@ fn bot_set(shared: &Shared, key: &str, v: &str) {
         let mut all: serde_json::Map<String, serde_json::Value> = cur.get("themeFonts").and_then(|t| t.as_str()).and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default();
         if font.is_empty() { all.remove(&theme); } else { all.insert(theme, serde_json::json!(font)); }
         bot_set(shared, "themeFonts", &serde_json::Value::Object(all).to_string());
-        if key == "fontPick" { bot_paint(shared); }
+        bot_paint(shared);
         return;
     }
     // (a HUD frame picked from its list, as a click on it is)
