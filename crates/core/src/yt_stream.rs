@@ -41,8 +41,49 @@ pub fn on_path(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+// YouTube asking yt-dlp to sign in "to confirm you're not a bot" (it's had too many requests from this
+// connection): YouTube left alone for a while, every yt-dlp lookup turned down at once meanwhile, since
+// asking again keeps it asking (2026-11-03: twenty songs in a minute, each failing and moving on to the
+// next, each another request). 5 minutes, twice as long each time it asks again, up to 30; back to 5 once
+// a lookup works.
+const BOT_FIRST_SECS: u64 = 300;
+const BOT_MOST_SECS: u64 = 1800;
+// (until when, and how long next time; each test's own, as they run side by side)
+#[cfg(not(test))]
+static BOT: std::sync::Mutex<(u64, u64)> = std::sync::Mutex::new((0, BOT_FIRST_SECS));
+#[cfg(not(test))]
+fn bot_state<T>(f: impl FnOnce(&mut (u64, u64)) -> T) -> T { f(&mut BOT.lock().unwrap_or_else(|e| e.into_inner())) }
+#[cfg(test)]
+thread_local! { static BOT: std::cell::RefCell<(u64, u64)> = const { std::cell::RefCell::new((0, BOT_FIRST_SECS)) }; }
+#[cfg(test)]
+fn bot_state<T>(f: impl FnOnce(&mut (u64, u64)) -> T) -> T { BOT.with(|b| f(&mut b.borrow_mut())) }
+
+/// How long YouTube is still being left alone (seconds), after it asked for its bot check
+pub fn bot_wait() -> Option<u64> {
+    let (until, now) = (bot_state(|b| b.0), crate::now_secs());
+    (until > now).then(|| until - now)
+}
+
+fn bot_said(wait: u64) -> String {
+    format!("YouTube asked OmniPulse to prove it isn't a bot (too many requests), so YouTube is paused for {} min", wait.div_ceil(60).max(1))
+}
+
+/// yt-dlp's error is YouTube's bot check
+fn bot_check(why: &str) -> bool {
+    let w = why.to_lowercase();
+    w.contains("not a bot") || w.contains("confirm you")
+}
+
+/// YouTube's bot check met: left alone from now, for longer each time
+fn bot_hold() -> u64 {
+    let step = bot_state(|b| { let step = b.1; *b = (crate::now_secs() + step, (step * 2).min(BOT_MOST_SECS)); step });
+    crate::diag::note(&format!("youtube: its bot check; leaving it alone for {} s", step));
+    step
+}
+
 async fn run(program: impl AsRef<OsStr>, target: String, label: &str, format: &str) -> Result<String, String> {
     let query = label;
+    if let Some(wait) = bot_wait() { return Err(bot_said(wait) + "."); }
     let mut cmd = tokio::process::Command::new(program.as_ref());
     cmd.arg(target)
         // (its address, and when YouTube lets it be used: an address used before then is refused, 403)
@@ -74,9 +115,11 @@ async fn run(program: impl AsRef<OsStr>, target: String, label: &str, format: &s
         // yt-dlp prints "ERROR: ..." lines; the last one is usually the useful one
         let why = stderr.lines().rev().find(|l| l.contains("ERROR")).or_else(|| stderr.lines().rev().find(|l| !l.trim().is_empty()))
             .unwrap_or("no details").trim();
+        if bot_check(why) { return Err(bot_said(bot_hold()) + "."); }
         let code = out.status.code().map(|c| c.to_string()).unwrap_or_else(|| "a signal".into());
         return Err(format!("yt-dlp couldn't resolve \"{query}\" (exit {code}): {why}"));
     }
+    bot_state(|b| b.1 = BOT_FIRST_SECS);
     // a line per format: when it can be used, then its address; with an audio-only format there's one,
     // but the first is taken to be safe
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -191,9 +234,29 @@ mod tests {
 
     #[tokio::test]
     async fn a_failing_yt_dlp_gives_its_error() {
-        let p = fake("fail", "echo WARNING: something 1>&2\r\necho ERROR: [youtube] abc: Sign in to confirm you're not a bot 1>&2\r\nexit /b 1");
+        let p = fake("fail", "echo WARNING: something 1>&2\r\necho ERROR: [youtube] abc: Video unavailable 1>&2\r\nexit /b 1");
         let e = resolve_with(&p, "x").await.unwrap_err();
-        assert!(e.contains("exit 1") && e.contains("Sign in to confirm"), "{e}");
+        assert!(e.contains("exit 1") && e.contains("Video unavailable"), "{e}");
+        assert!(bot_wait().is_none());
+    }
+
+    #[tokio::test]
+    async fn youtubes_bot_check_leaves_youtube_alone_for_a_while() {
+        let p = fake("bot", "echo ERROR: [youtube] abc: Sign in to confirm you're not a bot. This helps protect our community. 1>&2\r\nexit /b 1");
+        let e = resolve_with(&p, "x").await.unwrap_err();
+        assert!(e.contains("isn't a bot") && e.contains("5 min"), "{e}");
+        let w = bot_wait().expect("left alone");
+        assert!((290..=300).contains(&w), "{w}");
+        // (meanwhile nothing's asked: even one that would work is turned down at once)
+        let ok = fake("ok-later", "echo https://rr1.googlevideo.com/videoplayback?id=abc");
+        assert!(resolve_with(&ok, "x").await.unwrap_err().contains("paused"));
+        // (asked again after: twice as long)
+        bot_state(|b| b.0 = 0);
+        assert!(resolve_with(&p, "x").await.unwrap_err().contains("10 min"));
+        // (a lookup that works: back to 5 next time)
+        bot_state(|b| b.0 = 0);
+        assert!(resolve_with(&ok, "x").await.is_ok());
+        assert!(resolve_with(&p, "x").await.unwrap_err().contains("5 min"));
     }
 
     #[tokio::test]
