@@ -388,6 +388,7 @@
     {"key": "sponsorAll", "label": "All Together", "type": "toggle", "default": false},
     {"key": "sponsorColoured", "label": "In Their Colours", "type": "toggle", "default": false},
     {"key": "panelExtended", "label": "Panels With Their Words", "type": "toggle", "default": false},
+    {"key": "panelItems", "label": "Your Panels, With Their Words", "type": "text", "default": ""},
     {"key": "panelTemplates", "label": "Panel Templates", "type": "text", "default": "[]"},
     {"key": "panelTplName", "label": "Template Name", "type": "text", "default": ""},
     {"key": "panelTplLoad", "label": "Load a Template", "type": "select", "default": ""},

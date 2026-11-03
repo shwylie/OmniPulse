@@ -94,6 +94,63 @@
     }
     return out;
   }
+  // A line of a panel's words as the app's editor formats them: "- " (or "• ") a bullet, "1. " a number, then
+  // runs of words, **bold**, *italics*, __underlined__ (each on till its mark comes again, on that line only)
+  function parseRich(line) {
+    let mark = "", m;
+    if ((m = /^\s*[-•*]\s+(.*)$/.exec(line))) { mark = "•"; line = m[1]; }
+    else if ((m = /^\s*(\d{1,3})[.)]\s+(.*)$/.exec(line))) { mark = m[1] + "."; line = m[2]; }
+    const runs = []; let b = false, i = false, u = false, buf = "";
+    const push = () => { if (buf) runs.push({ t: buf, b, i, u }); buf = ""; };
+    for (let k = 0; k < line.length;) {
+      if (line.startsWith("**", k)) { push(); b = !b; k += 2; }
+      else if (line.startsWith("__", k)) { push(); u = !u; k += 2; }
+      else if (line[k] === "*") { push(); i = !i; k += 1; }
+      else { buf += line[k]; k += 1; }
+    }
+    push();
+    return { mark, runs };
+  }
+  // (the words with their marks taken out: for measuring, and where only plain will do)
+  const plainOf = (text) => String(text || "").split("\n").map((l) => { const r = parseRich(l); return (r.mark ? r.mark + " " : "") + r.runs.map((x) => x.t).join(""); }).join(" ");
+  const runFont = (r, size, fam) => (r.i ? "italic " : "") + (r.b ? "800 " : "500 ") + size + "px " + fam;
+  // Formatted words wrapped to a width: each line its runs, how far in (a list's), and its mark (on its first line)
+  function wrapRich(c, text, width, size, fam) {
+    const out = [];
+    for (const src of String(text || "").split("\n")) {
+      if (!src.trim()) { out.push({ runs: [], indent: 0, mark: "" }); continue; }
+      const r = parseRich(src), indent = r.mark ? Math.round(size * (r.mark === "•" ? 1.2 : 1.7)) : 0;
+      const words = [];
+      for (const run of r.runs) for (const piece of run.t.split(/(\s+)/)) if (piece) words.push(Object.assign({}, run, { t: piece }));
+      let cur = [], w = 0, first = true;
+      const done = () => { while (cur.length && /^\s+$/.test(cur[cur.length - 1].t)) cur.pop(); out.push({ runs: cur, indent, mark: first ? r.mark : "" }); first = false; cur = []; w = 0; };
+      for (const word of words) {
+        const space = /^\s+$/.test(word.t);
+        if (space && !cur.length) continue;
+        c.font = runFont(word, size, fam);
+        const ww = c.measureText(word.t).width;
+        if (!space && cur.length && w + ww > width - indent) done();
+        cur.push(word); w += ww;
+      }
+      done();
+    }
+    return out;
+  }
+  // One wrapped line drawn at (x, y): its mark, then its runs in their own weights, underlined where they are
+  function drawRich(c, line, x, y, size, fam, fill) {
+    c.fillStyle = fill;
+    if (line.mark) { c.font = "700 " + size + "px " + fam; c.fillText(line.mark, x, y); }
+    let at = x + line.indent;
+    for (const r of line.runs) {
+      c.font = runFont(r, size, fam);
+      c.fillText(r.t, at, y);
+      const w = c.measureText(r.t).width;
+      if (r.u) c.fillRect(at, y + size * 0.48, w, Math.max(1, size * 0.07));
+      at += w;
+    }
+  }
+  // (a line's width, formatted)
+  const richWidth = (c, line, size, fam) => line.runs.reduce((n, r) => { c.font = runFont(r, size, fam); return n + c.measureText(r.t).width; }, line.indent);
   // (the set's font, if one's picked for its theme (a Google Font), else the theme's own)
   let SET_FONT = "";
   const MONO = '"Cascadia Mono", Consolas, monospace';
@@ -317,22 +374,28 @@
     const probe = document.createElement("canvas").getContext("2d");
     probe.font = "500 11px " + FONT(th);
     const room = W - (set.icons !== false ? 84 : 22) - 18 - keepT;
-    const ext = !!p.line && (!!set.extended || probe.measureText(p.line).width > room);
+    // (more than one line of words, or a list: always under the title)
+    const lines = String(p.line || "").split("\n");
+    const ext = !!p.line && (!!set.extended || lines.length > 1 || !!parseRich(lines[0]).mark || probe.measureText(plainOf(p.line)).width > room);
     let H = { short: 80, medium: 100, tall: 160, square: 320 }[set.height] || 100;
     let body = [];
     const bw = W - 44 - keepB;
     if (ext) {
       // (as tall as its words need: a header, then the lines)
       const m = document.createElement("canvas").getContext("2d");
-      m.font = "500 14px " + FONT(th);
-      body = wrap(m, p.line, bw);
-      if (body.length > 10) { m.font = "500 12.5px " + FONT(th); body = wrap(m, p.line, bw); }
-      p.fs = body.length > 10 ? 12.5 : 14; p.lh = body.length > 10 ? 17 : 20;
+      p.fs = 14; body = wrapRich(m, p.line, bw, p.fs, FONT(th));
+      if (body.length > 10) { p.fs = 12.5; body = wrapRich(m, p.line, bw, p.fs, FONT(th)); }
+      p.lh = Math.round(p.fs * 1.4);
       // (Twitch's tallest is 600: smaller words first, down to 10 px; then the last line ends in ...)
       const head = 74 + 18 + top;
-      while (head + body.length * p.lh > MAX_H && p.fs > 10) { p.fs -= 0.5; p.lh = Math.round(p.fs * 1.36); m.font = "500 " + p.fs + "px " + FONT(th); body = wrap(m, p.line, bw); }
+      while (head + body.length * p.lh > MAX_H && p.fs > 10) { p.fs -= 0.5; p.lh = Math.round(p.fs * 1.36); body = wrapRich(m, p.line, bw, p.fs, FONT(th)); }
       const fit = Math.floor((MAX_H - head) / p.lh);
-      if (body.length > fit) { body = body.slice(0, fit); let l = body[fit - 1]; while (m.measureText(l + "…").width > bw && l.length) l = l.slice(0, -1); body[fit - 1] = l + "…"; }
+      if (body.length > fit) {
+        body = body.slice(0, fit);
+        const last = body[fit - 1];
+        last.runs.push({ t: "…", b: false, i: false, u: false });
+        while (richWidth(m, last, p.fs, FONT(th)) > bw && last.runs.length > 1) { const r = last.runs[last.runs.length - 2]; if (r.t.length > 1) r.t = r.t.slice(0, -1); else last.runs.splice(last.runs.length - 2, 1); }
+      }
       H = Math.min(MAX_H, head + body.length * p.lh);
     }
     cv.width = W * SCALE; cv.height = H * SCALE;
@@ -365,9 +428,8 @@
       title(c, th, p.title, x, top + 36, fs, o, th === "minimal" ? g : ink);
       const lg = c.createLinearGradient(22, 0, W - 22, 0); lg.addColorStop(0, c1); lg.addColorStop(1, c2);
       c.fillStyle = th === "comic" || th === "bauhaus" ? "#111" : lg; c.fillRect(22, top + 64, bw, 2);
-      c.font = "500 " + p.fs + "px " + font; c.fillStyle = sub;
       halo(c, th, ink, true);
-      body.forEach((l, i) => c.fillText(l, 22, top + 84 + i * p.lh));
+      body.forEach((l, i) => drawRich(c, l, 22, top + 84 + i * p.lh, p.fs, font, sub));
       halo(c, th, ink, false);
       return;
     }
@@ -394,14 +456,16 @@
       // (its line, smaller until it fits: never cut off)
       // (a little smaller first; still too long, two lines, the title moved up for them)
       const room = W - x - 18 - keepT;
+      // (as formatted, on one line; too long for one, plain over two)
+      const one = { runs: parseRich(p.line).runs, indent: 0, mark: "" };
       let ls = Math.max(11, fs * 0.46);
-      c.font = "500 " + ls + "px " + font;
-      while (c.measureText(p.line).width > room && ls > 10) { ls -= 0.5; c.font = "500 " + ls + "px " + font; }
+      while (richWidth(c, one, ls, font) > room && ls > 10) ls -= 0.5;
       c.fillStyle = sub;
       halo(c, th, ink, true);
-      if (c.measureText(p.line).width <= room) c.fillText(p.line, x, mid + fs * 0.5);
+      if (richWidth(c, one, ls, font) <= room) drawRich(c, one, x, mid + fs * 0.5, ls, font, sub);
       else {
-        const two = wrap(c, p.line, room);
+        c.font = "500 " + ls + "px " + font;
+        const two = wrap(c, plainOf(p.line), room);
         if (two.length > 2) { let l = two[1]; while (c.measureText(l + "…").width > room && l.length) l = l.slice(0, -1); two.splice(1, two.length - 1, l + "…"); }
         two.forEach((l, i) => c.fillText(l, x, mid + fs * 0.42 + i * (ls + 3)));
       }
@@ -446,7 +510,7 @@
           sig = next;
           const list = $("list"); list.innerHTML = ""; made = [];
           const all = (set.panels || []).slice();
-          if (set.powered) all.push({ title: "Powered by OmniPulse", line: set.extended ? "This stream's music, chatbot, alerts and overlays all run on OmniPulse." + (set.site ? " / Get it at " + set.site : "") : (set.site || "Music, chatbot and stream tools in one app"), icon: "omni", logo: true });
+          if (set.powered) all.push({ title: "Powered by OmniPulse", line: set.extended ? "This stream's music, chatbot, alerts and overlays all run on OmniPulse." + (set.site ? "\nGet it at " + set.site : "") : (set.site || "Music, chatbot and stream tools in one app"), icon: "omni", logo: true });
           all.forEach((p, i) => { p.n = i + 1; });
           for (const p of all) if (p.img) {
             const im = await pic(p.img);

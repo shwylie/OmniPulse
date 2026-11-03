@@ -2386,10 +2386,17 @@ function sponsorPlug() {
 function panelSet() {
   const x = S(), v = (k, d) => (x[k] === undefined || x[k] === "" ? d : x[k]);
   const list = String(v("panelList", "About Me | My Music | PC Specs | Sponsors | Donate")).split("|").map((p) => p.trim()).filter(Boolean).slice(0, 12);
+  // (as kept now: a title, its words (formatted: **bold**, *italics*, __underline__, "- " and "1. " lists, a line
+  // each), its own icon; before, the list's "Title: words | ...", " / " a new line, and the icons' list)
+  let items = null;
+  try { const a = JSON.parse(String(x.panelItems || "")); if (Array.isArray(a)) items = a.slice(0, 12); } catch (e) {}
+  const own = (img) => (/^(\/overlay\/|https?:\/\/)/.test(String(img || "")) ? { img: String(img) } : {});
+  const panels = items
+    ? items.filter((p) => p && (String(p.title || "").trim() || String(p.body || "").trim())).map((p) => Object.assign({ title: String(p.title || "").trim(), line: String(p.body || "").trim() }, own(p.img)))
+    : list.map((p, n) => { const i = p.indexOf(":"), img = (String(v("panelOwnIcons", "")).split("|")[n] || "").trim(); return Object.assign(i < 0 ? { title: p, line: "" } : { title: p.slice(0, i).trim(), line: p.slice(i + 1).trim().split(" / ").join("\n") }, own(img)); });
   return {
     id: "panels", kind: "panels", logoColours: String(v("panelLogoColours", "theme")), font: themeFonts()[String(v("panelTheme", "dark"))] || "", scale: num(v("panelScale", 2)) === 1 ? 1 : 2, extended: yes(v("panelExtended", false)), powered: yes(v("panelPowered", true)), site: OMNIPULSE_SITE, theme: String(v("panelTheme", "dark")), shape: String(v("panelShape", "rounded")), height: String(v("panelHeight", "medium")), icons: yes(v("panelIcons", true)), colors: panelColors(), ink: hexOr(v("panelInk", "")), bg: hexOr(v("panelBg", "")),
-    // (your own icons, in the panels' order: a picture copied in (/overlay/...), or one's address)
-    panels: list.map((p, n) => { const i = p.indexOf(":"), img = (String(v("panelOwnIcons", "")).split("|")[n] || "").trim(); return Object.assign(i < 0 ? { title: p, line: "" } : { title: p.slice(0, i).trim(), line: p.slice(i + 1).trim() }, /^(\/overlay\/|https?:\/\/)/.test(img) ? { img } : {}); }),
+    panels,
   };
 }
 // (each theme's font, as picked: a Google Font's name, by theme)

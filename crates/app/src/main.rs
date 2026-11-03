@@ -7323,7 +7323,7 @@ fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
     }
     // (a page with a preview is split: its column narrow, as Panels' is)
     let split_page = list.iter().any(|x| x.kind == "suiteprev");
-    let sig = list.iter().map(|x| format!("{}|{}|{}|{}|{}|{}", x.key, x.kind, x.value, x.label, x.extra, if x.kind == "suiteprev" { format!("{}{}", x.note, x.n) } else { String::new() })).collect::<Vec<_>>().join("\n");
+    let sig = list.iter().map(|x| format!("{}|{}|{}|{}|{}|{}", x.key, x.kind, x.value, x.label, x.extra, if x.kind == "suiteprev" { format!("{}{}", x.note, x.n) } else if x.kind == "panelcard" { x.note.clone() } else { String::new() })).collect::<Vec<_>>().join("\n");
     // (a row of choices: its extra, as "id=Name|id=Name", for the page to draw)
     let strs = |v: Vec<String>| ModelRc::from(Rc::new(VecModel::from(v.into_iter().map(slint::SharedString::from).collect::<Vec<_>>())));
     let rows = list.into_iter().map(|x| {
@@ -7334,6 +7334,8 @@ fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
             else if x.kind == "suiteprev" && x.value == "timer" { (Vec::new(), x.key.split('|').map(String::from).collect()) }
             else if x.kind == "suiteprev" && x.value == "emoterain" { (Vec::new(), x.label.split('|').skip(1).map(String::from).collect()) }
             else if x.kind == "suiteprev" && (x.value == "goals" || x.value == "wheel") { x.key.split('|').filter_map(|o| o.split_once('=')).map(|(n, t)| (t.to_string(), n.to_string())).unzip() }
+            // (a panel's card: what's to be selected in its words, after a format button)
+            else if x.kind == "panelcard" { (Vec::new(), x.note.split(',').filter(|s| !s.is_empty()).map(String::from).collect()) }
             else if x.kind == "list" || x.kind == "piclist" { (Vec::new(), botpage::list_items(if x.value.is_empty() { &x.extra } else { &x.value })) }
             else { (Vec::new(), Vec::new()) };
         // (a Suite preview's colours: "#a,#b" in its note; none, the accent)
@@ -7397,6 +7399,8 @@ fn bot_paint(shared: &Shared) {
     // (a sheet's and the step's lines: drawn again only when they've changed, so what's being typed stays put)
     let sheet = BOT_SHEET.with(|b| b.borrow().clone());
     let (title, mut lines) = botpage::sheet(&sheet, &cur);
+    // (a panel's card, its words just formatted: what's to be selected in them after, "anchor,cursor,count")
+    if let Some((i, a, c, seq)) = PNL_SEL.with(|s| s.get()) { for l in lines.iter_mut().filter(|l| l.kind == "panelcard" && l.n == i as i32) { l.note = format!("{a},{c},{seq}"); } }
     { let m = theme_accents(&shared.borrow().web.prefs); for l in lines.iter_mut().filter(|l| l.kind == "suiteprev" && l.note.is_empty()) { l.note = format!("{},{}", m.0, m.1); } }
     // (its theme's font, after its colours: a Google Font picked, fetched first; Pixel's own, Cascadia Mono)
     { let rt = shared.borrow().rt.clone(); for l in lines.iter_mut().filter(|l| l.kind == "suiteprev") {
@@ -7439,20 +7443,21 @@ fn bot_paint(shared: &Shared) {
     // (the panels' preview: each one's title and line, the set's look)
     if sheet == "panels" {
         let g = ui.global::<PanelLook>();
-        let list = cur.get("panelList").and_then(|v| v.as_str()).filter(|v| !v.trim().is_empty()).unwrap_or("About Me | My Music | PC Specs | Sponsors | Donate").to_string();
+        let list = botpage::panels(&cur);
         let ext = cur.get("panelExtended").and_then(|v| v.as_bool()) == Some(true);
         let icons = cur.get("panelIcons").and_then(|v| v.as_bool()) != Some(false);
-        // (a line too long for beside its title (about 36 letters there, 44 without an icon): extended, its lines
-        // as wrapped at about 44 letters, a new paragraph at each " / ")
-        let item = |title: &str, line: &str| {
-            let long = !line.is_empty() && (ext || line.chars().count() > if icons { 36 } else { 44 });
-            let lines = line.split(" / ").map(|p| p.chars().count().div_ceil(44).max(1)).sum::<usize>() as i32;
-            PanelItem { title: title.into(), line: line.replace(" / ", "\n").into(), body: long, lines, icon: botpage::panel_icon(title).into(), img: Default::default(), has_img: false }
+        // (words too long for beside its title (about 36 letters there, 44 without an icon), more than one line, or a
+        // list: under it, as wrapped at about 44 letters; drawn plain here (its formatting is the browser page's))
+        let item = |title: &str, words: &str| {
+            let line = botpage::rich_plain(words);
+            let long = !line.is_empty() && (ext || line.contains('\n') || line.chars().count() > if icons { 36 } else { 44 });
+            let lines = line.split('\n').map(|p| p.chars().count().div_ceil(44).max(1)).sum::<usize>() as i32;
+            PanelItem { title: title.into(), line: line.into(), body: long, lines, icon: botpage::panel_icon(title).into(), img: Default::default(), has_img: false }
         };
-        let mut items: Vec<PanelItem> = list.split('|').map(|p| p.trim()).filter(|p| !p.is_empty()).take(12).map(|p| match p.split_once(':') { Some((a, b)) => item(a.trim(), b.trim()), None => item(p, "") }).collect();
-        // (your own icons, in the panels' order: a picture copied in, shown in its place)
-        let own = cur.get("panelOwnIcons").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        for (it, u) in items.iter_mut().zip(own.split('|').map(|u| u.trim().to_string())) {
+        let mut items: Vec<PanelItem> = list.iter().filter(|p| !p.title.trim().is_empty() || !p.body.trim().is_empty()).map(|p| item(p.title.trim(), &p.body)).collect();
+        // (your own icons: a picture copied in, shown in its place)
+        let own: Vec<String> = list.iter().filter(|p| !p.title.trim().is_empty() || !p.body.trim().is_empty()).map(|p| p.img.clone()).collect();
+        for (it, u) in items.iter_mut().zip(own) {
             if let Some(name) = u.strip_prefix("/overlay/") {
                 // (each picture read from disk once, not on every change to the page)
                 thread_local! { static PICS: RefCell<HashMap<String, slint::Image>> = RefCell::new(HashMap::new()); }
@@ -7594,10 +7599,12 @@ thread_local! {
     static HUD_SHOT: RefCell<String> = const { RefCell::new(String::new()) };
     /// (a nudge's step: 1 pixel, or 10)
     static HUD_STEP: std::cell::Cell<f64> = const { std::cell::Cell::new(1.0) };
+    /// (a panel's words just formatted: which panel, what's to be selected (bytes), and a count, so it's done once)
+    static PNL_SEL: std::cell::Cell<Option<(usize, usize, usize, u64)>> = const { std::cell::Cell::new(None) };
 }
 
 /// The panels' look and list, as a template keeps them
-const PANEL_TPL_KEYS: [&str; 14] = ["panelTheme", "panelShape", "panelHeight", "panelIcons", "panelExtended", "panelList", "suiteColors", "suiteC1", "suiteC2", "panelColors", "panelC1", "panelC2", "panelInk", "panelBg"];
+const PANEL_TPL_KEYS: [&str; 15] = ["panelTheme", "panelShape", "panelHeight", "panelIcons", "panelExtended", "panelList", "panelItems", "suiteColors", "suiteC1", "suiteC2", "panelColors", "panelC1", "panelC2", "panelInk", "panelBg"];
 
 fn bot_set(shared: &Shared, key: &str, v: &str) {
     let key = botpage::key_of(key).to_string();
@@ -7651,6 +7658,8 @@ fn bot_set(shared: &Shared, key: &str, v: &str) {
             all.retain(|t| t["name"].as_str() != Some(name.as_str()));
             bot_set(shared, "panelTemplates", &serde_json::Value::Array(all).to_string());
         } else if let Some(t) = all.iter().find(|t| t["name"].as_str() == Some(name.as_str())) {
+            // (one saved before panels were a list of their own: its list as it was, not the panels now)
+            if t["set"]["panelItems"].is_null() { bot_set(shared, "panelItems", ""); }
             for k in PANEL_TPL_KEYS {
                 let val = &t["set"][k];
                 let s = match val { serde_json::Value::String(s) => s.clone(), serde_json::Value::Bool(b) => b.to_string(), serde_json::Value::Null => continue, x => x.to_string() };
@@ -7694,6 +7703,48 @@ fn hook_id() -> String {
 fn bot_act(shared: &Shared, act: &str) {
     let say = |t: &str| if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(t.into()); };
     // (a list's row typed into, taken out, or one added: kept as "a | b | c"; the page drawn again unless it's typing)
+    // (a channel panel's card: "pnl:add", or "pnl:<i>:<what>[:...]": its title or words typed, a format button
+    // pressed on what's selected, moved, taken out, or its own icon chosen or let go)
+    if let Some(rest) = act.strip_prefix("pnl:") {
+        let mut list = botpage::panels(&bot_current(shared));
+        if rest == "add" {
+            if list.len() < botpage::PANELS_MAX { list.push(botpage::Panel::default()); }
+            bot_set(shared, "panelItems", &botpage::panels_json(&list));
+            bot_paint(shared);
+            return;
+        }
+        let mut parts = rest.splitn(3, ':');
+        let Some(i) = parts.next().and_then(|i| i.parse::<usize>().ok()).filter(|&i| i < list.len()) else { return };
+        let (what, arg) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+        match what {
+            "title" => list[i].title = arg.chars().take(60).collect(),
+            "body" => list[i].body = arg.chars().take(2000).collect(),
+            // ("<kind>:<anchor>:<cursor>:<the words as they are>": formatted, and what's to be selected after)
+            "fmt" => {
+                let mut f = arg.splitn(4, ':');
+                let (kind, a, c) = (f.next().unwrap_or(""), f.next().and_then(|x| x.parse().ok()).unwrap_or(0), f.next().and_then(|x| x.parse().ok()).unwrap_or(0));
+                let (words, a, c) = botpage::rich_format(f.next().unwrap_or(""), a, c, kind);
+                list[i].body = words;
+                PNL_SEL.with(|s| { let seq = s.get().map_or(0, |x| x.3) + 1; s.set(Some((i, a, c, seq))); });
+            }
+            "up" if i > 0 => list.swap(i, i - 1),
+            "down" if i + 1 < list.len() => list.swap(i, i + 1),
+            "del" => { list.remove(i); }
+            "noimg" => list[i].img.clear(),
+            // (a picture of yours for its icon: chosen, and copied into the widgets' own folder (its address there))
+            "pick" => {
+                let Some(p) = ask_path(rfd::FileDialog::new().set_title("A picture for this panel's icon").add_filter("Pictures", &["png", "jpg", "jpeg", "gif", "webp"]), Ask::Open, { let (s, a) = (shared.clone(), act.to_string()); move || bot_act(&s, &a) }) else { return };
+                match omnipulse_core::widget::overlay_media(&p.to_string_lossy(), false) {
+                    Ok(url) => list[i].img = url,
+                    Err(e) => { say(&e); return; }
+                }
+            }
+            _ => return,
+        }
+        bot_set(shared, "panelItems", &botpage::panels_json(&list));
+        bot_paint(shared);
+        return;
+    }
     if let Some(rest) = act.strip_prefix("list:") {
         let mut parts = rest.splitn(4, ':');
         let (key, what) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));

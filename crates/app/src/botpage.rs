@@ -134,6 +134,127 @@ pub fn list_items(v: &str) -> Vec<String> {
     v.split('|').map(|x| x.trim().to_string()).collect()
 }
 
+/// A channel panel as you've written it: its title, its words (formatted as rich_format marks them), and a
+/// picture of your own for its icon ("" for the one its title picks)
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Panel { pub title: String, pub body: String, pub img: String }
+
+/// The most panels made
+pub const PANELS_MAX: usize = 12;
+const PANELS_FIRST: &str = "About Me | My Music | PC Specs | Sponsors | Donate";
+
+/// Your panels: as kept (panelItems), else as they were before it (panelList's "Title: words | ...", " / " a
+/// new line, and panelOwnIcons in their order)
+pub fn panels(cur: &Map<String, Value>) -> Vec<Panel> {
+    if let Some(a) = serde_json::from_str::<Value>(s(cur, "panelItems")).ok().and_then(|v| v.as_array().cloned()) {
+        let t = |p: &Value, k: &str| p[k].as_str().unwrap_or("").to_string();
+        return a.iter().take(PANELS_MAX).map(|p| Panel { title: t(p, "title"), body: t(p, "body"), img: t(p, "img") }).collect();
+    }
+    let list = if s(cur, "panelList").is_empty() { PANELS_FIRST } else { s(cur, "panelList") };
+    let icons: Vec<String> = s(cur, "panelOwnIcons").split('|').map(|x| x.trim().to_string()).collect();
+    list.split('|').map(str::trim).filter(|x| !x.is_empty()).take(PANELS_MAX).enumerate().map(|(i, p)| {
+        let (t, b) = p.split_once(':').map(|(a, b)| (a.trim(), b.trim())).unwrap_or((p, ""));
+        Panel { title: t.into(), body: b.replace(" / ", "\n"), img: icons.get(i).cloned().unwrap_or_default() }
+    }).collect()
+}
+
+/// Your panels as kept (panelItems)
+pub fn panels_json(list: &[Panel]) -> String {
+    Value::Array(list.iter().map(|p| serde_json::json!({ "title": p.title, "body": p.body, "img": p.img })).collect()).to_string()
+}
+
+/// A panel's words as plain text (its marks taken out, its lists' bullets and numbers kept)
+pub fn rich_plain(text: &str) -> String {
+    text.lines().map(|l| {
+        let (mark, rest) = list_mark(l);
+        let words = rest.replace("**", "").replace("__", "").replace('*', "");
+        match mark { Some(m) if m.starts_with('-') || m.starts_with('\u{2022}') || m.starts_with('*') => format!("\u{2022} {words}"), Some(m) => format!("{} {words}", m.trim()), None => words }
+    }).collect::<Vec<_>>().join("\n")
+}
+
+/// A line's list mark, if it starts with one ("- ", "\u{2022} ", "* ", "1. ", "2) "), and the rest of it
+fn list_mark(line: &str) -> (Option<&str>, &str) {
+    for b in ["- ", "\u{2022} ", "* "] { if let Some(r) = line.strip_prefix(b) { return (Some(&line[..b.len()]), r); } }
+    let digits = line.bytes().take_while(|c| c.is_ascii_digit()).count();
+    if (1..=3).contains(&digits) && (line[digits..].starts_with(". ") || line[digits..].starts_with(") ")) { return (Some(&line[..digits + 2]), &line[digits + 2..]); }
+    (None, line)
+}
+
+/// A panel's words formatted as the editor's buttons do it, on what's selected (byte offsets `a` and `c`, either
+/// way round): "bold" **, "italic" *, "underline" __ around it on each line it covers (taken off again if they're
+/// all there already; nothing selected, a pair put in with the cursor between); "bullet" "- " or "number" "1. ",
+/// "2. "... at the start of each line it touches (taken off if they all have that already). The words, and
+/// what's selected after
+pub fn rich_format(text: &str, a: usize, c: usize, kind: &str) -> (String, usize, usize) {
+    let fix = |mut i: usize| { i = i.min(text.len()); while !text.is_char_boundary(i) { i -= 1; } i };
+    let (s, e) = (fix(a.min(c)), fix(a.max(c)));
+    let line_start = |i: usize| text[..i].rfind('\n').map_or(0, |p| p + 1);
+    let line_end = |i: usize| text[i..].find('\n').map_or(text.len(), |p| i + p);
+    match kind {
+        "bold" | "italic" | "underline" => {
+            let mark = match kind { "bold" => "**", "italic" => "*", _ => "__" };
+            let m = mark.len();
+            if s == e {
+                let out = format!("{}{mark}{mark}{}", &text[..s], &text[s..]);
+                return (out, s + m, s + m);
+            }
+            // (each line's part of it, without the spaces round it; marks selected with it counted as round it)
+            let mut segs: Vec<(usize, usize)> = Vec::new();
+            let mut at = s;
+            while at < e {
+                let le = line_end(at).min(e);
+                let (mut x, mut y) = (at, le);
+                while x < y && text[x..].starts_with(char::is_whitespace) { x += text[x..].chars().next().map_or(1, char::len_utf8); }
+                while y > x && text[..y].ends_with(char::is_whitespace) { y -= text[..y].chars().next_back().map_or(1, char::len_utf8); }
+                if y - x >= 2 * m && text[x..y].starts_with(mark) && text[x..y].ends_with(mark) && !(mark == "*" && text[x..y].starts_with("**")) { x += m; y -= m; }
+                if x < y { segs.push((x, y)); }
+                at = le + 1;
+            }
+            if segs.is_empty() { return (text.to_string(), s, e); }
+            // (italic's one * isn't half of a bold's **)
+            let round = |x: usize, y: usize| x >= m && text[x - m..x] == *mark && text[y..].starts_with(mark)
+                && !(mark == "*" && ((x >= 2 && &text[x - 2..x] == "**") || text[y..].starts_with("**")));
+            let off = segs.iter().all(|&(x, y)| round(x, y));
+            let (mut out, mut last, mut ns, mut ne) = (String::new(), 0, None, 0);
+            for &(x, y) in &segs {
+                if off {
+                    out.push_str(&text[last..x - m]);
+                    ns.get_or_insert(out.len());
+                    out.push_str(&text[x..y]);
+                    last = y + m;
+                } else {
+                    out.push_str(&text[last..x]);
+                    out.push_str(mark);
+                    ns.get_or_insert(out.len());
+                    out.push_str(&text[x..y]);
+                    out.push_str(mark);
+                    last = y;
+                }
+                ne = out.len() - if off { 0 } else { m };
+            }
+            out.push_str(&text[last..]);
+            (out, ns.unwrap_or(0), ne)
+        }
+        "bullet" | "number" => {
+            let (from, to) = (line_start(s), line_end(if e > s && text[..e].ends_with('\n') { e - 1 } else { e }));
+            let lines: Vec<&str> = text[from..to].split('\n').collect();
+            let has = |l: &str| match list_mark(l).0 { Some(mk) => (kind == "number") == mk.as_bytes()[0].is_ascii_digit(), None => false };
+            let off = lines.iter().all(|l| has(l));
+            let mut n = 0;
+            let made: Vec<String> = lines.iter().map(|l| {
+                let rest = list_mark(l).1;
+                if off { return rest.to_string(); }
+                n += 1;
+                if kind == "bullet" { format!("- {rest}") } else { format!("{n}. {rest}") }
+            }).collect();
+            let block = made.join("\n");
+            let out = format!("{}{block}{}", &text[..from], &text[to..]);
+            (out, from, from + block.len())
+        }
+        _ => (text.to_string(), s, e),
+    }
+}
+
 /// The webcam overlay's parts: (id, name, on at first, place, size)
 pub const CAM_PARTS: [(&str, &str, bool, &str, &str); 12] = [("name", "Name Tag", true, "below", "medium"), ("live", "LIVE Badge", true, "corner", "small"), ("now", "Now Playing", false, "above", "medium"), ("alerts", "Alerts", true, "above", "large"), ("follow", "Latest Follow", false, "left", "medium"), ("sub", "Latest Sub", false, "left", "medium"), ("goals", "Goals", false, "left", "medium"), ("hype", "Hype Train", false, "above", "medium"), ("chat", "Chat", false, "left", "medium"), ("socials", "Social Plug", false, "below", "medium"), ("clock", "Clock", false, "in-top", "small"), ("sticker", "A GIF or Picture", false, "corner", "medium")];
 
@@ -489,15 +610,24 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             let mut v = vec![
                 f("note", "", "Make your channel's panels here, watch them change on the right, then click Open in Your Browser. Each panel there has a Save as PNG button: add them on Twitch (your channel, About, Edit Panels) or Kick.", "", "", ""),
                 f("head", "", "1. Your panels", "", "", ""),
-                f("list", "panelList", "Panels", "A title for each, like Schedule. To add words under it, type a colon after the title, like About Me: Music and good vibes. Each one's icon is picked from its title.", s(cur, "panelList"), "About Me | My Music | PC Specs | Sponsors | Donate"),
-                f("piclist", "panelOwnIcons", "Your own icons", "If you like: a picture for any panel, in the same order as the panels above. Click Choose... to pick one from your PC. Leave a row empty for the icon its title picks.", s(cur, "panelOwnIcons"), ""),
-                f("toggle", "panelExtended", "Put the words inside each panel", "Each panel shows its title with all its words under it, as tall as they need (up to Twitch's 600). Type / to start a new paragraph. When this is off, a panel with long words grows to fit anyway.", if on(cur, "panelExtended", false) { "true" } else { "false" }, ""),
+                f("note", "", "Give each panel a title, and any words to go under it. To format words, select them and click B (bold), I (italics) or U (underline). For a list, click the bulleted or numbered list button. Each panel's icon is picked from its title, or click Icon to use a picture of your own.", "", "", ""),
+            ];
+            // (each panel its own card: its title, its words with their buttons, its icon, moved or taken out)
+            let list = panels(cur);
+            for (i, p) in list.iter().enumerate() {
+                let mut card = f("panelcard", &format!("pnl:{i}"), &p.title, "", &p.body, &p.img);
+                card.n = i as i32;
+                v.push(card);
+            }
+            if list.len() < PANELS_MAX { v.push(f("buttons", "", "", "", "", "pnl:add=+ Add a Panel")); }
+            v.extend([
+                f("toggle", "panelExtended", "Always put the words under the title", "Each panel shows its title with all its words under it, as tall as they need (up to Twitch's 600). When this is off, a few words show beside the title instead, and a panel with more words, or a list, grows to fit them anyway.", if on(cur, "panelExtended", false) { "true" } else { "false" }, ""),
                 f("toggle", "panelPowered", "Add a Powered by OmniPulse panel", "One more at the end, in the same look, with OmniPulse's logo, so viewers can find the app your stream runs on.", if on(cur, "panelPowered", true) { "true" } else { "false" }, ""),
                 f("chips", "panelLogoColours", "Logo colours", "", if s(cur, "panelLogoColours").is_empty() { "theme" } else { s(cur, "panelLogoColours") }, "theme=Your Colours|omnipulse=OmniPulse's Own|plain=Plain"),
                 f("head", "", "2. How they look", "", "", ""),
                 f("chips", "panelTheme", "Theme", "", &or("panelTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|y2k=Y2K|pixel=Pixel|gradient=Gradient|minimal=Minimal|synthwave=Synthwave|paper=Paper Note|bauhaus=Bauhaus|holo=Holo Foil|terminal=Terminal|watercolour=Watercolour|cyber=Cyber|galaxy=Galaxy|ticket=Ticket"),
                 f("chips", "panelColors", "Colours", "The theme's two colours. Same as Your Widgets uses the Suite widgets' colours.", if s(cur, "panelColors").is_empty() { "suite" } else { s(cur, "panelColors") }, "suite=Same as Your Widgets|accent=OmniPulse's Look|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"),
-            ];
+            ]);
             // (the logo's colours: only with its panel on)
             if !on(cur, "panelPowered", true) { v.retain(|x| x.key != "panelLogoColours"); }
             if s(cur, "panelColors") == "custom" {
@@ -1111,6 +1241,46 @@ pub fn method(act: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_panel_editor_formats_what_is_selected() {
+        let t = "Music and good vibes";
+        // (bold round "good", and off again)
+        let (b, s, e) = rich_format(t, 10, 14, "bold");
+        assert_eq!((b.as_str(), &b[s..e]), ("Music and **good** vibes", "good"));
+        assert_eq!(rich_format(&b, s, e, "bold").0, t);
+        // (selected backwards, with the space after it, as a double-click picks: the word only)
+        assert_eq!(rich_format(t, 15, 10, "italic").0, "Music and *good* vibes");
+        // (italic isn't taken for half of bold)
+        assert_eq!(rich_format(&b, s, e, "italic").0, "Music and ***good*** vibes");
+        // (the marks selected with it: taken off)
+        assert_eq!(rich_format("a __b__ c", 2, 7, "underline").0, "a b c");
+        // (nothing selected: a pair, the cursor between)
+        assert_eq!(rich_format("ab", 1, 1, "bold"), ("a****b".to_string(), 3, 3));
+        // (over two lines: each line's part)
+        assert_eq!(rich_format("one\ntwo", 0, 7, "bold").0, "**one**\n**two**");
+        // (lists: every line touched, numbered in order; again, taken off; a bullet made a number)
+        let (l, s, e) = rich_format("Games\nMusic\nArt", 2, 9, "number");
+        assert_eq!((l.as_str(), s, e), ("1. Games\n2. Music\nArt", 0, 17));
+        assert_eq!(rich_format(&l, s, e, "number").0, "Games\nMusic\nArt");
+        assert_eq!(rich_format("- a\n- b", 0, 7, "number").0, "1. a\n2. b");
+        assert_eq!(rich_format("x", 1, 1, "bullet").0, "- x");
+        // (out of range, or mid-character: kept in)
+        assert_eq!(rich_format("é", 1, 99, "bold").0, "**é**");
+    }
+
+    #[test]
+    fn panels_kept_before_their_list_came_in() {
+        let mut cur = Map::new();
+        cur.insert("panelList".into(), json!("About Me: Music / Good vibes | Rules"));
+        cur.insert("panelOwnIcons".into(), json!(" | /overlay/r.png"));
+        let p = panels(&cur);
+        assert_eq!(p, vec![Panel { title: "About Me".into(), body: "Music\nGood vibes".into(), img: "".into() }, Panel { title: "Rules".into(), body: "".into(), img: "/overlay/r.png".into() }]);
+        cur.insert("panelItems".into(), json!(panels_json(&p)));
+        cur.insert("panelList".into(), json!("Something else"));
+        assert_eq!(panels(&cur), p);
+        assert_eq!(rich_plain("**Hi** *there*\n- one\n2. two"), "Hi there\n\u{2022} one\n2. two");
+    }
 
     #[test]
     fn labels_in_title_case() {
