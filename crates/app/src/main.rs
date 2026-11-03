@@ -7792,6 +7792,14 @@ fn bot_act(shared: &Shared, act: &str) {
     // (Widgets, or Docks: their own page, under the Suite's)
     if act == "widgets" || act == "docks" || act == "creators" { return bot_widgets_open(shared, act); }
     // (Game HUD Frames: a screenshot chosen; a box drawn (snapped), a frame picked, snapped again, taken away)
+    // (the picked HUD frame nudged: "hudn:<left|right|up|down|wider|...>", ":10" for ten pixels (Shift, on the screenshot))
+    if let Some(rest) = act.strip_prefix("hudn:") {
+        let (dir, ten) = match rest.strip_suffix(":10") { Some(d) => (d, true), None => (rest, false) };
+        let was = HUD_STEP.with(|s| s.replace(if ten { 10.0 } else { 1.0 }));
+        bot_set(shared, "hudNudge", dir);
+        HUD_STEP.with(|s| s.set(was));
+        return;
+    }
     if let Some(rest) = act.strip_prefix("hud:") {
         let cur = bot_current(shared);
         let mut frames = hud::frames(cur.get("hudFrames").and_then(|v| v.as_str()).unwrap_or("[]"));
@@ -7858,6 +7866,9 @@ fn bot_act(shared: &Shared, act: &str) {
             }
         } else if rest == "del" && sel >= 0.0 && (sel as usize) < frames.len() {
             frames.remove(sel as usize);
+            bot_set(shared, "hudSel", "-1");
+        } else if rest == "none" {
+            // (Done, or Esc on the screenshot: none picked)
             bot_set(shared, "hudSel", "-1");
         }
         bot_set(shared, "hudFrames", &serde_json::Value::Array(frames).to_string());
@@ -15595,7 +15606,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("side") { vec![(9, "library"), (11, "sidefold"), (13, "sideopen"), (14, "settings"), (16, "discover"), (18, "back"), (20, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=creators: the Creators' pages, each pictured: Panels (scrolled down, too), Webcam
             // Overlay, Game HUD Frames)
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("creators") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "scroll:1250"), (11, "scroll:600"), (13, "scroll:601"), (15, "bot:sheet:cam"), (17, "scroll:-3000"), (19, "bot:sheet:hud"), (21, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("creators") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "scroll:1250"), (11, "scroll:600"), (13, "scroll:601"), (15, "bot:sheet:cam"), (17, "scroll:-3000"), (19, "bot:sheet:hud"), (20, "hudsample"), (22, "bot:hud:add:0.82,0.04,0.98,0.32"), (24, "scroll:800"), (26, "bot:hud:none"), (28, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setfit") { vec![(9, "play"), (10, "queue"), (11, "size:1150:530"), (12, "nav:settings"), (13, "cat:Sound"), (14, "scroll:4000"), (16, "cat:Integrations"), (17, "scroll:-4000"), (19, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=pagespeed: the Library, Discover and Rediscover opened twice each, timed with OMNIPULSE_PAGE_TIMING)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("pagespeed") { vec![(8, "nav:library"), (11, "nav:discover"), (40, "nav:rediscover"), (43, "nav:library"), (46, "nav:discover"), (49, "nav:rediscover"), (52, "end")] }
@@ -15775,6 +15786,21 @@ fn main() -> Result<(), slint::PlatformError> {
                 w if w.starts_with("sd_") => { ui.invoke_stats_open(w[3..].into()); println!("selftest: stats detail \"{}\": \"{}\", {} blocks", &w[3..], ui.get_st_detail_head(), ui.get_st_blocks().row_count()); }
                 "queue" => { ui.set_queue_open(true); }
                 w if w.starts_with("nav:") => { ui.invoke_nav(w[4..].into()); }
+                // (Game HUD Frames with a made-up game's screenshot (a minimap, a health bar, ammo), drawn here: never
+                // saved, as nothing in a self-test is)
+                "hudsample" => {
+                    let mut img = image::RgbaImage::from_pixel(1920, 1080, image::Rgba([46, 64, 52, 255]));
+                    let mut fill = |x0: u32, y0: u32, w: u32, h: u32, c: [u8; 4]| for y in y0..y0 + h { for x in x0..x0 + w { img.put_pixel(x, y, image::Rgba(c)); } };
+                    fill(1590, 50, 280, 280, [20, 24, 30, 255]);
+                    fill(1610, 70, 240, 240, [70, 110, 80, 255]);
+                    fill(60, 960, 420, 50, [20, 24, 30, 255]);
+                    fill(66, 966, 300, 38, [210, 60, 60, 255]);
+                    fill(1620, 940, 240, 90, [20, 24, 30, 255]);
+                    let file = format!("{dir}/hud-sample.png");
+                    let _ = img.save(&file);
+                    for (k, v) in [("hudShotPath", file.as_str()), ("hudShot", "/overlay/hud-sample.png"), ("hudW", "1920"), ("hudH", "1080"), ("hudFrames", "[]"), ("hudSel", "-1")] { bot_set(&s, k, v); }
+                    bot_paint(&s);
+                }
                 // (the chatbot's page open, then something done on it: "bot:sheet:panels" a Creator's page)
                 w if w.starts_with("bot:") => { if !ui.get_pf_open() { pf_open(&s, botpage::BOT); } bot_act(&s, &w[4..]); }
                 "accent2" => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { if let Some(o) = sh.borrow_mut().web.prefs.as_object_mut() { o.insert("artAccent".into(), serde_json::json!(false)); o.insert("accent".into(), serde_json::json!("#4cc9f0")); o.insert("accent2".into(), serde_json::json!("#fa586a")); } apply_look(&sh); } }

@@ -3377,8 +3377,8 @@ component HudFrame inherits Rectangle {
 /// the picked one to move it, or its white corner to size it; click one to pick it
 component HudEditor inherits Rectangle {
     callback act(string);
-    // (no taller than about a window's third, so the picked frame's settings stay in sight under it)
-    height: min(self.width * HudLook.ratio, 380px);
+    // (big enough to draw round a minimap on: no taller than about half a window, the picked frame's settings under it)
+    height: min(self.width * HudLook.ratio, 540px) + 30px;
     // (what a press there does: draw, move or size; where it started)
     property <string> mode;
     property <length> sx;
@@ -3397,8 +3397,25 @@ component HudEditor inherits Rectangle {
     property <length> gy: root.mode == "draw" ? max(0px, min(root.sy, ta.mouse-y)) : root.mode == "move" ? clamp(root.by + root.dy, 0px, stage.height - root.bh) : root.by;
     property <length> gw: root.mode == "draw" ? abs(clamp(ta.mouse-x, 0px, stage.width) - root.sx) : root.mode == "size" ? clamp(root.bw + root.dx, 8px, stage.width - root.bx) : root.bw;
     property <length> gh: root.mode == "draw" ? abs(clamp(ta.mouse-y, 0px, stage.height) - root.sy) : root.mode == "size" ? clamp(root.bh + root.dy, 8px, stage.height - root.by) : root.bh;
+    // (what can be done now, over it (not on it: the HUD's parts are at its edges): draw the first; pick one or draw
+    // another; or what the picked one takes)
+    Text {
+        x: stage.x;
+        y: 0;
+        width: stage.width;
+        height: 24px;
+        text: HudLook.frames.length == 0 ? "Drag a box round a part of your HUD, like the minimap, health or ammo. It snaps to that part's edges."
+            : HudLook.has-sel ? "Drag the frame to move it, or its white corner to resize it. Arrow keys nudge it (Shift for 10), Delete takes it away, Esc puts it down."
+            : "Click a frame to change it, or drag a box round another part of your HUD.";
+        color: Theme.accent.mix(Theme.text, 0.5);
+        font-size: 12px;
+        font-weight: 600;
+        vertical-alignment: center;
+        overflow: elide;
+    }
     stage := Rectangle {
-        width: min(parent.width, parent.height / HudLook.ratio);
+        y: 30px;
+        width: min(parent.width, (parent.height - 30px) / HudLook.ratio);
         height: self.width * HudLook.ratio;
         x: (parent.width - self.width) / 2;
         border-radius: 10px;
@@ -3434,10 +3451,24 @@ component HudEditor inherits Rectangle {
             border-color: #ffffff;
             background: #ffffff22;
         }
+        // (the keys, once the screenshot's been clicked)
+        keys := FocusScope {
+            key-pressed(e) => {
+                if (!HudLook.has-sel) { return reject; }
+                if (e.text == Key.LeftArrow) { root.act("hudn:left" + (e.modifiers.shift ? ":10" : "")); return accept; }
+                if (e.text == Key.RightArrow) { root.act("hudn:right" + (e.modifiers.shift ? ":10" : "")); return accept; }
+                if (e.text == Key.UpArrow) { root.act("hudn:up" + (e.modifiers.shift ? ":10" : "")); return accept; }
+                if (e.text == Key.DownArrow) { root.act("hudn:down" + (e.modifiers.shift ? ":10" : "")); return accept; }
+                if (e.text == Key.Delete || e.text == Key.Backspace) { root.act("hud:del"); return accept; }
+                if (e.text == Key.Escape) { root.act("hud:none"); return accept; }
+                reject
+            }
+        }
         ta := TouchArea {
             mouse-cursor: root.mode == "move" ? MouseCursor.move : root.mode == "size" || root.over-corner ? MouseCursor.nwse-resize : root.over-sel ? MouseCursor.move : MouseCursor.crosshair;
             pointer-event(e) => {
                 if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+                    keys.focus();
                     root.sx = self.mouse-x;
                     root.sy = self.mouse-y;
                     root.mode = root.over-corner ? "size" : root.over-sel ? "move" : "draw";
