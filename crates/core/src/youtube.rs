@@ -557,6 +557,28 @@ pub async fn stream_url(video_id: &str, fresh: bool) -> Result<String, String> {
     if !valid_id(video_id) {
         return Err("Bad YouTube video id".into());
     }
+    // (one lookup of a video at a time: playing it, getting it ready, measuring its beat and its loudness all
+    // ask for it at once, and each asking yt-dlp was several requests to YouTube a song, enough for it to ask
+    // for its bot check; the others wait, then take what it found)
+    let turn = STREAM_ASKING.lock().map_err(|e| e.to_string())?.entry(video_id.to_string()).or_default().clone();
+    let _turn = turn.lock().await;
+    let r = stream_url_now(video_id, fresh).await;
+    if let Ok(mut g) = STREAM_ASKING.lock() { if std::sync::Arc::strong_count(&turn) <= 2 { g.remove(video_id); } }
+    r
+}
+
+/// Videos being looked up, each with its turn
+#[cfg(feature = "desktop")]
+static STREAM_ASKING: std::sync::LazyLock<Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>> = std::sync::LazyLock::new(Default::default);
+/// Videos yt-dlp couldn't find a stream for lately, and why: not asked again for a minute (a fresh lookup
+/// is, as for an address YouTube stopped taking)
+#[cfg(feature = "desktop")]
+static STREAM_FAILED: Mutex<Vec<(String, String, u64)>> = Mutex::new(Vec::new()); // (id, why, until)
+#[cfg(feature = "desktop")]
+const STREAM_FAILED_SECS: u64 = 60;
+
+#[cfg(feature = "desktop")]
+async fn stream_url_now(video_id: &str, fresh: bool) -> Result<String, String> {
     let now = crate::now_secs();
     if let Ok(mut g) = STREAMS.lock() {
         g.retain(|(_, _, exp)| *exp > now + 120);
@@ -566,7 +588,17 @@ pub async fn stream_url(video_id: &str, fresh: bool) -> Result<String, String> {
             return Ok(url.clone());
         }
     }
-    let url = crate::yt_stream::resolve_video(video_id).await?;
+    if let Ok(mut f) = STREAM_FAILED.lock() {
+        f.retain(|(_, _, until)| *until > now);
+        if !fresh { if let Some((_, why, _)) = f.iter().find(|(id, _, _)| id == video_id) { return Err(why.clone()); } }
+    }
+    let url = match crate::yt_stream::resolve_video(video_id).await {
+        Ok(u) => u,
+        Err(e) => {
+            if let Ok(mut f) = STREAM_FAILED.lock() { f.retain(|(id, _, _)| id != video_id); f.push((video_id.to_string(), e.clone(), now + STREAM_FAILED_SECS)); }
+            return Err(e);
+        }
+    };
     if let Ok(mut g) = STREAMS.lock() {
         g.push((video_id.to_string(), url.clone(), expiry(&url)));
         if g.len() > 200 {
