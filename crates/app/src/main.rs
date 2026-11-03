@@ -3471,6 +3471,13 @@ fn start(shared: &Shared) {
                     return;
                 }
                 ui.set_track_loading(false);
+                // (it didn't start: nothing's playing, so the song before's place, at its end, can't start a fade,
+                // a mix or a preload on to the next one, a tick at a time: 0.3.50 went through dozens of songs a
+                // second like that while YouTube was paused)
+                if src.is_err() {
+                    engine.stop();
+                    shared.borrow_mut().loaded = false;
+                }
                 match src {
                     Ok(src) => {
                         START_FAILS.with(|f| f.set(0));
@@ -3572,6 +3579,13 @@ fn start(shared: &Shared) {
                     Err(e) => {
                         let run = START_FAILS.with(|f| { f.set(f.get() + 1); f.get() });
                         omnipulse_core::diag::note(&format!("couldn't play \"{}\": {e}", t.title));
+                        // (YouTube paused, after it asked for its bot check: the next songs would fail too, so it
+                        // stops here, saying when YouTube's back, instead of going through them)
+                        if let Some(wait) = omnipulse_core::yt_stream::bot_wait() {
+                            START_FAILS.with(|f| f.set(0));
+                            ui.set_status(format!("Couldn't play \"{}\": YouTube asked OmniPulse to prove it isn't a bot, so it's paused for {} min. Press play to try again after that.", t.title, wait.div_ceil(60).max(1)).into());
+                            return;
+                        }
                         if run >= START_FAILS_MAX {
                             START_FAILS.with(|f| f.set(0));
                             ui.set_status(format!("Couldn't play \"{}\": {e}. Stopped after {run} songs in a row didn't play.", t.title).into());
@@ -6646,21 +6660,24 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     if near_end {
         autoplay_fill(shared, false);
     }
-    if !engine.is_paused() && dur > 0 && preload_due(pos, dur) {
+    // (only for a song that's playing: one that didn't start leaves the one before's place, at its end, which
+    // would move on again at once)
+    let live = !engine.is_paused() && shared.borrow().loaded && !ui.get_track_loading();
+    if live && dur > 0 && preload_due(pos, dur) {
         preload_next(shared);
     }
     let dbg = std::env::var_os("OMNIPULSE_MIX_DEBUG").is_some() && pos % 1000 < 260;
-    if !engine.is_paused() && fade_and_silences(shared, pos, dur) {
+    if live && fade_and_silences(shared, pos, dur) {
         if dbg { eprintln!("mix debug at {pos}: fades and silences took the tick"); }
         return;
     }
-    if !engine.is_paused() && sb_tick(shared, pos, dur) {
+    if live && sb_tick(shared, pos, dur) {
         if dbg { eprintln!("mix debug at {pos}: SponsorBlock took the tick"); }
         return;
     }
     if dbg { eprintln!("mix debug at {pos}: paused {}", engine.is_paused()); }
     rhythm_tick(shared, pos);
-    if !engine.is_paused() { mix_tick(shared, pos, dur); }
+    if live { mix_tick(shared, pos, dur); }
     while let Ok(ev) = events.try_recv() {
         match ev {
             Event::Mixed => mix_started(shared),
