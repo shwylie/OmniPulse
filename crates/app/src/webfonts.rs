@@ -22,7 +22,10 @@ fn register(name: &str) -> bool {
     let mut any = false;
     for i in 0..3 {
         let Ok(bytes) = std::fs::read(d.join(file_name(name, i))) else { continue };
-        any |= !c.register_fonts(slint::fontique_011::fontique::Blob::new(Arc::new(bytes)), None).is_empty();
+        // (under the name it was picked by: some come named otherwise inside (Fredoka's files say "Fredoka Light"),
+        // and the preview, asking for the name you typed, found none)
+        let named = slint::fontique_011::fontique::FontInfoOverride { family_name: Some(name), ..Default::default() };
+        any |= !c.register_fonts(slint::fontique_011::fontique::Blob::new(Arc::new(bytes)), Some(named)).is_empty();
     }
     any
 }

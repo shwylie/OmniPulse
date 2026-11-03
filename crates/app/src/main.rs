@@ -7314,20 +7314,22 @@ fn bot_current(shared: &Shared) -> serde_json::Map<String, serde_json::Value> {
 }
 
 fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
+    // (the app theme's two colours: a palette's "Your Theme's", and where it's left to them)
+    let accents = SHARED.with(|s| s.borrow().as_ref().and_then(|sh| sh.try_borrow().ok().map(|a| theme_accents(&a.web.prefs)))).unwrap_or_else(|| ("#8e9bff".to_string(), "#b48eff".to_string()));
     // (labels, headings, buttons and choices in Title Case, as everywhere in the app; notes and steps are sentences)
     for x in list.iter_mut().filter(|x| !matches!(x.kind, "note" | "step" | "suiteprev" | "hudedit" | "goalrow" | "addr")) {
         x.label = botpage::title_case(&x.label);
-        if matches!(x.kind, "chips" | "buttons") {
+        if matches!(x.kind, "chips" | "buttons" | "palettes" | "panelthemes" | "camthemes") {
             x.extra = x.extra.split('|').map(|o| match o.split_once('=') { Some((id, name)) => format!("{id}={}", botpage::title_case(name)), None => o.to_string() }).collect::<Vec<_>>().join("|");
         }
     }
     // (a page with a preview is split: its column narrow, as Panels' is)
     let split_page = list.iter().any(|x| x.kind == "suiteprev");
-    let sig = list.iter().map(|x| format!("{}|{}|{}|{}|{}|{}", x.key, x.kind, x.value, x.label, x.extra, if x.kind == "suiteprev" { format!("{}{}", x.note, x.n) } else if x.kind == "panelcard" { x.note.clone() } else { String::new() })).collect::<Vec<_>>().join("\n");
+    let sig = list.iter().map(|x| format!("{}|{}|{}|{}|{}|{}", x.key, x.kind, x.value, x.label, x.extra, if x.kind == "suiteprev" { format!("{}{}", x.note, x.n) } else if x.kind == "panelcard" { x.note.clone() } else { x.cols.join(",") })).collect::<Vec<_>>().join("\n");
     // (a row of choices: its extra, as "id=Name|id=Name", for the page to draw)
     let strs = |v: Vec<String>| ModelRc::from(Rc::new(VecModel::from(v.into_iter().map(slint::SharedString::from).collect::<Vec<_>>())));
     let rows = list.into_iter().map(|x| {
-        let (ids, names): (Vec<String>, Vec<String>) = if x.kind == "chips" || x.kind == "buttons" { x.extra.split('|').filter_map(|o| o.split_once('=')).map(|(i, n)| (i.to_string(), n.to_string())).unzip() }
+        let (ids, names): (Vec<String>, Vec<String>) = if matches!(x.kind, "chips" | "buttons" | "palettes" | "panelthemes" | "camthemes") { x.extra.split('|').filter_map(|o| o.split_once('=')).map(|(i, n)| (i.to_string(), n.to_string())).unzip() }
             // (a list: its items, from what's kept, or the default in extra)
             // (the goals' preview: each goal shown, its name, and its target as its id)
             // (Emote Rain's: its size and spin, after its way in the label)
@@ -7352,7 +7354,10 @@ fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
             else if x.kind == "link" { (x.kind, i32::from(x.extra.starts_with("url:") || x.extra.starts_with("http"))) }
             else { (x.kind, x.n) };
         let key = if x.kind == "suiteprev" && (x.value == "goals" || x.value == "wheel" || x.value == "timer") { String::new() } else { x.key };
-        BotField { changed: !key.is_empty() && !key.contains(':') && pf_changed(&key), key: key.into(), kind: kind.into(), label: x.label.split('|').next().unwrap_or("").into(), note: if x.kind == "suiteprev" { font.into() } else { x.note.into() }, value: x.value.into(), extra: x.extra.into(), n, opts: strs(names), opt_ids: strs(ids), c1, c2 }
+        // (a palette's swatches, two to a choice ("" the app theme's own two); your own colour's, its swatch)
+        let cols: Vec<slint::Color> = x.cols.iter().enumerate().map(|(i, h)| look::Rgb::parse(h).map(|c| c.slint()).unwrap_or_else(|| look::Rgb::parse(if i % 2 == 0 { &accents.0 } else { &accents.1 }).map(|c| c.slint()).unwrap_or_default())).collect();
+        let (c1, c2) = if x.kind == "colour" { (look::Rgb::parse(&x.value).map(|c| c.slint()).unwrap_or_default(), c2) } else { (c1, c2) };
+        BotField { changed: !key.is_empty() && !key.contains(':') && pf_changed(&key), key: key.into(), kind: kind.into(), label: x.label.split('|').next().unwrap_or("").into(), note: if x.kind == "suiteprev" { font.into() } else { x.note.into() }, value: x.value.into(), extra: x.extra.into(), n, opts: strs(names), opt_ids: strs(ids), c1, c2, cols: ModelRc::from(Rc::new(VecModel::from(cols))) }
     }).collect();
     (rows, sig)
 }
@@ -7703,6 +7708,14 @@ fn hook_id() -> String {
 fn bot_act(shared: &Shared, act: &str) {
     let say = |t: &str| if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(t.into()); };
     // (a list's row typed into, taken out, or one added: kept as "a | b | c"; the page drawn again unless it's typing)
+    // (your own colour: "colour:<key>" Windows' colour picker, from the one set; ":clear" back to the theme's own)
+    if let Some(rest) = act.strip_prefix("colour:") {
+        if let Some(key) = rest.strip_suffix(":clear") { bot_set(shared, key, ""); bot_paint(shared); return; }
+        let key = rest.to_string();
+        let now = bot_current(shared).get(&key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        desktop::pick_color_then(&now, move |c| SHARED.with(|s| if let Some(sh) = s.borrow().clone() { bot_set(&sh, &key, &c.to_lowercase()); bot_paint(&sh); }));
+        return;
+    }
     // (a channel panel's card: "pnl:add", or "pnl:<i>:<what>[:...]": its title or words typed, a format button
     // pressed on what's selected, moved, taken out, or its own icon chosen or let go)
     if let Some(rest) = act.strip_prefix("pnl:") {
@@ -15580,6 +15593,9 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("tallpanels") { vec![(9, "size:1180:2600"), (10, "settings"), (11, "cat_Streaming"), (12, "p_widget"), (14, "p_alerts"), (16, "p_alertlist"), (18, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=side: the sidebar collapsed by hand, and Settings left for Discover)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("side") { vec![(9, "library"), (11, "sidefold"), (13, "sideopen"), (14, "settings"), (16, "discover"), (18, "back"), (20, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=creators: the Creators' pages, each pictured: Panels (scrolled down, too), Webcam
+            // Overlay, Game HUD Frames)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("creators") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "scroll:1250"), (11, "scroll:600"), (13, "scroll:601"), (15, "bot:sheet:cam"), (17, "scroll:-3000"), (19, "bot:sheet:hud"), (21, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setfit") { vec![(9, "play"), (10, "queue"), (11, "size:1150:530"), (12, "nav:settings"), (13, "cat:Sound"), (14, "scroll:4000"), (16, "cat:Integrations"), (17, "scroll:-4000"), (19, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=pagespeed: the Library, Discover and Rediscover opened twice each, timed with OMNIPULSE_PAGE_TIMING)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("pagespeed") { vec![(8, "nav:library"), (11, "nav:discover"), (40, "nav:rediscover"), (43, "nav:library"), (46, "nav:discover"), (49, "nav:rediscover"), (52, "end")] }
@@ -15759,6 +15775,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 w if w.starts_with("sd_") => { ui.invoke_stats_open(w[3..].into()); println!("selftest: stats detail \"{}\": \"{}\", {} blocks", &w[3..], ui.get_st_detail_head(), ui.get_st_blocks().row_count()); }
                 "queue" => { ui.set_queue_open(true); }
                 w if w.starts_with("nav:") => { ui.invoke_nav(w[4..].into()); }
+                // (the chatbot's page open, then something done on it: "bot:sheet:panels" a Creator's page)
+                w if w.starts_with("bot:") => { if !ui.get_pf_open() { pf_open(&s, botpage::BOT); } bot_act(&s, &w[4..]); }
                 "accent2" => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { if let Some(o) = sh.borrow_mut().web.prefs.as_object_mut() { o.insert("artAccent".into(), serde_json::json!(false)); o.insert("accent".into(), serde_json::json!("#4cc9f0")); o.insert("accent2".into(), serde_json::json!("#fa586a")); } apply_look(&sh); } }
                 w if w.starts_with("loud:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { loud_pick(&sh, &w[5..]); } }
                 "titleedit" => { ui.set_title_editing(true); }

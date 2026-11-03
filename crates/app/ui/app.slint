@@ -208,7 +208,7 @@ export struct BotTile { id: string, name: string, state: string, line1: string, 
 export struct BotFeat { id: string, name: string, note: string, on: bool, open: bool, changed: bool }
 export struct BotStep { id: string, title: string, note: string, state: string, optional: bool }
 export struct BotLine { who: string, heard: string, did: string, platform: string }
-export struct BotField { key: string, kind: string, label: string, note: string, value: string, extra: string, changed: bool, n: int, opts: [string], opt-ids: [string], c1: color, c2: color }
+export struct BotField { key: string, kind: string, label: string, note: string, value: string, extra: string, changed: bool, n: int, opts: [string], opt-ids: [string], c1: color, c2: color, cols: [color] }
 // (an artist you follow: whether on SoundCloud and on Spotify, for its menu)
 export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool, on-yt: bool, row: Row }
 /// A page being loaded: each platform it asks, and whether it's answered yet
@@ -4564,10 +4564,7 @@ component PanelCard inherits Rectangle {
     in property <BotField> f;
     callback act(string);
     property <string> applied;
-    border-radius: 12px;
-    background: Theme.panel;
-    border-width: 1px;
-    border-color: body.has-focus || ti.has-focus ? Theme.accent.with-alpha(0.6) : Theme.line;
+    // (the page's own box round each field is its frame)
     height: pc.preferred-height;
     // (the words or title changed by the app (formatted, or moved here from another card): shown; what's
     // being typed is the same as what the app has, so it's left as it is)
@@ -4584,7 +4581,6 @@ component PanelCard inherits Rectangle {
         root.act("pnl:" + root.f.n + ":fmt:" + kind + ":" + body.anchor-position-byte-offset + ":" + body.cursor-position-byte-offset + ":" + body.text);
     }
     pc := VerticalLayout {
-        padding: 10px;
         spacing: 8px;
         HorizontalLayout {
             spacing: 6px;
@@ -4641,6 +4637,144 @@ component PanelCard inherits Rectangle {
                     edited => { root.act("pnl:" + root.f.n + ":body:" + self.text); }
                 }
                 if body.text == "": Text { x: 10px; y: 9px; text: "Words under the title, if you like. Press Enter for a new line."; color: Theme.muted.with-alpha(0.6); font-size: 13px; }
+            }
+        }
+    }
+}
+
+/// A small panel in a theme (Panels' theme picker): its background, frame and words as the full preview draws them,
+/// an icon tile in the colours, and a title
+component PanelSwatch inherits Rectangle {
+    in property <string> th;
+    in property <color> c1;
+    in property <color> c2;
+    property <bool> light: self.th == "comic" || self.th == "pastel" || self.th == "y2k" || self.th == "paper" || self.th == "bauhaus" || self.th == "holo" || self.th == "watercolour" || self.th == "ticket";
+    property <color> ink: self.th == "pastel" ? #3a2a4a : self.th == "paper" ? #26324a : self.th == "bauhaus" ? #111111 : self.th == "holo" ? #2a1f45 : self.th == "watercolour" ? #2b2233
+        : self.th == "ticket" ? #3b2410 : self.th == "terminal" ? #5dff9c : self.light ? #2b1b40 : #ffffff;
+    clip: true;
+    border-radius: self.th == "pixel" || self.th == "cyber" ? 0px : self.th == "paper" ? 2px : self.th == "bauhaus" ? 4px : 8px;
+    background: self.th == "comic" ? #ffffff : self.th == "y2k" ? #fdf6ff : self.th == "pastel" ? #fff6fb : self.th == "glass" ? #ffffff29 : self.th == "neon" ? #080614f0
+        : self.th == "pixel" ? #1b1030 : self.th == "gradient" ? @linear-gradient(120deg, root.c1 0%, root.c2 100%) : self.th == "minimal" || self.th == "cyber" ? #00000040
+        : self.th == "synthwave" ? @linear-gradient(180deg, #12021f 60%, root.c2.with-alpha(0.55) 100%) : self.th == "paper" ? #fbf6e9 : self.th == "bauhaus" ? #f2ede4
+        : self.th == "holo" ? @linear-gradient(120deg, #e9e0ff 0%, #d9f7ff 50%, #ffe0f3 100%) : self.th == "terminal" ? #0a0f0c
+        : self.th == "watercolour" ? #fffdf8 : self.th == "galaxy" ? @linear-gradient(135deg, #05030f 0%, #1a0b3a 100%) : self.th == "ticket" ? #ffe9c7 : #14111f;
+    border-width: self.th == "comic" || self.th == "pastel" || self.th == "pixel" ? 2px : self.th == "y2k" || self.th == "neon" ? 1.5px : self.th == "glass" || self.th == "holo" || self.th == "terminal" ? 1px : 0px;
+    border-color: self.th == "comic" || self.th == "y2k" ? #2b1b40 : self.th == "pastel" ? root.c1.mix(#ffffff, 0.55) : self.th == "pixel" ? #f4f0ff : self.th == "neon" ? root.c1 : self.th == "holo" ? #ffffffe6 : self.th == "terminal" ? #ffffff1f : #ffffff66;
+    drop-shadow-blur: self.th == "neon" ? 6px : 0px;
+    drop-shadow-color: root.c1;
+    // (Y2K's title bar; Cyber's edge; Galaxy's stars; Watercolour's wash)
+    if root.th == "y2k": Rectangle { height: 6px; y: 0; background: @linear-gradient(90deg, root.c1 0%, root.c2 100%); }
+    if root.th == "cyber": Rectangle { x: 0; width: 3px; background: root.c1; }
+    if root.th == "galaxy": Rectangle { x: parent.width - 14px; y: 6px; width: 2px; height: 2px; border-radius: 1px; background: #ffffff; }
+    if root.th == "galaxy": Rectangle { x: parent.width - 30px; y: parent.height - 9px; width: 2px; height: 2px; border-radius: 1px; background: #ffffffb0; }
+    if root.th == "watercolour": Rectangle { x: parent.width * 0.55; y: 4px; width: parent.width * 0.4; height: parent.height - 8px; border-radius: self.height / 2; background: root.c1.with-alpha(0.22); }
+    Rectangle { x: 7px; y: (parent.height - 20px) / 2 + (root.th == "y2k" ? 2px : 0px); width: 20px; height: 20px; border-radius: root.th == "pixel" || root.th == "cyber" ? 0px : 5px; background: @linear-gradient(135deg, root.c1 0%, root.c2 100%); }
+    Text {
+        x: 33px;
+        height: parent.height;
+        width: parent.width - 38px;
+        text: root.th == "terminal" ? "> about" : root.th == "pixel" || root.th == "bauhaus" || root.th == "cyber" ? "ABOUT" : "About";
+        color: root.th == "minimal" ? root.c1 : root.ink;
+        font-size: 12px;
+        font-weight: 800;
+        font-family: root.th == "pixel" || root.th == "terminal" ? "Cascadia Mono" : root.th == "paper" ? "Ink Free" : root.th == "bauhaus" || root.th == "cyber" || root.th == "ticket" ? "Bahnschrift" : root.th == "watercolour" ? "Georgia" : "";
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+/// A webcam overlay's name tag in a theme (its theme picker), on a camera's corner
+component CamSwatch inherits Rectangle {
+    in property <string> th;
+    in property <color> c1;
+    in property <color> c2;
+    property <bool> light: self.th == "comic" || self.th == "pastel";
+    clip: true;
+    border-radius: 6px;
+    background: #3b4766;
+    Rectangle { x: (parent.width - 22px) / 2; y: 4px; width: 22px; height: 22px; border-radius: 11px; background: #ffffff40; }
+    Rectangle {
+        x: 6px;
+        width: parent.width - 12px;
+        height: 18px;
+        y: parent.height - 22px;
+        border-radius: root.th == "comic" ? 3px : 9px;
+        background: root.th == "comic" ? #ffffff : root.th == "pastel" ? #fff6fb : root.th == "glass" ? #ffffff38 : root.th == "gradient" ? @linear-gradient(90deg, root.c1 0%, root.c2 100%) : root.th == "minimal" ? transparent : #0a0814e0;
+        border-width: root.th == "neon" || root.th == "pastel" ? 1.5px : root.th == "comic" ? 2px : root.th == "glass" ? 1px : 0px;
+        border-color: root.th == "neon" ? root.c1 : root.th == "comic" ? #111111 : root.th == "pastel" ? root.c1.mix(#ffffff, 0.5) : #ffffff66;
+        drop-shadow-blur: root.th == "neon" ? 6px : 0px;
+        drop-shadow-color: root.c1;
+        Text { text: "Your Name"; color: root.light ? #2b1b40 : #ffffff; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+    }
+}
+
+/// A theme picked by its look: a grid of small previews (Panels' or the webcam overlay's), the one in use outlined
+component ThemeGrid inherits Rectangle {
+    in property <BotField> f;
+    in property <string> which;
+    in property <color> c1;
+    in property <color> c2;
+    callback set(string, string);
+    property <length> tw: 118px;
+    property <length> tht: 78px;
+    property <length> gap: 8px;
+    property <int> cols: max(1, floor((self.width + self.gap) / (self.tw + self.gap)));
+    height: tg.preferred-height;
+    tg := VerticalLayout {
+        spacing: 6px;
+        Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
+        if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 11px; wrap: word-wrap; }
+        Rectangle {
+            height: ceil(root.f.opts.length / root.cols) * (root.tht + root.gap);
+            for o[i] in root.f.opts: Rectangle {
+                property <bool> on: root.f.value == root.f.opt-ids[i];
+                x: mod(i, root.cols) * (root.tw + root.gap);
+                y: floor(i / root.cols) * (root.tht + root.gap);
+                width: root.tw;
+                height: root.tht;
+                border-radius: 10px;
+                background: self.on ? Theme.accent.with-alpha(0.12) : tta.has-hover ? Theme.elevated : Theme.bg;
+                border-width: self.on ? 2px : 1px;
+                border-color: self.on ? Theme.accent : tta.has-hover ? Theme.muted : Theme.line;
+                if root.which == "panel": PanelSwatch { x: 8px; y: 8px; width: parent.width - 16px; height: 40px; th: root.f.opt-ids[i]; c1: root.c1; c2: root.c2; }
+                if root.which == "cam": CamSwatch { x: 8px; y: 8px; width: parent.width - 16px; height: 40px; th: root.f.opt-ids[i]; c1: root.c1; c2: root.c2; }
+                Text { y: parent.height - 24px; height: 20px; width: parent.width; text: o; horizontal-alignment: center; vertical-alignment: center; font-size: 11px; color: parent.on ? Theme.text : Theme.muted; font-weight: parent.on ? 700 : 400; overflow: elide; }
+                tta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.set(root.f.key, root.f.opt-ids[i]); } }
+            }
+        }
+    }
+}
+
+/// Two colours picked as a pair: each choice with its two colours beside its name (cols: two to a choice)
+component PaletteGrid inherits Rectangle {
+    in property <BotField> f;
+    callback set(string, string);
+    property <length> tw: 182px;
+    property <length> tht: 36px;
+    property <length> gap: 6px;
+    property <int> cols: max(1, floor((self.width + self.gap) / (self.tw + self.gap)));
+    height: pg.preferred-height;
+    pg := VerticalLayout {
+        spacing: 6px;
+        Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
+        if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 11px; wrap: word-wrap; }
+        Rectangle {
+            height: ceil(root.f.opts.length / root.cols) * (root.tht + root.gap);
+            for o[i] in root.f.opts: Rectangle {
+                property <bool> on: root.f.value == root.f.opt-ids[i];
+                x: mod(i, root.cols) * (root.tw + root.gap);
+                y: floor(i / root.cols) * (root.tht + root.gap);
+                width: root.tw;
+                height: root.tht;
+                border-radius: root.tht / 2;
+                background: self.on ? Theme.accent.with-alpha(0.12) : pta.has-hover ? Theme.elevated : Theme.bg;
+                border-width: self.on ? 2px : 1px;
+                border-color: self.on ? Theme.accent : pta.has-hover ? Theme.muted : Theme.line;
+                // (its two colours, overlapping)
+                Rectangle { x: 8px; y: (parent.height - 20px) / 2; width: 20px; height: 20px; border-radius: 10px; border-width: 1px; border-color: #00000040; background: root.f.cols.length > 2 * i ? root.f.cols[2 * i] : Theme.accent; }
+                Rectangle { x: 20px; y: (parent.height - 20px) / 2; width: 20px; height: 20px; border-radius: 10px; border-width: 1px; border-color: #00000040; background: root.f.cols.length > 2 * i + 1 ? root.f.cols[2 * i + 1] : Theme.accent-2; }
+                Text { x: 48px; width: parent.width - 54px; height: parent.height; text: o; vertical-alignment: center; font-size: 12px; color: parent.on ? Theme.text : Theme.muted; font-weight: parent.on ? 700 : 400; overflow: elide; }
+                pta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.set(root.f.key, root.f.opt-ids[i]); } }
             }
         }
     }
@@ -4839,6 +4973,44 @@ component BotFieldRow inherits VerticalLayout {
     if root.f.kind == "campreview": CamPreview { }
     if root.f.kind == "panelpreview": PanelPreview { }
     if root.f.kind == "panelcard": PanelCard { f: root.f; act(a) => { root.act(a); } }
+    if root.f.kind == "panelthemes": ThemeGrid { f: root.f; which: "panel"; c1: PanelLook.c1; c2: PanelLook.c2; set(k, v) => { root.set(k, v); } }
+    if root.f.kind == "camthemes": ThemeGrid { f: root.f; which: "cam"; c1: CamLook.c1; c2: CamLook.c2; set(k, v) => { root.set(k, v); } }
+    if root.f.kind == "palettes": PaletteGrid { f: root.f; set(k, v) => { root.set(k, v); } }
+    // (your own colour: its swatch (click it, or Choose..., for Windows' colour picker), its code to type; the
+    // theme's own again, where there's one)
+    if root.f.kind == "colour": VerticalLayout {
+        spacing: 6px;
+        Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
+        if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 11px; wrap: word-wrap; }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Rectangle {
+                width: 36px;
+                height: 36px;
+                border-radius: 9px;
+                border-width: 1px;
+                border-color: csa.has-hover ? Theme.muted : Theme.line;
+                background: root.f.value != "" ? root.f.c1 : Theme.bg;
+                if root.f.value == "": Text { text: "Auto"; color: Theme.muted; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+                csa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("colour:" + root.f.key); } }
+                TipSpot { tip: "Choose a colour"; hover: csa.has-hover; }
+            }
+            Rectangle {
+                width: 104px;
+                height: 36px;
+                clip: true;
+                border-radius: 9px;
+                background: Theme.bg;
+                border-width: 1px;
+                border-color: chex.has-focus ? Theme.accent : Theme.line;
+                chex := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: root.f.value; accepted => { root.set(root.f.key, self.text); } }
+                if chex.text == "": Text { x: 10px; text: root.f.n == 1 ? "Theme's own" : root.f.extra; color: Theme.muted.with-alpha(0.6); font-size: 12px; vertical-alignment: center; }
+            }
+            VerticalLayout { alignment: center; Pill { label: "Choose..."; clicked => { root.act("colour:" + root.f.key); } } }
+            if root.f.n == 1 && root.f.value != "": VerticalLayout { alignment: center; Pill { label: "Use the Theme's Own"; clicked => { root.act("colour:" + root.f.key + ":clear"); } } }
+        }
+    }
     if root.f.kind == "hudedit": HudEditor { act(a) => { root.act(a); } }
     if root.f.kind == "suiteprev": SuitePreview { which: root.f.value; theme: root.f.extra; font: root.f.note; rain-size: root.f.opts.length > 0 && root.f.value == "emoterain" ? root.f.opts[0] : ""; rain-spin: root.f.value == "emoterain" && root.f.opts.length > 1 && root.f.opts[1] == "spin"; goal-names: root.f.opts; goal-targets: root.f.opt-ids; rings: root.f.label == "rings"; look: root.f.label; own-c1: root.f.c1; own-c2: root.f.c2; gif: root.f.n == 1; spot: root.f.key; }
     if root.f.kind == "chips2": HorizontalLayout {

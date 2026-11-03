@@ -56,10 +56,10 @@ mod live_tests {
 
 /// One line of a sheet or a step, as the page draws it (BotField)
 #[derive(Clone)]
-pub struct Field { pub key: String, pub kind: &'static str, pub label: String, pub note: String, pub value: String, pub extra: String, pub n: i32 }
+pub struct Field { pub key: String, pub kind: &'static str, pub label: String, pub note: String, pub value: String, pub extra: String, pub n: i32, pub cols: Vec<String> }
 
 fn f(kind: &'static str, key: &str, label: &str, note: &str, value: &str, extra: &str) -> Field {
-    Field { key: key.into(), kind, label: label.into(), note: note.into(), value: value.into(), extra: extra.into(), n: 0 }
+    Field { key: key.into(), kind, label: label.into(), note: note.into(), value: value.into(), extra: extra.into(), n: 0, cols: Vec::new() }
 }
 
 /// A widget's address in OBS, copied with its icon (the widget server's port, as set)
@@ -456,7 +456,44 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
     let col = suite_colours(cur).map(|(a, b)| format!("{a},{b}")).unwrap_or_default();
     let has_gif = !gif.is_empty() && !s(cur, gif).trim().is_empty();
     for x in v.iter_mut().filter(|x| x.kind == "suiteprev") { x.note = col.clone(); x.n = if has_gif { 1 } else { 0 }; }
+    looks_shown(cur, &mut v);
     (title, v)
+}
+
+/// Colours and themes as you'd pick them by eye: a palette's choices each with its two colours beside it, your own
+/// colours as a swatch to click (Windows' colour picker), the panels' and the webcam overlay's themes as a grid of
+/// small previews. (Colours left "" are the app theme's own, filled in as the page is drawn)
+fn looks_shown(cur: &Map<String, Value>, v: &mut [Field]) {
+    for x in v.iter_mut() {
+        match x.key.as_str() {
+            "panelColors" | "suiteColors" | "visColors" if x.kind == "chips" => {
+                x.kind = "palettes";
+                let own = |a: &str, b: &str| (hex_of(cur, a).unwrap_or_default(), hex_of(cur, b).unwrap_or_default());
+                x.cols = x.extra.split('|').filter_map(|o| o.split_once('=')).flat_map(|(id, _)| {
+                    let (a, b) = match id {
+                        "suite" => suite_colours(cur).unwrap_or_default(),
+                        "custom" => match x.key.as_str() { "panelColors" => own("panelC1", "panelC2"), "visColors" => own("visC1", "visC2"), _ => own("suiteC1", "suiteC2") },
+                        k => colours_of(cur, k, "", "").unwrap_or_default(),
+                    };
+                    [a, b]
+                }).collect();
+            }
+            "panelLogoColours" if x.kind == "chips" => {
+                x.kind = "palettes";
+                let (a, b) = panel_colours(cur).unwrap_or_default();
+                x.cols = vec![a, b, "#00e5ff".into(), "#ff2bd0".into(), "#ffffff".into(), "#ffffff".into()];
+            }
+            "panelTheme" if x.kind == "chips" => x.kind = "panelthemes",
+            "camTheme" if x.kind == "chips" => x.kind = "camthemes",
+            // (your own colours: a swatch; the words' and the background's can go back to the theme's own)
+            "panelC1" | "panelC2" | "suiteC1" | "suiteC2" | "visC1" | "visC2" | "panelInk" | "panelBg" if x.kind == "text" => {
+                x.kind = "colour";
+                x.n = i32::from(matches!(x.key.as_str(), "panelInk" | "panelBg"));
+                x.note = x.note.replace("As hex, like #8e9bff. ", "").replace("As hex, like #8e9bff.", "").replace("As hex, like #ffffff. ", "").replace("Leave it empty for the theme's own.", "").trim().to_string();
+            }
+            _ => {}
+        }
+    }
 }
 
 fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
