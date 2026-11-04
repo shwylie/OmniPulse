@@ -7437,8 +7437,11 @@ fn bot_paint(shared: &Shared) {
         let rects: Vec<HudRect> = hud::frames(cur.get("hudFrames").and_then(|v| v.as_str()).unwrap_or("[]")).iter().enumerate().map(|(i, f)| {
             let a = |k: &str| f[k].as_f64().unwrap_or(0.0) as f32;
             let pad = f["pad"].as_f64().unwrap_or(6.0) as f32;
+            // (a shaped one's lines, on its box with the room round it, in the screenshot's pixels)
+            let (vw, vh) = (a("w") + pad * 2.0, a("h") + pad * 2.0);
+            let (d, di, db) = hud::shape_paths(&hud::points_of(f), vw, vh);
             HudRect { x: a("x") / iw, y: a("y") / ih, w: a("w") / iw, h: a("h") / ih, label: f["label"].as_str().unwrap_or("").into(), picked: i as i64 == sel,
-                style: f["style"].as_str().unwrap_or("brackets").into(), px: pad / iw, py: pad / ih, pulse: f["pulse"].as_bool() == Some(true) }
+                style: f["style"].as_str().unwrap_or("brackets").into(), px: pad / iw, py: pad / ih, pulse: f["pulse"].as_bool() == Some(true), d: d.into(), di: di.into(), db: db.into(), vw, vh }
         }).collect();
         // (the picked one's box, to move or size it by dragging)
         let picked = usize::try_from(sel).ok().and_then(|i| rects.get(i).cloned());
@@ -7634,6 +7637,8 @@ fn bot_set(shared: &Shared, key: &str, v: &str) {
         let mut paint = true;
         match key.as_str() {
             "hudF_style" => fr["style"] = serde_json::json!(v),
+            // (its shape: traced from the screenshot, its box, or one of the others)
+            "hudF_shape" => { let path = cur.get("hudShotPath").and_then(|v| v.as_str()).unwrap_or("").to_string(); hud::reshape(hud_images(&path).map(|i| i.0).as_deref(), fr, v); }
             "hudF_label" => { fr["label"] = serde_json::json!(v); paint = false; }
             "hudF_pad" => fr["pad"] = serde_json::json!(v.parse::<f64>().unwrap_or(6.0)),
             "hudF_pulse" => fr["pulse"] = serde_json::json!(v == "true"),
@@ -7803,14 +7808,7 @@ fn bot_act(shared: &Shared, act: &str) {
         let mut frames = hud::frames(cur.get("hudFrames").and_then(|v| v.as_str()).unwrap_or("[]"));
         let (iw, ih) = (cur.get("hudW").and_then(|v| v.as_f64()).unwrap_or(1920.0) as f32, cur.get("hudH").and_then(|v| v.as_f64()).unwrap_or(1080.0) as f32);
         let path = cur.get("hudShotPath").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        // (the screenshot in grey, to snap to: read once, kept while it's the one)
-        thread_local! { static GRAY: RefCell<Option<(String, Rc<image::GrayImage>)>> = const { RefCell::new(None) }; }
-        let gray = || GRAY.with(|g| {
-            if let Some((p, img)) = g.borrow().as_ref() { if *p == path { return Some(img.clone()); } }
-            let img = Rc::new(image::open(&path).ok()?.to_luma8());
-            *g.borrow_mut() = Some((path.clone(), img.clone()));
-            Some(img)
-        });
+        let imgs = || hud_images(&path);
         let sel = cur.get("hudSel").and_then(|v| v.as_f64()).unwrap_or(-1.0);
         let nums = |s: &str| s.split(',').filter_map(|x| x.parse::<f32>().ok()).collect::<Vec<_>>();
         // (a screenshot pasted: the clipboard's picture, kept as a PNG in OmniPulse's folder, then as a chosen one)
@@ -7837,8 +7835,9 @@ fn bot_act(shared: &Shared, act: &str) {
             let n = nums(r);
             if n.len() == 4 {
                 let (x0, y0, x1, y1) = (n[0].min(n[2]) * iw, n[1].min(n[3]) * ih, n[0].max(n[2]) * iw, n[1].max(n[3]) * ih);
-                let (x, y, w, h) = gray().map(|g| hud::snap(&g, x0, y0, x1 - x0, y1 - y0)).unwrap_or((x0, y0, x1 - x0, y1 - y0));
-                let f = hud::frame(x, y, w, h, frames.last());
+                // (wrapped in the element's own shape if it isn't a box, else snapped to its edges)
+                let mut f = hud::frame(x0, y0, x1 - x0, y1 - y0, frames.last());
+                if let Some((rgb, g)) = imgs() { hud::fit(&rgb, &g, &mut f, x0, y0, x1 - x0, y1 - y0); }
                 frames.push(f);
                 bot_set(shared, "hudSel", &(frames.len() - 1).to_string());
             }
@@ -7857,10 +7856,15 @@ fn bot_act(shared: &Shared, act: &str) {
                 f["w"] = serde_json::json!((n[2] * iw).round().max(4.0)); f["h"] = serde_json::json!((n[3] * ih).round().max(4.0));
             }
         } else if rest == "snap" {
-            if let (Some(g), Some(f)) = (gray(), (sel >= 0.0).then(|| frames.get_mut(sel as usize)).flatten()) {
-                let a = |k: &str| f[k].as_f64().unwrap_or(0.0) as f32;
-                let (x, y, w, h) = hud::snap(&g, a("x"), a("y"), a("w"), a("h"));
-                f["x"] = serde_json::json!(x); f["y"] = serde_json::json!(y); f["w"] = serde_json::json!(w); f["h"] = serde_json::json!(h);
+            // (fitted again where it is: traced again if it's traced, else snapped, its shape kept)
+            if let (Some((rgb, g)), Some(f)) = (imgs(), (sel >= 0.0).then(|| frames.get_mut(sel as usize)).flatten()) {
+                let shape = f["shape"].as_str().unwrap_or("rect").to_string();
+                if shape == "auto" { hud::reshape(Some(&rgb), f, "auto"); } else {
+                    let a = |k: &str| f[k].as_f64().unwrap_or(0.0) as f32;
+                    let (x, y, w, h) = hud::snap(&g, a("x"), a("y"), a("w"), a("h"));
+                    f["x"] = serde_json::json!(x); f["y"] = serde_json::json!(y); f["w"] = serde_json::json!(w); f["h"] = serde_json::json!(h);
+                    if shape != "rect" { hud::reshape(None, f, &shape); }
+                }
             }
         } else if rest == "del" && sel >= 0.0 && (sel as usize) < frames.len() {
             frames.remove(sel as usize);
@@ -9210,6 +9214,19 @@ fn live_widget(shared: &Shared) {
         // (the drawing under it hidden once the real one has had a moment to come in)
         g.set_live(show && loaded.load(std::sync::atomic::Ordering::Relaxed));
     });
+}
+
+/// The HUD screenshot, in colour (to trace parts' shapes) and in grey (to snap to edges): read once, kept while
+/// it's the one
+fn hud_images(path: &str) -> Option<(Rc<image::RgbImage>, Rc<image::GrayImage>)> {
+    thread_local! { static SHOT: RefCell<Option<(String, Rc<image::RgbImage>, Rc<image::GrayImage>)>> = const { RefCell::new(None) }; }
+    SHOT.with(|s| {
+        if let Some((p, rgb, g)) = s.borrow().as_ref() { if p == path { return Some((rgb.clone(), g.clone())); } }
+        let img = image::open(path).ok()?;
+        let (rgb, g) = (Rc::new(img.to_rgb8()), Rc::new(img.to_luma8()));
+        *s.borrow_mut() = Some((path.to_string(), rgb.clone(), g.clone()));
+        Some((rgb, g))
+    })
 }
 
 /// A picture of yours on the widgets' server (/overlay/...), as the app shows it: read from disk once
@@ -15684,6 +15701,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("side") { vec![(9, "library"), (11, "sidefold"), (13, "sideopen"), (14, "settings"), (16, "discover"), (18, "back"), (20, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=creators: the Creators' pages, each pictured: Panels (scrolled down, too), Webcam
             // Overlay, Game HUD Frames)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("hudshape") { vec![(6, "size:1500:950"), (7, "bot:sheet:hud"), (8, "hudsample"), (10, "bot:hud:add:0.238,0.896,0.288,0.956"), (11, "bot:hud:add:0.29,0.896,0.339,0.956"), (12, "bot:hud:add:0.463,0.837,0.537,0.953"), (13, "bot:hud:add:0.673,0.896,0.723,0.956"), (14, "bot:hud:add:0.781,0.88,0.976,0.956"), (16, "bot:hud:none"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("camwiz") { vec![(6, "size:1500:950"), (7, "bot:sheet:cam"), (9, "bot:cam:step:0"), (10, "bot:cam:step:1"), (11, "bot:cam:step:2"), (12, "bot:cam:step:3"), (13, "bot:cam:step:4"), (14, "scroll:700"), (15, "bot:cam:step:5"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("icons") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "bot:pnl:1:icon:trophy"), (11, "click:933,309"), (13, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("words") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "bot:pnl:0:edit"), (13, "wordsbold"), (16, "wordsgot"), (18, "end")] }
@@ -15885,8 +15903,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     fill(66, 966, 300, 38, [210, 60, 60, 255]);
                     fill(1620, 940, 240, 90, [20, 24, 30, 255]);
                     let file = format!("{dir}/hud-sample.png");
-                    let _ = img.save(&file);
-                    for (k, v) in [("hudShotPath", file.as_str()), ("hudShot", "/overlay/hud-sample.png"), ("hudW", "1920"), ("hudH", "1080"), ("hudFrames", "[]"), ("hudSel", "-1")] { bot_set(&s, k, v); }
+                    // (OMNIPULSE_SELFTEST_HUD: a real game's screenshot instead)
+                    let real = std::env::var("OMNIPULSE_SELFTEST_HUD").ok().and_then(|f| image::open(f).ok());
+                    let (w, h) = match real { Some(r) => { let _ = r.to_rgba8().save(&file); (r.width(), r.height()) } None => { let _ = img.save(&file); (1920, 1080) } };
+                    let (w, h) = (w.to_string(), h.to_string());
+                    for (k, v) in [("hudShotPath", file.as_str()), ("hudShot", "/overlay/hud-sample.png"), ("hudW", w.as_str()), ("hudH", h.as_str()), ("hudFrames", "[]"), ("hudSel", "-1")] { bot_set(&s, k, v); }
                     bot_paint(&s);
                 }
                 // (the chatbot's page open, then something done on it: "bot:sheet:panels" a Creator's page)

@@ -655,7 +655,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 v.push(f("note", "", "Frames round parts of your game's HUD (the minimap, health, ammo), on stream, in your colours. Here's how:", "", "", ""));
                 v.push(step(1, "Take a screenshot of your game, at the resolution you stream it. Win+Shift+S (or the Print Screen key) works.", "", "", ""));
                 v.push(step(2, "Paste it here, or choose the file if you saved one.", "", "", ""));
-                v.push(step(3, "Drag a box round each part of the HUD you'd like framed. It snaps to the part's edges.", "", "", ""));
+                v.push(step(3, "Drag a box round each part of the HUD you'd like framed. It wraps round the part's own shape, slanted or not.", "", "", ""));
                 v.push(f("link", "", "Paste a Screenshot", "Paste brings in what you just took with Win+Shift+S or Print Screen.", "", "hud:paste"));
                 v.push(f("link", "", "Choose a Screenshot", "Choose opens a PNG or JPG of your game from your PC.", "", "hud:shot"));
                 return ("Game HUD Frames (WIP)".into(), v);
@@ -670,13 +670,14 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 let g = |k: &str, d: &str| fr[k].as_str().map(String::from).unwrap_or_else(|| d.to_string());
                 v.push(f("head", "", &format!("Frame {}: How It Looks", sel + 1), "", "", ""));
                 v.push(f("chips", "hudF_style", "Style", "", &g("style", "brackets"), "brackets=Corner Brackets|glow=Glow|neon=Neon|tech=Tech|soft=Soft"));
+                v.push(f("chips", "hudF_shape", "Shape", "Traced follows the part's own outline in your screenshot, like a slanted ability slot. The others are drawn in its box.", &g("shape", "rect"), &crate::hud::SHAPES.iter().map(|(k, n)| format!("{k}={n}")).collect::<Vec<_>>().join("|")));
                 v.push(f("text", "hudF_label", "Label", "Words above it, like MAP. Leave it empty for none.", &g("label", ""), "MAP"));
                 v.push(f("chips", "hudF_pad", "Room round it", "", &fr["pad"].as_f64().unwrap_or(6.0).to_string(), "0=None|6=A Little|14=More|24=Lots"));
                 v.push(f("toggle", "hudF_pulse", "A slow pulse", "", if fr["pulse"].as_bool() == Some(true) { "true" } else { "false" }, ""));
                 v.push(f("head", "", &format!("Frame {}: Where It Is", sel + 1), "", "", ""));
                 v.push(f("buttons", "", "", "Move it a pixel at a time. On the screenshot, the arrow keys do the same (with Shift, 10 at a time).", "", "hudn:left=← Left|hudn:right=→ Right|hudn:up=↑ Up|hudn:down=↓ Down"));
                 v.push(f("buttons", "", "", "Make it bigger or smaller, from its middle.", "", "hudn:wider=Wider|hudn:narrower=Narrower|hudn:taller=Taller|hudn:shorter=Shorter"));
-                v.push(f("buttons", "", "", "Snap It Again fits it to the edges inside it, after you've moved it.", "", "hud:snap=Snap It Again|hud:del=Take It Away|hud:none=Done"));
+                v.push(f("buttons", "", "", "Fit It Again wraps it round the part inside it again, after you've moved it.", "", "hud:snap=Fit It Again|hud:del=Take It Away|hud:none=Done"));
             }
             v.push(f("head", "", "Look", "", "", ""));
             v.push(f("chips", "suiteColors", "Colours", "Shared with the Suite's widgets.", if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") }, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"));

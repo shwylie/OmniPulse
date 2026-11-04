@@ -118,7 +118,7 @@ export struct WidgetLook { design: string, theme: string, right: bool, rounded: 
 
 /// The alerts' preview: their theme and colours as they're set
 /// A HUD frame, for its editor: where it is on the screenshot (fractions), and whether it's the one picked
-export struct HudRect { x: float, y: float, w: float, h: float, label: string, picked: bool, style: string, px: float, py: float, pulse: bool }
+export struct HudRect { x: float, y: float, w: float, h: float, label: string, picked: bool, style: string, px: float, py: float, pulse: bool, d: string, di: string, db: string, vw: float, vh: float }
 /// The Stream Widget's page: where its preview's card is (in the window, logical pixels), for the real widget's
 /// web view to sit on it; whether it's all in sight; a count that moves while any menu is open (the web view
 /// steps aside for it, as it would draw over it); and whether the real one is showing
@@ -3356,11 +3356,28 @@ component HudFrame inherits Rectangle {
     in property <string> style;
     in property <string> label;
     in property <bool> pulse;
+    // (a shaped one: its outline, that a little inside it, and its corners' brackets, on a box vw × vh)
+    in property <string> d;
+    in property <string> di;
+    in property <string> db;
+    in property <float> vw: 1;
+    in property <float> vh: 1;
+    property <bool> shaped: self.d != "";
     property <color> c1: HudLook.c1;
     property <color> c2: HudLook.c2;
     // (A Slow Pulse: its light rising and falling)
     opacity: self.pulse && Theme.motion ? 0.7 + 0.3 * sin(animation-tick() / 2400ms * 360deg) : 1;
-    if root.style == "brackets": Rectangle {
+    if root.shaped: Path {
+        commands: root.style == "brackets" ? root.db : root.d;
+        viewbox-width: root.vw;
+        viewbox-height: root.vh;
+        fill: transparent;
+        stroke: root.style == "soft" ? root.c1.mix(root.c2, 0.5) : root.c1;
+        stroke-width: root.style == "soft" || root.style == "brackets" ? 3px : 2px;
+    }
+    if root.shaped && root.style == "neon": Path { commands: root.di; viewbox-width: root.vw; viewbox-height: root.vh; fill: transparent; stroke: root.c2; stroke-width: 2px; }
+    if root.shaped && root.style == "glow": Path { commands: root.d; viewbox-width: root.vw; viewbox-height: root.vh; fill: transparent; stroke: root.c1.with-alpha(0.3); stroke-width: 7px; }
+    if !root.shaped && root.style == "brackets": Rectangle {
         property <length> lx: parent.width * 0.22;
         property <length> ly: parent.height * 0.22;
         Rectangle { x: 0; y: 0; width: parent.lx; height: 3px; background: root.c1; }
@@ -3372,8 +3389,8 @@ component HudFrame inherits Rectangle {
         Rectangle { x: parent.width - parent.lx; y: parent.height - 3px; width: parent.lx; height: 3px; background: root.c1; }
         Rectangle { x: parent.width - 3px; y: parent.height - parent.ly; width: 3px; height: parent.ly; background: root.c1; }
     }
-    if root.style == "glow": Rectangle { border-width: 2px; border-color: root.c1; border-radius: 10px; drop-shadow-blur: 12px; drop-shadow-color: root.c1; }
-    if root.style == "neon": Rectangle {
+    if !root.shaped && root.style == "glow": Rectangle { border-width: 2px; border-color: root.c1; border-radius: 10px; drop-shadow-blur: 12px; drop-shadow-color: root.c1; }
+    if !root.shaped && root.style == "neon": Rectangle {
         border-width: 2px;
         border-color: root.c1;
         border-radius: 6px;
@@ -3381,13 +3398,13 @@ component HudFrame inherits Rectangle {
         drop-shadow-color: root.c1;
         Rectangle { x: 4px; y: 4px; width: parent.width - 8px; height: parent.height - 8px; border-width: 2px; border-color: root.c2; border-radius: 3px; }
     }
-    if root.style == "tech": Rectangle {
+    if !root.shaped && root.style == "tech": Rectangle {
         border-width: 2px;
         border-color: root.c1;
         Rectangle { x: parent.width * 0.58; y: -1px; width: parent.width * 0.3; height: 4px; background: root.c2; }
         Rectangle { x: parent.width * 0.12; y: parent.height - 3px; width: parent.width * 0.3; height: 4px; background: root.c2; }
     }
-    if root.style == "soft": Rectangle { border-width: 3px; border-color: root.c1.mix(root.c2, 0.5); border-radius: 14px; }
+    if !root.shaped && root.style == "soft": Rectangle { border-width: 3px; border-color: root.c1.mix(root.c2, 0.5); border-radius: 14px; }
     if root.label != "": Rectangle {
         property <bool> bare: root.style == "brackets" || root.style == "neon";
         x: 0;
@@ -3431,7 +3448,7 @@ component HudEditor inherits Rectangle {
         y: 0;
         width: stage.width;
         height: 24px;
-        text: HudLook.frames.length == 0 ? "Drag a box round a part of your HUD, like the minimap, health or ammo. It snaps to that part's edges."
+        text: HudLook.frames.length == 0 ? "Drag a box round a part of your HUD, like the minimap, health or ammo. It wraps round that part's shape."
             : HudLook.has-sel ? "Drag the frame to move it, or its white corner to resize it. Arrow keys nudge it (Shift for 10), Delete takes it away, Esc puts it down."
             : "Click a frame to change it, or drag a box round another part of your HUD.";
         color: Theme.accent.mix(Theme.text, 0.5);
@@ -3457,6 +3474,11 @@ component HudEditor inherits Rectangle {
             style: f.style;
             label: f.label;
             pulse: f.pulse;
+            d: f.d;
+            di: f.di;
+            db: f.db;
+            vw: f.vw;
+            vh: f.vh;
             // (the picked one, while it isn't being moved: its box outlined, its corner to size it by)
             if f.picked && root.mode == "": Rectangle {
                 x: parent.width * f.px / (f.w + 2 * f.px);

@@ -37,6 +37,20 @@
   .st-soft { border-radius: 14px; padding: 3px; background: linear-gradient(135deg, var(--c1), var(--c2)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
   .st-soft .lbl { display: none; }
   .soft-lbl { position: absolute; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; padding: 0.15em 0.6em; border-radius: 999px; background: linear-gradient(90deg, var(--c1), var(--c2)); white-space: nowrap; }
+  /* a shaped one (its corners in pts): its lines drawn in an SVG over its box, in its style */
+  .fr.shaped { background: none !important; border: 0 !important; box-shadow: none !important; clip-path: none !important; -webkit-mask: none !important; mask: none !important; padding: 0 !important; }
+  .fr.shaped::before, .fr.shaped::after { display: none; }
+  .fr svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .fr svg * { fill: none; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+  .fr .ln { stroke: var(--c1); stroke-width: 2.5; }
+  .st-brackets .ln { stroke-width: 3.5; }
+  .st-glow .ln { filter: drop-shadow(0 0 5px var(--c1)) drop-shadow(0 0 9px var(--c1)); }
+  .st-neon .ln { filter: drop-shadow(0 0 6px var(--c1)); }
+  .fr .in { stroke: var(--c2); stroke-width: 2; }
+  .st-tech .ln { stroke-dasharray: none; }
+  .st-tech .tk { stroke: var(--c2); stroke-width: 4; }
+  .st-soft .ln { stroke: url(#soft-grad); stroke-width: 3.5; }
+  .st-soft.shaped .lbl { display: block; border-radius: 999px; background: linear-gradient(90deg, var(--c1), var(--c2)); }
   /* a slow pulse, if it's on */
   .pulse { animation: pulse 2.4s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: 0.55; } }
@@ -50,6 +64,38 @@
   const $ = (id) => document.getElementById(id);
   const PREVIEW = /[?&]preview=1/.test(location.search);
   let sig = "";
+  const NS = "http://www.w3.org/2000/svg";
+  // (a shaped frame's lines, in its box's pixels (w x h): its outline; Neon's second line a little inside it;
+  // Corner Brackets' short lines from each corner along its edges; Tech's ticks on its longest edges)
+  function shapeSvg(pts, w, h, style) {
+    const p = pts.map(([x, y]) => [x * w, y * h]), n = p.length;
+    const line = (q) => "M" + q.map(([x, y]) => x.toFixed(1) + " " + y.toFixed(1)).join(" L") + " Z";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+    svg.setAttribute("preserveAspectRatio", "none");
+    const add = (d, cls) => { const e = document.createElementNS(NS, "path"); e.setAttribute("d", d); e.setAttribute("class", cls); svg.append(e); };
+    if (style === "soft") svg.innerHTML = '<defs><linearGradient id="soft-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:var(--c1)"/><stop offset="1" style="stop-color:var(--c2)"/></linearGradient></defs>';
+    if (style === "brackets") {
+      const reach = Math.min(w, h) * 0.24;
+      let d = "";
+      p.forEach((b, i) => {
+        const to = (o) => { const dx = o[0] - b[0], dy = o[1] - b[1], l = Math.max(1, Math.hypot(dx, dy)), r = Math.min(reach, l * 0.4); return [b[0] + (dx / l) * r, b[1] + (dy / l) * r]; };
+        const s = to(p[(i + n - 1) % n]), e = to(p[(i + 1) % n]);
+        d += "M" + s[0] + " " + s[1] + " L" + b[0] + " " + b[1] + " L" + e[0] + " " + e[1] + " ";
+      });
+      add(d, "ln");
+    } else add(line(p), "ln");
+    if (style === "neon") {
+      const cx = p.reduce((a, q) => a + q[0], 0) / n, cy = p.reduce((a, q) => a + q[1], 0) / n, k = Math.max(0.5, 1 - 10 / Math.max(20, Math.min(w, h)));
+      add(line(p.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k])), "in");
+    }
+    if (style === "tech") {
+      // (a tick along its two longest edges, a third of the way along)
+      const edges = p.map((a, i) => [a, p[(i + 1) % n]]).sort((u, v) => Math.hypot(v[1][0] - v[0][0], v[1][1] - v[0][1]) - Math.hypot(u[1][0] - u[0][0], u[1][1] - u[0][1])).slice(0, 2);
+      for (const [a, c] of edges) add("M" + (a[0] + (c[0] - a[0]) * 0.55) + " " + (a[1] + (c[1] - a[1]) * 0.55) + " L" + (a[0] + (c[0] - a[0]) * 0.85) + " " + (a[1] + (c[1] - a[1]) * 0.85), "tk");
+    }
+    return svg;
+  }
   function draw(h) {
     const next = JSON.stringify(h) + innerWidth + "x" + innerHeight;
     if (next === sig) return;
@@ -64,12 +110,15 @@
     for (const f of h.frames || []) {
       const pad = Number(f.pad) || 6;
       const el = document.createElement("div");
-      el.className = "fr st-" + (f.style || "brackets") + (f.pulse ? " pulse" : "");
-      Object.assign(el.style, { left: (f.x - pad) * kx + "px", top: (f.y - pad) * ky + "px", width: (f.w + pad * 2) * kx + "px", height: (f.h + pad * 2) * ky + "px" });
+      const pts = Array.isArray(f.pts) && f.pts.length >= 3 ? f.pts.filter((q) => Array.isArray(q) && q.length === 2).map((q) => [Number(q[0]) || 0, Number(q[1]) || 0]) : null;
+      el.className = "fr st-" + (f.style || "brackets") + (f.pulse ? " pulse" : "") + (pts ? " shaped" : "");
+      const bw = (f.w + pad * 2) * kx, bh = (f.h + pad * 2) * ky;
+      Object.assign(el.style, { left: (f.x - pad) * kx + "px", top: (f.y - pad) * ky + "px", width: bw + "px", height: bh + "px" });
+      if (pts) el.append(shapeSvg(pts, bw, bh, f.style || "brackets"));
       el.style.setProperty("--ls", Math.max(10, Math.min(22, 14 * ky)) + "px");
       if (f.label) {
         const l = document.createElement("div"); l.className = "lbl"; l.textContent = f.label; el.append(l);
-        if (f.style === "soft") { const s = document.createElement("div"); s.className = "soft-lbl"; s.textContent = f.label; s.style.fontSize = Math.max(10, Math.min(22, 14 * ky)) + "px"; s.style.left = (f.x - pad) * kx + "px"; s.style.top = (f.y - pad) * ky - 28 * ky + "px"; stage.append(s); }
+        if (f.style === "soft" && !pts) { const s = document.createElement("div"); s.className = "soft-lbl"; s.textContent = f.label; s.style.fontSize = Math.max(10, Math.min(22, 14 * ky)) + "px"; s.style.left = (f.x - pad) * kx + "px"; s.style.top = (f.y - pad) * ky - 28 * ky + "px"; stage.append(s); }
       }
       stage.append(el);
     }
