@@ -315,6 +315,49 @@ export default {
       return stub.fetch("https://hook/add", { method: "POST", body: JSON.stringify({ body: text, sig: req.headers.get("x-fourthwall-hmac-sha256") || "" }) });
     }
 
+    // Kick's webhooks for OmniPulse's own Kick app (its Webhook URL in Kick's developer settings is this one,
+    // /api/hook/kick): checked against Kick's own public key, then kept for the channel they're about, whose app
+    // listens on that channel's hook's socket. A hook's address is its channel's user id and a code only the relay
+    // can make, given to an app that shows Kick it's signed in as that channel.
+    if (parts[0] === "api" && parts[1] === "hook" && parts[2] === "kick") {
+      if (parts.length === 3 && req.method === "POST") {
+        const text = await req.text();
+        if (text.length > 64 * 1024) return json({ error: "too long" }, 413);
+        const mid = req.headers.get("kick-event-message-id") || "", ts = req.headers.get("kick-event-message-timestamp") || "", sig = req.headers.get("kick-event-signature") || "";
+        if (!mid || !ts || !sig) return json({ error: "not signed" }, 401);
+        // (a delivery from long ago: not taken, so an old one can't be sent again)
+        const at = Date.parse(ts);
+        if (!isFinite(at) || Math.abs(Date.now() - at) > 600000) return json({ error: "too old" }, 401);
+        if (!(await kickSigned(mid + "." + ts + "." + text, sig))) return json({ error: "not Kick's" }, 401);
+        let body = {};
+        try { body = JSON.parse(text); } catch (e) { return json({ error: "not JSON" }, 400); }
+        const who = body && body.broadcaster && body.broadcaster.user_id;
+        if (!who || !/^\d{1,15}$/.test(String(who))) return json({ ok: true });
+        const stub = env.HOOKS.get(env.HOOKS.idFromName("kick:" + who));
+        return stub.fetch("https://hook/add", { method: "POST", body: JSON.stringify({ type: req.headers.get("kick-event-type") || "", id: mid, body: text }) });
+      }
+      if (parts.length === 4 && parts[3] === "key" && req.method === "POST") {
+        if (!env.KICK_CLIENT_SECRET) return json({ error: "OmniPulse's Kick app isn't set up on this relay" }, 503);
+        const r = await readJson(req);
+        if (r.error) return r.error;
+        // (whose sign-in it is, as Kick says: only that channel's hook is given)
+        const token = String((r.body || {}).token || "");
+        if (!token || token.length > 4096) return json({ error: "no sign-in" }, 400);
+        const u = await fetch("https://api.kick.com/public/v1/users", { headers: { authorization: "Bearer " + token, accept: "application/json" } });
+        if (!u.ok) return json({ error: "Kick didn't know that sign-in" }, 401);
+        let uid = "";
+        try { uid = String((((await u.json()).data || [])[0] || {}).user_id || ""); } catch (e) {}
+        if (!/^\d{1,15}$/.test(uid)) return json({ error: "Kick didn't say whose sign-in it is" }, 401);
+        return json({ url: url.origin + "/api/hook/kick/" + uid + "-" + (await kickHookCode(env, uid)) });
+      }
+      if (parts.length === 5 && parts[4] === "ws") {
+        const m = /^(\d{1,15})-([a-f0-9]{32})$/.exec(parts[3]);
+        if (!m || !env.KICK_CLIENT_SECRET || m[2] !== (await kickHookCode(env, m[1]))) return json({ error: "not found" }, 404);
+        return env.HOOKS.get(env.HOOKS.idFromName("kick:" + m[1])).fetch(new Request("https://hook/ws", req));
+      }
+      return json({ error: "not found" }, 404);
+    }
+
     // shared playlists
     if (url.pathname === "/api/shares" && req.method === "POST") {
       const r = await readJson(req);
@@ -683,6 +726,37 @@ export class Share {
 // A socket says {"after": n} for those after n it missed, or {"after": "now"} for none (where it's up to)
 // Throne's webhook key (Ed25519, public: from Throne's webhook help page), and whether a delivery's its
 const THRONE_KEY = "MCowBQYDK2VwAyEAPXbUfxh7XL4SYUVcfhmYMIbxvtR9E9LDd8gPJ1PwSD8=";
+// Kick's webhooks' signature: RSA (PKCS#1 v1.5, SHA-256) over "message id.timestamp.body", with Kick's public key
+// (fetched, as Kick may change it: once again if a signature doesn't match the one we have)
+let kickKey = null, kickKeyAt = 0;
+async function kickKeyGet(fresh) {
+  // (fetched again at most every five minutes, however many unsigned ones come in)
+  if (kickKey && (!fresh || Date.now() - kickKeyAt < 300000)) return kickKey;
+  kickKeyAt = Date.now();
+  const text = await (await fetch("https://api.kick.com/public/v1/public-key", { headers: { accept: "application/json" } })).text();
+  let pem = text;
+  try { const j = JSON.parse(text); pem = (j.data && (j.data.public_key || j.data.publicKey)) || j.public_key || text; } catch (e) {}
+  const b64 = String(pem).replace(/-----[^-]+-----/g, "").replace(/\\n/g, "").replace(/\s+/g, "");
+  const der = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  kickKey = await crypto.subtle.importKey("spki", der, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+  return kickKey;
+}
+async function kickSigned(message, sigB64) {
+  let sig;
+  try { sig = Uint8Array.from(atob(sigB64), (c) => c.charCodeAt(0)); } catch (e) { return false; }
+  const data = new TextEncoder().encode(message);
+  for (const fresh of [false, true]) {
+    try { if (await crypto.subtle.verify("RSASSA-PKCS1-v1_5", await kickKeyGet(fresh), sig, data)) return true; } catch (e) {}
+  }
+  return false;
+}
+// A channel's hook code: made from its user id with the app's secret, so only the relay can make one
+async function kickHookCode(env, uid) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(String(env.KICK_CLIENT_SECRET)), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode("kick-hook:" + uid)));
+  return Array.from(mac.slice(0, 16), (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
 let throneKey = null;
 async function throneSigned(message, sigHex) {
   try {

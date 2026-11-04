@@ -1757,7 +1757,7 @@ function setPoints() {
 
 // ---------- Kick: signed in with its OAuth (your own app's Client ID and secret, PKCE), chat read from
 // Kick's own realtime socket (as kick.com's page reads it: a guest's), sent through its API ----------
-const KICK_SCOPES = "user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage channel:rewards:read channel:rewards:write";
+const KICK_SCOPES = "user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage channel:rewards:read channel:rewards:write events:subscribe";
 // (a bot account: only what posting needs, as Mix It Up's)
 const KICK_BOT_SCOPES = "user:read chat:write";
 const KICK_REDIRECT_PORT = 8476;
@@ -1985,6 +1985,60 @@ async function kickConnect() {
 }
 
 const KICK_SEEN = {};
+// A Kick follow, from the live feed or Kick's webhook (whichever comes first): alerted and its actions started once
+const kickFollows = new Map();
+function kickFollowed(user) {
+  const k = String(user).toLowerCase(), now = Date.now();
+  if (now - (kickFollows.get(k) || 0) < 10 * 60000) return;
+  kickFollows.set(k, now);
+  if (kickFollows.size > 500) for (const [n, t] of kickFollows) if (now - t > 10 * 60000) kickFollows.delete(n);
+  if (S().alerts !== false) sendAlert({ platform: "kick", type: "follow", user });
+  const c = Object.assign({ platform: "kick", rawInput: "", message: "", amount: "", user }, words(""));
+  fire("follow", c);
+}
+
+// Kick's own webhooks (OmniPulse's Kick app's, on the relay): follows with who followed, which the live feed often
+// leaves out. The channel's hook on the relay (given once its sign-in shows it's that channel), and Kick asked to
+// send its follows there (once per sign-in)
+const kickHookIds = new Set();
+async function kickHook() {
+  const relay = String(S().kickRelay || "").trim().replace(/\/$/, "");
+  if (!yes(S().kickOn) || !S().kickToken || !relay || String(S().kickClientSecret || "").trim()) return;
+  if (!S().kickHookUrl) {
+    const r = await OmniPulse.fetch(relay + "/api/hook/kick/key", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: S().kickToken }) });
+    let j = {};
+    try { j = await r.json(); } catch (e) {}
+    if (!r.ok || !j.url) throw new Error("the relay didn't give a hook: " + (j.error || r.status));
+    S().kickHookUrl = j.url;
+    await OmniPulse.app.saveSettings({ kickHookUrl: j.url });
+  }
+  if (S().kickHookFor !== S().kickToken.slice(-12)) {
+    try {
+      const have = await kickApi("GET", "events/subscriptions", null, false, "channel");
+      if (!(have.data || []).some((x) => (x.event || x.name) === "channel.followed")) {
+        await kickApi("POST", "events/subscriptions", { events: [{ name: "channel.followed", version: 1 }], method: "webhook" }, false, "channel");
+      }
+      S().kickHookFor = S().kickToken.slice(-12);
+      await OmniPulse.app.saveSettings({ kickHookFor: S().kickHookFor });
+    } catch (e) {
+      OmniPulse.log("kick follows: " + e.message);
+      if (/40[13]/.test(e.message)) OmniPulse.app.say("Kick follows need one more permission. Sign your channel in to Kick again (Settings > Streaming > Suite > Kick), then they'll come through with names.").catch(() => {});
+      return;
+    }
+  }
+  hookSocket("kick", S().kickHookUrl, "", (data) => {
+    let h;
+    try { h = JSON.parse(data); } catch (e) { return; }
+    // (Kick may send one more than once: each taken once)
+    if (h.id) { if (kickHookIds.has(h.id)) return; kickHookIds.add(h.id); if (kickHookIds.size > 300) kickHookIds.clear(); }
+    let e = {};
+    try { e = JSON.parse(h.body || "{}"); } catch (x) { return; }
+    if (h.type === "channel.followed") {
+      const f = e.follower || {};
+      if (f.username) kickFollowed(f.username);
+    }
+  });
+}
 // (who's spoken this stream: their first words; begun again as you go live)
 const spoken = new Set();
 // What Kick sends: its chat as ours (a Twitch line's shape, its platform Kick), its events as ours
@@ -2047,10 +2101,10 @@ function onKick(event, d) {
       return;
     }
     case "FollowersUpdated": {
+      // (Kick's live feed often doesn't say who: those come from Kick's webhook instead, kickHook)
       const user = d.username || "";
       if (d.followed === false || !user) return;
-      alert({ type: "follow", user });
-      go("follow", { user });
+      kickFollowed(user);
       return;
     }
     case "RewardRedeemedEvent": {
@@ -3124,6 +3178,8 @@ function tipConnect(only) {
       : kind === "Commission" ? "Commissioned you on Ko-fi" + (msg ? ": " + msg : "") : msg;
     onTip(open ? String(k.from_name || "Someone") : "Someone", k.amount, k.currency, what, "kofi");
   }, "kofi");
+  // Kick's follows, from Kick's own webhooks (on the relay, as these)
+  if (!only || only === "kick") kickHook().catch((e) => OmniPulse.log("kick follows: " + e.message));
   // Throne and Fourthwall: their webhooks' deliveries, from the relay's socket for each hook (as Ko-fi's)
   hookSocket("throne", yes(S().throneOn) && String(S().throneUrl || "").trim(), only, (data) => {
     let t;
@@ -3269,7 +3325,7 @@ OmniPulse.register({
   signInKickBotCopy(values) { return signInKick(values, true, "bot"); },
   async signOutChannel() { return signOutOf({ token: "", refresh: "", login: "", userId: "" }, "Signed your channel out of Twitch."); },
   async signOutBot() { return signOutOf({ botToken: "", botRefresh: "", botLogin: "" }, "Signed the bot out of Twitch."); },
-  async signOutKickChannel() { return signOutOf({ kickToken: "", kickRefreshToken: "", kickUserId: "", kickLogin: "" }, "Signed your channel out of Kick."); },
+  async signOutKickChannel() { return signOutOf({ kickToken: "", kickRefreshToken: "", kickUserId: "", kickLogin: "", kickHookUrl: "", kickHookFor: "", kickLast: "" }, "Signed your channel out of Kick."); },
   async signOutKickBot() { return signOutOf({ kickBotToken: "", kickBotRefreshToken: "", kickBotLogin: "" }, "Signed the bot out of Kick."); },
   tryChat(text, platform, asMod, real) { return tryChat(text, platform, asMod, real); },
   // (settings that change only how things look or behave, saved: taken as they are, nothing restarted, the
@@ -3298,7 +3354,7 @@ OmniPulse.register({
     };
   },
   async signOutKick() {
-    const none = { kickToken: "", kickRefreshToken: "", kickUserId: "", kickLogin: "", kickBotToken: "", kickBotRefreshToken: "", kickBotLogin: "" };
+    const none = { kickToken: "", kickRefreshToken: "", kickUserId: "", kickLogin: "", kickBotToken: "", kickBotRefreshToken: "", kickBotLogin: "", kickHookUrl: "", kickHookFor: "", kickLast: "" };
     await OmniPulse.app.saveSettings(none);
     Object.assign(OmniPulse.settings, none);
     restart();
