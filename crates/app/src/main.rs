@@ -39,6 +39,7 @@ mod updater;
 mod discover;
 mod lang;
 mod panels;
+mod panelicon;
 mod flows;
 mod botimport;
 mod procwatch;
@@ -7325,7 +7326,7 @@ fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
     }
     // (a page with a preview is split: its column narrow, as Panels' is)
     let split_page = list.iter().any(|x| x.kind == "suiteprev");
-    let sig = list.iter().map(|x| format!("{}|{}|{}|{}|{}|{}", x.key, x.kind, x.value, x.label, x.extra, if x.kind == "suiteprev" { format!("{}{}", x.note, x.n) } else { x.cols.join(",") })).collect::<Vec<_>>().join("\n");
+    let sig = list.iter().map(|x| format!("{}|{}|{}|{}|{}|{}", x.key, x.kind, x.value, x.label, x.extra, if x.kind == "suiteprev" { format!("{}{}", x.note, x.n) } else if x.kind == "panelcard" { x.note.clone() } else { x.cols.join(",") })).collect::<Vec<_>>().join("\n");
     // (a row of choices: its extra, as "id=Name|id=Name", for the page to draw)
     let strs = |v: Vec<String>| ModelRc::from(Rc::new(VecModel::from(v.into_iter().map(slint::SharedString::from).collect::<Vec<_>>())));
     let rows = list.into_iter().map(|x| {
@@ -7336,6 +7337,8 @@ fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
             else if x.kind == "suiteprev" && x.value == "timer" { (Vec::new(), x.key.split('|').map(String::from).collect()) }
             else if x.kind == "suiteprev" && x.value == "emoterain" { (Vec::new(), x.label.split('|').skip(1).map(String::from).collect()) }
             else if x.kind == "suiteprev" && (x.value == "goals" || x.value == "wheel") { x.key.split('|').filter_map(|o| o.split_once('=')).map(|(n, t)| (t.to_string(), n.to_string())).unzip() }
+            // (a panel's card: its icon chosen ("" the title's) and its picture made into an icon, as ids; the icon shown's shape)
+            else if x.kind == "panelcard" { let (k, m) = x.note.split_once('|').unwrap_or(("", "")); (vec![k.to_string(), m.to_string()], vec![panelicon::shape(panelicon::of(k, &x.label)).to_string()]) }
             else if x.kind == "list" || x.kind == "piclist" { (Vec::new(), botpage::list_items(if x.value.is_empty() { &x.extra } else { &x.value })) }
             else { (Vec::new(), Vec::new()) };
         // (a Suite preview's colours: "#a,#b" in its note; none, the accent)
@@ -7357,7 +7360,9 @@ fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
         let (c1, c2) = if x.kind == "colour" { (look::Rgb::parse(&x.value).map(|c| c.slint()).unwrap_or_default(), c2) } else { (c1, c2) };
         // (a panel's words, shown formatted: as plain words, if they don't read as formatting)
         let words = if x.kind == "panelcard" { slint::StyledText::from_markdown(&botpage::rich_md(&x.value)).unwrap_or_else(|_| slint::StyledText::from_plain_text(&botpage::rich_plain(&x.value))) } else { Default::default() };
-        BotField { changed: !key.is_empty() && !key.contains(':') && pf_changed(&key), key: key.into(), kind: kind.into(), label: x.label.split('|').next().unwrap_or("").into(), note: if x.kind == "suiteprev" { font.into() } else { x.note.into() }, value: x.value.into(), extra: x.extra.into(), n, opts: strs(names), opt_ids: strs(ids), c1, c2, cols: ModelRc::from(Rc::new(VecModel::from(cols))), words }
+        // (a panel's own picture, or that made into an icon)
+        let pic = if x.kind == "panelcard" { overlay_pic(ids.get(1).filter(|m| !m.is_empty()).unwrap_or(&x.extra)).unwrap_or_default() } else { Default::default() };
+        BotField { changed: !key.is_empty() && !key.contains(':') && pf_changed(&key), key: key.into(), kind: kind.into(), label: x.label.split('|').next().unwrap_or("").into(), note: if x.kind == "suiteprev" { font.into() } else { x.note.into() }, value: x.value.into(), extra: x.extra.into(), n, opts: strs(names), opt_ids: strs(ids), c1, c2, cols: ModelRc::from(Rc::new(VecModel::from(cols))), words, pic }
     }).collect();
     (rows, sig)
 }
@@ -7451,28 +7456,19 @@ fn bot_paint(shared: &Shared) {
         let icons = cur.get("panelIcons").and_then(|v| v.as_bool()) != Some(false);
         // (words too long for beside its title (about 36 letters there, 44 without an icon), more than one line, or a
         // list: under it, as wrapped at about 44 letters; drawn plain here (its formatting is the browser page's))
-        let item = |title: &str, words: &str| {
+        let item = |title: &str, words: &str, icon: &str| {
             let line = botpage::rich_plain(words);
             let long = !line.is_empty() && (ext || line.contains('\n') || line.chars().count() > if icons { 36 } else { 44 });
             let lines = line.split('\n').map(|p| p.chars().count().div_ceil(44).max(1)).sum::<usize>() as i32;
-            PanelItem { title: title.into(), line: line.into(), body: long, lines, icon: botpage::panel_icon(title).into(), img: Default::default(), has_img: false }
+            PanelItem { title: title.into(), line: line.into(), body: long, lines, icon: panelicon::shape(panelicon::of(icon, title)).into(), img: Default::default(), has_img: false, tint: false }
         };
-        let mut items: Vec<PanelItem> = list.iter().filter(|p| !p.title.trim().is_empty() || !p.body.trim().is_empty()).map(|p| item(p.title.trim(), &p.body)).collect();
+        let mut items: Vec<PanelItem> = list.iter().filter(|p| !p.title.trim().is_empty() || !p.body.trim().is_empty()).map(|p| item(p.title.trim(), &p.body, &p.icon)).collect();
         // (your own icons: a picture copied in, shown in its place)
-        let own: Vec<String> = list.iter().filter(|p| !p.title.trim().is_empty() || !p.body.trim().is_empty()).map(|p| p.img.clone()).collect();
-        for (it, u) in items.iter_mut().zip(own) {
-            if let Some(name) = u.strip_prefix("/overlay/") {
-                // (each picture read from disk once, not on every change to the page)
-                thread_local! { static PICS: RefCell<HashMap<String, slint::Image>> = RefCell::new(HashMap::new()); }
-                let img = PICS.with(|p| p.borrow().get(name).cloned()).or_else(|| {
-                    let img = omnipulse_core::data_dir().ok().map(|d| d.join("overlay-media").join(name)).and_then(|f| slint::Image::load_from_path(&f).ok())?;
-                    PICS.with(|p| p.borrow_mut().insert(name.to_string(), img.clone()));
-                    Some(img)
-                });
-                if let Some(img) = img { it.img = img; it.has_img = true; }
-            }
+        let own: Vec<(String, bool)> = list.iter().filter(|p| !p.title.trim().is_empty() || !p.body.trim().is_empty()).map(|p| if p.mask.is_empty() { (p.img.clone(), false) } else { (p.mask.clone(), true) }).collect();
+        for (it, (u, tint)) in items.iter_mut().zip(own) {
+            if let Some(img) = overlay_pic(&u) { it.img = img; it.has_img = true; it.tint = tint; }
         }
-        if cur.get("panelPowered").and_then(|v| v.as_bool()) != Some(false) { items.push(item("Powered by OmniPulse", if ext { "This stream's music, chatbot, alerts and overlays all run on OmniPulse." } else { "Music, chatbot and stream tools in one app" })); }
+        if cur.get("panelPowered").and_then(|v| v.as_bool()) != Some(false) { items.push(item("Powered by OmniPulse", if ext { "This stream's music, chatbot, alerts and overlays all run on OmniPulse." } else { "Music, chatbot and stream tools in one app" }, "omni")); }
         g.set_items(ModelRc::from(Rc::new(VecModel::from(items))));
         let or = |k: &str, d: &str| cur.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty()).unwrap_or(d).to_string();
         g.set_theme(or("panelTheme", "dark").into());
@@ -7733,12 +7729,19 @@ fn bot_act(shared: &Shared, act: &str) {
             "up" if i > 0 => list.swap(i, i - 1),
             "down" if i + 1 < list.len() => list.swap(i, i + 1),
             "del" => { list.remove(i); }
-            "noimg" => list[i].img.clear(),
+            // (an icon of ours chosen ("" the one its title picks): in place of a picture of yours)
+            "icon" => { list[i].icon = panelicon::ICONS.iter().find(|x| x.0 == arg).map_or("", |x| x.0).to_string(); list[i].img.clear(); list[i].mask.clear(); }
+            // (your picture made into an icon, in the panels' colours; or shown as it is again)
+            "tint" => {
+                if !list[i].mask.is_empty() { list[i].mask.clear(); }
+                else { match panelicon::mask_of(&list[i].img) { Ok(u) => list[i].mask = u, Err(e) => { say(&e); return; } } }
+            }
+            "noimg" => { list[i].img.clear(); list[i].mask.clear(); }
             // (a picture of yours for its icon: chosen, and copied into the widgets' own folder (its address there))
             "pick" => {
                 let Some(p) = ask_path(rfd::FileDialog::new().set_title("A picture for this panel's icon").add_filter("Pictures", &["png", "jpg", "jpeg", "gif", "webp"]), Ask::Open, { let (s, a) = (shared.clone(), act.to_string()); move || bot_act(&s, &a) }) else { return };
                 match omnipulse_core::widget::overlay_media(&p.to_string_lossy(), false) {
-                    Ok(url) => list[i].img = url,
+                    Ok(url) => { list[i].img = url; list[i].mask.clear(); }
                     Err(e) => { say(&e); return; }
                 }
             }
@@ -9197,6 +9200,17 @@ fn live_widget(shared: &Shared) {
         // (the drawing under it hidden once the real one has had a moment to come in)
         g.set_live(show && loaded.load(std::sync::atomic::Ordering::Relaxed));
     });
+}
+
+/// A picture of yours on the widgets' server (/overlay/...), as the app shows it: read from disk once
+fn overlay_pic(url: &str) -> Option<slint::Image> {
+    let name = url.strip_prefix("/overlay/").filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '.') && !n.starts_with('.'))?;
+    thread_local! { static PICS: RefCell<HashMap<String, slint::Image>> = RefCell::new(HashMap::new()); }
+    PICS.with(|p| p.borrow().get(name).cloned()).or_else(|| {
+        let img = omnipulse_core::data_dir().ok().map(|d| d.join("overlay-media").join(name)).and_then(|f| slint::Image::load_from_path(&f).ok())?;
+        PICS.with(|p| p.borrow_mut().insert(name.to_string(), img.clone()));
+        Some(img)
+    })
 }
 
 thread_local! {
@@ -14127,6 +14141,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let _ = slint::BackendSelector::new().backend_name("winit".into()).renderer_name(if gpu { "femtovg" } else { "software" }.into()).select();
     }
     let ui = AppWindow::new()?;
+    // (the panels' icons to pick from)
+    ui.global::<PanelIcons>().set_list(ModelRc::from(Rc::new(VecModel::from(panelicon::ICONS.iter().map(|(k, n, d)| IconChoice { key: (*k).into(), name: (*n).into(), d: (*d).into() }).collect::<Vec<_>>()))));
     let engine = Arc::new(Engine::new("").map_err(slint::PlatformError::Other)?);
     let events = engine.events().expect("events");
     // (the volume you left it at; 80% the first time)
@@ -15658,6 +15674,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("side") { vec![(9, "library"), (11, "sidefold"), (13, "sideopen"), (14, "settings"), (16, "discover"), (18, "back"), (20, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=creators: the Creators' pages, each pictured: Panels (scrolled down, too), Webcam
             // Overlay, Game HUD Frames)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("icons") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "bot:pnl:1:icon:trophy"), (11, "click:933,309"), (13, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("words") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "bot:pnl:0:edit"), (13, "wordsbold"), (16, "wordsgot"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("creators") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "scroll:1250"), (11, "scroll:600"), (13, "scroll:601"), (15, "bot:sheet:cam"), (17, "scroll:-3000"), (19, "bot:sheet:hud"), (20, "hudsample"), (22, "bot:hud:add:0.82,0.04,0.98,0.32"), (24, "scroll:800"), (26, "bot:hud:none"), (28, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setfit") { vec![(9, "play"), (10, "queue"), (11, "size:1150:530"), (12, "nav:settings"), (13, "cat:Sound"), (14, "scroll:4000"), (16, "cat:Integrations"), (17, "scroll:-4000"), (19, "end")] }

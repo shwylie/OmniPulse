@@ -135,9 +135,10 @@ pub fn list_items(v: &str) -> Vec<String> {
 }
 
 /// A channel panel as you've written it: its title, its words (**bold**, *italics*, __underline__; lines starting "- " or "1. " a list), and a
-/// picture of your own for its icon ("" for the one its title picks)
+/// picture of your own for its icon ("" for none), its icon (a panelicon key; "" for the one its title picks),
+/// and its picture made into an icon (its address; "" to show the picture as it is)
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Panel { pub title: String, pub body: String, pub img: String }
+pub struct Panel { pub title: String, pub body: String, pub img: String, pub icon: String, pub mask: String }
 
 /// The most panels made
 pub const PANELS_MAX: usize = 12;
@@ -149,19 +150,19 @@ pub fn panels(cur: &Map<String, Value>) -> Vec<Panel> {
     if let Some(a) = serde_json::from_str::<Value>(s(cur, "panelItems")).ok().and_then(|v| v.as_array().cloned()) {
         let t = |p: &Value, k: &str| p[k].as_str().unwrap_or("").to_string();
         // (words typed in the app's own boxes once kept Windows' line ends: lines as the page and plugin read them)
-        return a.iter().take(PANELS_MAX).map(|p| Panel { title: t(p, "title"), body: t(p, "body").replace("\r\n", "\n").replace('\r', "\n"), img: t(p, "img") }).collect();
+        return a.iter().take(PANELS_MAX).map(|p| Panel { title: t(p, "title"), body: t(p, "body").replace("\r\n", "\n").replace('\r', "\n"), img: t(p, "img"), icon: t(p, "icon"), mask: t(p, "mask") }).collect();
     }
     let list = if s(cur, "panelList").is_empty() { PANELS_FIRST } else { s(cur, "panelList") };
     let icons: Vec<String> = s(cur, "panelOwnIcons").split('|').map(|x| x.trim().to_string()).collect();
     list.split('|').map(str::trim).filter(|x| !x.is_empty()).take(PANELS_MAX).enumerate().map(|(i, p)| {
         let (t, b) = p.split_once(':').map(|(a, b)| (a.trim(), b.trim())).unwrap_or((p, ""));
-        Panel { title: t.into(), body: b.replace(" / ", "\n"), img: icons.get(i).cloned().unwrap_or_default() }
+        Panel { title: t.into(), body: b.replace(" / ", "\n"), img: icons.get(i).cloned().unwrap_or_default(), ..Default::default() }
     }).collect()
 }
 
 /// Your panels as kept (panelItems)
 pub fn panels_json(list: &[Panel]) -> String {
-    Value::Array(list.iter().map(|p| serde_json::json!({ "title": p.title, "body": p.body, "img": p.img })).collect()).to_string()
+    Value::Array(list.iter().map(|p| serde_json::json!({ "title": p.title, "body": p.body, "img": p.img, "icon": p.icon, "mask": p.mask })).collect()).to_string()
 }
 
 /// A panel's words as plain text (its marks taken out, its lists' bullets and numbers kept)
@@ -258,26 +259,6 @@ pub fn cam_layout(cur: &Map<String, Value>) -> Vec<(String, String, f32, f32, f3
         out.push((id.to_string(), label, x / w0, y / h0, w / w0, h / h0));
     }
     out
-}
-
-/// A panel's icon, from its title's words (as panels.html picks it): an SVG path, 24 x 24
-pub fn panel_icon(title: &str) -> &'static str {
-    let t = title.to_lowercase();
-    // (the OmniPulse panel's own mark first)
-    if t.contains("omnipulse") { return "M13.4 1.6c.7 0 1.2.5 1.3 1.1.4 2.3 1.9 3.8 3.4 5.2 1.9 1.7 2.6 4.3 1.5 6.6l-.9 1.6c-.2-.7 0-1.4.2-2 .6-1.5.1-3.1-1.1-4.1-1.1-.9-2.2-1.8-3.1-2.9v11.6c0 2.6-2.4 4.7-5.2 4.7S4.3 21.9 4.3 19.3s2.4-4.7 5.2-4.7c1 0 1.9.3 2.7.7V2.9c0-.7.5-1.3 1.2-1.3z"; }
-    if ["about", "me", "bio", "who"].iter().any(|w| t.contains(w)) { return "M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.4 0-8 2.2-8 5v3h16v-3c0-2.8-3.6-5-8-5z"; }
-    if ["schedule", "times", "when", "days"].iter().any(|w| t.contains(w)) { return "M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2zm-2 8h14v10H5z"; }
-    if ["rule"].iter().any(|w| t.contains(w)) { return "M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5z"; }
-    if ["social", "follow", "twitter", "insta", "tiktok", "link"].iter().any(|w| t.contains(w)) { return "M10.6 13.4a1 1 0 0 1 0-1.4l3.5-3.5a3 3 0 1 1 4.2 4.2l-2 2-1.4-1.4 2-2a1 1 0 0 0-1.4-1.4L12 13.4a1 1 0 0 1-1.4 0zM13.4 10.6a1 1 0 0 1 0 1.4l-3.5 3.5a3 3 0 1 1-4.2-4.2l2-2 1.4 1.4-2 2a1 1 0 0 0 1.4 1.4L12 10.6a1 1 0 0 1 1.4 0z"; }
-    if ["donat", "tip", "support", "sub"].iter().any(|w| t.contains(w)) { return "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54z"; }
-    if ["discord", "chat", "command"].iter().any(|w| t.contains(w)) { return "M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2z"; }
-    if ["merch", "shop", "store"].iter().any(|w| t.contains(w)) { return "M7 7V6a5 5 0 0 1 10 0v1h3l-1 15H5L4 7zm2 0h6V6a3 3 0 0 0-6 0z"; }
-    if ["setup", "pc", "spec", "gear"].iter().any(|w| t.contains(w)) { return "M3 4h18v12H3zm6 14h6v2H9z"; }
-    if ["music", "song", "request"].iter().any(|w| t.contains(w)) { return "M9 3v12.3A3.5 3.5 0 1 0 11 18V8h6V3z"; }
-    if ["faq", "question", "help"].iter().any(|w| t.contains(w)) { return "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-2h2zm2.1-7.7l-.9.9c-.7.7-1.2 1.3-1.2 2.8h-2v-.5c0-1.1.5-2.1 1.2-2.8l1.2-1.3A2 2 0 1 0 10 10H8a4 4 0 1 1 7.1 2.3z"; }
-    if ["game", "play"].iter().any(|w| t.contains(w)) { return "M7 6h10a5 5 0 0 1 0 10c-1.5 0-2.4-.7-3.2-1.6h-3.6C9.4 15.3 8.5 16 7 16A5 5 0 0 1 7 6zm-1 3v2H4v2h2v2h2v-2h2v-2H8V9z"; }
-    if ["powered", "omnipulse"].iter().any(|w| t.contains(w)) { return "M2 13h4l2.5-6 4 12 3-9 1.5 3H22v-2h-3.7L16 6.5l-3 9-4-12L5.3 11H2z"; }
-    "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"
 }
 
 /// The widgets' colours, as hex: a palette's, your own, or none (your accent)
@@ -610,12 +591,13 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             let mut v = vec![
                 f("note", "", "Make your channel's panels here, watch them change on the right, then click Open in Your Browser. Each panel there has a Save as PNG button: add them on Twitch (your channel, About, Edit Panels) or Kick.", "", "", ""),
                 f("head", "", "1. Your panels", "", "", ""),
-                f("note", "", "Give each panel a title, and any words to go under it. Click a panel's words, or Edit Words, to write them. Format them as in any word processor: Ctrl+B for bold, Ctrl+I for italics, and the list buttons for a list. Each panel's icon is picked from its title, or click Icon to use a picture of your own.", "", "", ""),
+                f("note", "", "Give each panel a title, and any words to go under it. Click a panel's words, or Edit Words, to write them. Format them as in any word processor: Ctrl+B for bold, Ctrl+I for italics, and the list buttons for a list. Each panel's icon is picked from its title. Click the icon to choose another, or to use a picture of your own.", "", "", ""),
             ];
             // (each panel its own card: its title, its words with their buttons, its icon, moved or taken out)
             let list = panels(cur);
             for (i, p) in list.iter().enumerate() {
-                let mut card = f("panelcard", &format!("pnl:{i}"), &p.title, "", &p.body, &p.img);
+                // (its icon chosen, and its picture made into an icon, in its note: "key|address")
+                let mut card = f("panelcard", &format!("pnl:{i}"), &p.title, &format!("{}|{}", p.icon, p.mask), &p.body, &p.img);
                 card.n = i as i32;
                 v.push(card);
             }
@@ -1256,7 +1238,7 @@ mod tests {
         cur.insert("panelList".into(), json!("About Me: Music / Good vibes | Rules"));
         cur.insert("panelOwnIcons".into(), json!(" | /overlay/r.png"));
         let p = panels(&cur);
-        assert_eq!(p, vec![Panel { title: "About Me".into(), body: "Music\nGood vibes".into(), img: "".into() }, Panel { title: "Rules".into(), body: "".into(), img: "/overlay/r.png".into() }]);
+        assert_eq!(p, vec![Panel { title: "About Me".into(), body: "Music\nGood vibes".into(), ..Default::default() }, Panel { title: "Rules".into(), img: "/overlay/r.png".into(), ..Default::default() }]);
         cur.insert("panelItems".into(), json!(panels_json(&p)));
         cur.insert("panelList".into(), json!("Something else"));
         assert_eq!(panels(&cur), p);

@@ -181,7 +181,11 @@ export global HudLook {
     in-out property <float> sel-h;
 }
 /// A channel panel, for the Panels' preview
-export struct PanelItem { title: string, line: string, body: bool, lines: int, icon: string, img: image, has-img: bool }
+export struct PanelItem { title: string, line: string, body: bool, lines: int, icon: string, img: image, has-img: bool, tint: bool }
+/// An icon to pick for a panel: its key, its name, its shape (24 x 24)
+export struct IconChoice { key: string, name: string, d: string }
+/// The panels' icons to pick from (panelicon.rs)
+export global PanelIcons { in-out property <[IconChoice]> list; }
 export global PanelLook {
     in-out property <[PanelItem]> items;
     // (the Powered by OmniPulse panel's mark: theme, omnipulse or plain)
@@ -231,7 +235,7 @@ export struct BotTile { id: string, name: string, state: string, line1: string, 
 export struct BotFeat { id: string, name: string, note: string, on: bool, open: bool, changed: bool }
 export struct BotStep { id: string, title: string, note: string, state: string, optional: bool }
 export struct BotLine { who: string, heard: string, did: string, platform: string }
-export struct BotField { key: string, kind: string, label: string, note: string, value: string, extra: string, changed: bool, n: int, opts: [string], opt-ids: [string], c1: color, c2: color, cols: [color], words: styled-text }
+export struct BotField { key: string, kind: string, label: string, note: string, value: string, extra: string, changed: bool, n: int, opts: [string], opt-ids: [string], c1: color, c2: color, cols: [color], words: styled-text, pic: image }
 // (an artist you follow: whether on SoundCloud and on Spotify, for its menu)
 export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool, on-yt: bool, row: Row }
 /// A page being loaded: each platform it asks, and whether it's answered yet
@@ -3689,7 +3693,8 @@ component PanelPreview inherits Rectangle {
                             border-width: pi.th == "terminal" ? 1.2px : 0px;
                             border-color: pi.ink;
                             if !p.has-img: Glyph { d: p.icon; width: parent.width * 0.6; height: self.width; fill: pi.th == "terminal" ? pi.ink : #ffffff; }
-                            if p.has-img: Image { width: parent.width; height: parent.height; source: p.img; image-fit: cover; }
+                            if p.has-img && !p.tint: Image { width: parent.width; height: parent.height; source: p.img; image-fit: cover; }
+                            if p.has-img && p.tint: Image { width: parent.width * 0.64; height: self.width; source: p.img; colorize: pi.th == "terminal" ? pi.ink : #ffffff; }
                         }
                     }
                     VerticalLayout {
@@ -3722,7 +3727,8 @@ component PanelPreview inherits Rectangle {
                             border-width: pi.th == "terminal" ? 1.2px : 0px;
                             border-color: pi.ink;
                             if !p.has-img: Glyph { d: p.icon; width: 22px; height: 22px; fill: pi.th == "terminal" ? pi.ink : #ffffff; }
-                            if p.has-img: Image { width: parent.width; height: parent.height; source: p.img; image-fit: cover; }
+                            if p.has-img && !p.tint: Image { width: parent.width; height: parent.height; source: p.img; image-fit: cover; }
+                            if p.has-img && p.tint: Image { width: 23px; height: 23px; source: p.img; colorize: pi.th == "terminal" ? pi.ink : #ffffff; }
                         }
                         Text { text: pi.shown-title; color: pi.ink; font-size: min(24px, ((PanelLook.icons ? 226px : 276px) - pi.keep) / max(1, pi.shown-title.character-count) * 1.75); font-weight: 800; vertical-alignment: center; font-family: pi.ff; }
                     }
@@ -4617,7 +4623,12 @@ component Light inherits Rectangle {
 component PanelCard inherits Rectangle {
     in property <BotField> f;
     callback act(string);
-    property <string> applied;
+    property <bool> picking;
+    property <bool> has-pic: root.f.extra != "";
+    property <bool> tinted: root.f.opt-ids.length > 1 && root.f.opt-ids[1] != "";
+    property <string> chosen: root.f.opt-ids.length > 0 ? root.f.opt-ids[0] : "";
+    property <length> cell: 44px;
+    property <int> per-row: max(1, floor((root.width - 26px + 6px) / (root.cell + 6px)));
     // (the page's own box round each field is its frame)
     height: pc.preferred-height;
     // (the words or title changed by the app (formatted, or moved here from another card): shown; what's
@@ -4641,12 +4652,69 @@ component PanelCard inherits Rectangle {
                 ti := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; font-weight: 700; single-line: true; text: root.f.label; edited => { root.act("pnl:" + root.f.n + ":title:" + self.text); } }
                 if ti.text == "": Text { x: 10px; text: "Title, like About Me"; color: Theme.muted.with-alpha(0.6); font-size: 13px; vertical-alignment: center; }
             }
-            // (its icon: the one its title picks, or a picture of yours)
-            VerticalLayout { alignment: center; Pill { label: root.f.extra != "" ? "Your Icon" : "Icon..."; on: root.f.extra != ""; tip: root.f.extra != "" ? "Choose another picture for this panel's icon" : "Use a picture of your own for this panel's icon, instead of the one its title picks"; clicked => { root.act("pnl:" + root.f.n + ":pick"); } } }
-            if root.f.extra != "": VerticalLayout { alignment: center; IconButton { d: Icons.close; size: 26px; tip: "Use the icon its title picks again"; clicked => { root.act("pnl:" + root.f.n + ":noimg"); } } }
+            // (its icon: the one picked (its title's, at first), or a picture of yours; click it to choose)
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 34px;
+                    height: 34px;
+                    border-radius: 9px;
+                    clip: true;
+                    background: root.has-pic && !root.tinted ? transparent : @linear-gradient(135deg, PanelLook.c1 0%, PanelLook.c2 100%);
+                    border-width: root.picking || it.has-hover ? 2px : 0px;
+                    border-color: Theme.accent;
+                    if !root.has-pic: Glyph { d: root.f.opts.length > 0 ? root.f.opts[0] : ""; width: 20px; height: 20px; fill: #ffffff; }
+                    if root.has-pic && !root.tinted: Image { width: parent.width; height: parent.height; source: root.f.pic; image-fit: cover; }
+                    if root.has-pic && root.tinted: Image { width: 22px; height: 22px; source: root.f.pic; colorize: #ffffff; }
+                    it := TouchArea { mouse-cursor: pointer; clicked => { root.picking = !root.picking; } }
+                }
+            }
             VerticalLayout { alignment: center; IconButton { d: "M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"; size: 28px; tip: "Move it up"; clicked => { root.act("pnl:" + root.f.n + ":up"); } } }
             VerticalLayout { alignment: center; IconButton { d: "M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"; size: 28px; tip: "Move it down"; clicked => { root.act("pnl:" + root.f.n + ":down"); } } }
             VerticalLayout { alignment: center; IconButton { d: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"; size: 28px; tip: "Take this panel out"; clicked => { root.act("pnl:" + root.f.n + ":del"); } } }
+        }
+        // (its icon to choose: ours (Auto, the one its title picks), or a picture of yours, made into an icon if you like)
+        if root.picking: VerticalLayout {
+            padding-left: 26px;
+            spacing: 8px;
+            Text { text: "Pick an Icon"; color: Theme.text; font-size: 13px; font-weight: 700; }
+            Rectangle {
+                height: ceil((PanelIcons.list.length + 1) / root.per-row) * (root.cell + 6px);
+                // (Auto: the one its title picks)
+                Rectangle {
+                    x: 0;
+                    y: 0;
+                    width: root.cell;
+                    height: root.cell;
+                    border-radius: 9px;
+                    background: at.has-hover ? Theme.elevated : Theme.bg;
+                    border-width: !root.has-pic && root.chosen == "" ? 2px : 1px;
+                    border-color: !root.has-pic && root.chosen == "" ? Theme.accent : Theme.line;
+                    Text { text: "Auto"; color: Theme.text; font-size: 11px; font-weight: 700; }
+                    at := TouchArea { mouse-cursor: pointer; clicked => { root.act("pnl:" + root.f.n + ":icon:"); } }
+                }
+                for ic[k] in PanelIcons.list: Rectangle {
+                    property <bool> on: !root.has-pic && root.chosen == ic.key;
+                    x: mod(k + 1, root.per-row) * (root.cell + 6px);
+                    y: floor((k + 1) / root.per-row) * (root.cell + 6px);
+                    width: root.cell;
+                    height: root.cell;
+                    border-radius: 9px;
+                    background: self.on ? @linear-gradient(135deg, PanelLook.c1 0%, PanelLook.c2 100%) : ta.has-hover ? Theme.elevated : Theme.bg;
+                    border-width: self.on ? 2px : 1px;
+                    border-color: self.on ? Theme.accent : Theme.line;
+                    Glyph { d: ic.d; width: 22px; height: 22px; fill: parent.on ? #ffffff : Theme.text; }
+                    ta := TouchArea { mouse-cursor: pointer; clicked => { root.act("pnl:" + root.f.n + ":icon:" + ic.key); } }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                Pill { label: root.has-pic ? "Choose Another Picture..." : "Use Your Own Picture..."; on: root.has-pic; tip: "Pick a picture on your computer for this panel's icon"; clicked => { root.act("pnl:" + root.f.n + ":pick"); } }
+                if root.has-pic: Pill { label: "Make It an Icon"; on: root.tinted; tip: "Cuts out your picture's background and shows the rest in your panel colours, like the other icons. Best for logos."; clicked => { root.act("pnl:" + root.f.n + ":tint"); } }
+                if root.has-pic: Pill { label: "Remove Picture"; tip: "Go back to the icons here"; clicked => { root.act("pnl:" + root.f.n + ":noimg"); } }
+                Pill { label: "Done"; clicked => { root.picking = false; } }
+            }
         }
         // (its words, shown as they'll look: click them, or Edit Words, to write and format them)
         HorizontalLayout {
