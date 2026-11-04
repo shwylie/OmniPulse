@@ -568,6 +568,65 @@ mod tests {
         stop("chatbot");
     }
 
+    /// Channel points as the currency: Request a Song redeemed with a song is requested and kept; one without a
+    /// song is given back; every redemption's cost counts towards the viewer's rank
+    #[test]
+    fn channel_points_pay_for_requests_and_count_for_ranks() {
+        let _one = one_at_a_time();
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let listener = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        rt.spawn(async move {
+            while let Ok((tcp, _)) = listener.accept().await {
+                let path = Arc::new(Mutex::new(String::new()));
+                let p2 = path.clone();
+                let ws = tokio_tungstenite::accept_hdr_async(tcp, move |req: &tokio_tungstenite::tungstenite::handshake::server::Request, res| { *p2.lock().unwrap() = req.uri().path().to_string(); Ok(res) }).await.unwrap();
+                let (mut w, mut r) = ws.split();
+                if path.lock().unwrap().as_str() == "/irc" { tokio::spawn(async move { while r.next().await.is_some() {} }); continue; }
+                let _ = w.send(Message::Text(r#"{"metadata":{"message_type":"session_welcome"},"payload":{"session":{"id":"s1"}}}"#.into())).await;
+                let red = |id: &str, input: &str, reward: &str, title: &str, cost: u32| format!(r#"{{"metadata":{{"message_type":"notification"}},"payload":{{"subscription":{{"type":"channel.channel_points_custom_reward_redemption.add"}},"event":{{"id":"{id}","user_name":"Viewer","user_id":"9","user_input":"{input}","reward":{{"id":"{reward}","title":"{title}","cost":{cost}}}}}}}}}"#);
+                for m in [red("X1", "dancing queen", "R1", "Request a Song", 500), red("X2", "", "R1", "Request a Song", 500), red("X3", "", "R2", "Hydrate", 200)] { let _ = w.send(Message::Text(m.into())).await; }
+                tokio::spawn(async move { while r.next().await.is_some() {} });
+            }
+        });
+        let asked: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let a2 = asked.clone();
+        set_app_handler(Arc::new(move |_p: &str, ask: Value, answer: Box<dyn FnOnce(Value) + Send>| {
+            a2.lock().unwrap().push(ask.clone());
+            answer(match ask["op"].as_str() { Some("request") => json!({ "ok": true, "message": "Added \"Dancing Queen\" by ABBA." }), _ => json!({ "ok": true }) });
+        }));
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot");
+        let code = std::fs::read_to_string(root.join("main.js")).unwrap()
+            .replace("wss://irc-ws.chat.twitch.tv:443", &format!("ws://127.0.0.1:{port}/irc"))
+            .replace("wss://eventsub.wss.twitch.tv/ws", &format!("ws://127.0.0.1:{port}/events"))
+            .replace("if (await validate(token)) return token;", "return token;")
+            .replace(r#"await helix("PATCH", "channel_points/custom_rewards/redemptions?broadcaster_id=" + S().userId + "&reward_id=" + encodeURIComponent(rewardId) + "&id=" + encodeURIComponent(redemptionId), { status: ok ? "FULFILLED" : "CANCELED" });"#,
+                r#"await OmniPulse.app.say("settle " + rewardId + " " + redemptionId + " " + (ok ? "FULFILLED" : "CANCELED"));"#);
+        let mut m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        m.hosts.push("127.0.0.1".into());
+        let pkg = core::plugins::Package { manifest: m, code, digest: String::new(), bundled: true };
+        let p = start(&pkg, &json!({ "token": "t", "login": "me", "userId": "1", "twitchClientId": "c", "pointsOn": true, "pointsCurrency": "channel", "srRewardTwitch": "R1", "srCost": 500 }), rt.handle().clone()).unwrap();
+        let said = |a: &[Value], s: &str| a.iter().any(|x| x["op"] == "say" && x["args"][0] == s);
+        let spent = |a: &[Value]| a.iter().rev().find(|x| x["op"] == "saveSettings" && x["args"][0]["spent"].is_object()).map(|x| x["args"][0]["spent"]["viewer"].clone()).unwrap_or(Value::Null);
+        let until = Instant::now() + Duration::from_secs(12);
+        loop {
+            let a = asked.lock().unwrap().clone();
+            if (said(&a, "settle R1 X1 FULFILLED") && said(&a, "settle R1 X2 CANCELED") && spent(&a) == json!(700)) || Instant::now() > until { break; }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let a = asked.lock().unwrap().clone();
+        // (the song asked for once, and kept; the empty one given back; the other reward left alone)
+        assert_eq!(a.iter().filter(|x| x["op"] == "request").count(), 1, "{a:#?}");
+        assert!(a.iter().any(|x| x["op"] == "request" && x["args"] == json!(["Viewer", "dancing queen", "twitch"])), "{a:#?}");
+        assert!(said(&a, "settle R1 X1 FULFILLED") && said(&a, "settle R1 X2 CANCELED") && !a.iter().any(|x| x["op"] == "say" && x["args"][0].as_str().is_some_and(|s| s.contains("X3"))), "{a:#?}");
+        // (the kept ones counted for the rank: 500 + 200; the one given back not)
+        assert_eq!(spent(&a), json!(700), "{a:#?}");
+        drop(p);
+        stop("chatbot");
+    }
+
     /// Twitch shows as connected as soon as its chat welcomes the chatbot (001), with no message in chat yet;
     /// and with a bot account too, which has its own connection
     #[test]

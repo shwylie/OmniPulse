@@ -292,7 +292,8 @@ async function onChat(m) {
       if (!allowed(who, rank(m.tags))) return reply(id, "@" + user + " song requests are for " + WHO_NAMES[who] + " right now.", platform);
       const wait = Math.max(0, num(S().srCooldown)) * 1000, k = user.toLowerCase();
       if (wait && srLast[k] && Date.now() - srLast[k] < wait) return reply(id, "@" + user + " you can request again in " + Math.ceil((wait - (Date.now() - srLast[k])) / 1000) + " s.", platform);
-      const cost = yes(S().pointsOn) ? Math.max(0, num(S().srCost)) : 0;
+      if (channelMode() && num(S().srCost) > 0 && (S().srRewardTwitch || S().srRewardKick)) return reply(id, "@" + user + " to request a song, redeem Request a Song with your channel points.", platform);
+      const cost = yes(S().pointsOn) && !channelMode() ? Math.max(0, num(S().srCost)) : 0;
       if (cost && pointsOf(user) < cost) return reply(id, "@" + user + " a request costs " + cost + " " + (S().pointsName || "points") + ". You have " + pointsOf(user) + ".", platform);
       try {
         const r = await OmniPulse.app.request(user, args, platform);
@@ -584,6 +585,11 @@ function onEvent(type, e) {
   const said = (e.message && e.message.text) || e.title || "";
   const ctx = { user: a.user || e.user_name || e.from_broadcaster_user_name || "", userId: e.user_id || e.from_broadcaster_user_id || "", amount: ev === "adbreak" ? String(e.duration_seconds || 0) : amount, message: a.message || said || e.user_input || "", reward, rewardId, redemptionId: ev === "reward" ? String(e.id || "") : "", rawInput: e.user_input || said || "", msgId: e.msg_id || "", platform: "twitch", winner: won, tier: String(e.tier || "") };
   Object.assign(ctx, words(ctx.rawInput));
+  if (ev === "reward") {
+    const cost = num(e.reward && e.reward.cost);
+    if (paidOf("twitch", rewardId, reward)) { paidReward("twitch", rewardId, reward, ctx.redemptionId, ctx.user, ctx.userId, e.user_input || "", cost).catch((x) => OmniPulse.log("paid reward: " + x.message)); return; }
+    addSpent(ctx.user, cost);
+  }
   fire(ev, ctx);
 }
 
@@ -638,7 +644,7 @@ function setVar(name, value, per, keep, user) {
 function fill(text, ctx) {
   return String(text == null ? "" : text).replace(/%([A-Za-z0-9_]+(?::[A-Za-z0-9_ ]+)?)%/g, (whole, k) => {
     if (k.startsWith("var:")) { const v = getVar(k.slice(4).trim(), ctx.user); return v === "" ? "0" : String(v); }
-    if (k === "points") return String(pointsOf(ctx.user));
+    if (k === "points") return String(channelMode() ? spentOf(ctx.user) : pointsOf(ctx.user));
     if (k === "pointsname") return pointsName();
     if (k === "rank") return rankOf(ctx.user);
     if (k === "credits") return creditsLine();
@@ -1062,7 +1068,7 @@ async function step(st, ctx, depth) {
     case "points": {
       const who = f("who").replace("@", "").trim();
       const n = Math.round(num(f("amount")));
-      if (!who) break;
+      if (!who || channelMode()) break;
       if (n < 0 && pointsOf(who) < -n) { say(ctx.msgId, "@" + who + ", that takes " + -n + " " + pointsName() + " (you have " + pointsOf(who) + ")."); return false; }
       addPoints(who, n);
       break;
@@ -1676,6 +1682,7 @@ let duels = {}, heists = {}, trivia = null, credits = {};
 
 // A bet: a number or "all", at least so many, and theirs to bet (taken from them by the game)
 function betOf(text, user, least, say, ctx) {
+  if (channelMode()) { say(ctx.msgId, "@" + user + ", games on points are off here: this channel uses channel points."); return null; }
   const have = pointsOf(user);
   const bet = String(text).trim().toLowerCase() === "all" ? have : Math.floor(num(text));
   if (!(bet > 0) || bet < Math.max(1, least)) { say(ctx.msgId, "@" + user + ", bet at least " + Math.max(1, least) + " " + pointsName() + " (you have " + have + ")."); return null; }
@@ -1693,7 +1700,7 @@ function gameChat(user, text, platform) {
 
 // A viewer's rank, by their points (the settings' list: "0 Newcomer, 100 Regular...")
 function rankOf(user) {
-  const have = pointsOf(user);
+  const have = rankScore(user);
   let best = "";
   String(S().pointsRanks || "").split(",").map((x) => /^\s*(\d+)\s+(.+?)\s*$/.exec(x)).filter(Boolean)
     .map((m) => [num(m[1]), m[2]]).sort((a, b) => a[0] - b[0]).forEach(([at, title]) => { if (have >= at) best = title; });
@@ -1741,11 +1748,118 @@ function addPoints(who, n) {
   saveSoon = setTimeout(() => { OmniPulse.app.saveSettings({ points: S().points }).catch(() => {}); }, 3000);
 }
 
+// ---------- channel points as the currency: Twitch and Kick let no app see or take a viewer's channel points, so
+// what costs something is a reward they redeem (Request a Song, Spin the Wheel), given back if it can't be done;
+// and the channel points each viewer spends on your rewards are kept, for their rank ----------
+function channelMode() { return yes(S().pointsOn) && S().pointsCurrency === "channel"; }
+function spentOf(who) { return num((S().spent || {})[String(who || "").toLowerCase()]); }
+let spentSoon = null;
+function addSpent(who, n) {
+  const k = String(who || "").toLowerCase();
+  if (!k || !(n > 0)) return;
+  const all = Object.assign({}, S().spent || {});
+  all[k] = num(all[k]) + n;
+  OmniPulse.settings.spent = all;
+  if (spentSoon) clearTimeout(spentSoon);
+  spentSoon = setTimeout(() => { OmniPulse.app.saveSettings({ spent: S().spent }).catch(() => {}); }, 3000);
+}
+// (what a rank counts: the app's points, the channel points spent on your rewards, or both)
+function rankBy() { const by = String(S().pointsRankBy || ""); return by === "spent" || by === "both" || by === "points" ? by : channelMode() ? "spent" : "points"; }
+function rankScore(who) { const by = rankBy(); return by === "spent" ? spentOf(who) : by === "both" ? pointsOf(who) + spentOf(who) : pointsOf(who); }
+function rankScoreName() { return rankBy() === "spent" ? "channel points spent" : pointsName(); }
+
+// (the paid features' rewards, as kept: "<feature>Reward<Platform>" ids)
+const PAID = {
+  sr: { title: "Request a Song", prompt: "The song and who it's by, like: take on me by a-ha", input: true, cost: (x) => Math.max(1, Math.round(num(x.srCost) || 500)), colour: "#1DB954" },
+  wheel: { title: "Spin the Wheel", prompt: "", input: false, cost: (x) => Math.max(1, Math.round(num(x.wheelCost) || 300)), colour: "#B48EFF" },
+};
+function paidOf(platform, rewardId, title) {
+  const x = S(), key = platform === "kick" ? "Kick" : "Twitch";
+  return Object.keys(PAID).find((k) => (rewardId && String(x[k + "Reward" + key] || "") === String(rewardId)) || (!rewardId && title && title === PAID[k].title && x[k + "Reward" + key])) || "";
+}
+// A paid feature's reward redeemed: done (a song requested, the wheel spun) and kept, or given back if it can't
+// be done. True if it was one of them
+async function paidReward(platform, rewardId, title, redemptionId, user, userId, input, cost) {
+  const which = paidOf(platform, rewardId, title);
+  if (!which) return false;
+  let ok = false;
+  try {
+    if (which === "sr") {
+      if (S().requests === false) reply(null, "@" + user + " song requests are off right now, so your points are given back.", platform);
+      else if (!String(input || "").trim()) reply(null, "@" + user + " put the song in the box when you redeem it. Your points are given back.", platform);
+      else {
+        const r = await OmniPulse.app.request(user, input, platform);
+        counts.requests++;
+        ok = r.ok !== false;
+        noted(user, "Request a Song: " + input, r.message, platform);
+        reply(null, r.message + (ok ? "" : " Your points are given back."), platform);
+      }
+    } else {
+      if (wheelPrizes().length < 2 || (fun.wheel && Date.now() - fun.wheel.at < 9000)) reply(null, "@" + user + " the wheel can't spin right now, so your points are given back.", platform);
+      else { await wheelSpin(user, null, platform, true); ok = true; }
+    }
+  } catch (e) { OmniPulse.log("paid reward: " + e.message); }
+  // (counted for their rank only if it's kept: one given back cost them nothing)
+  if (ok) addSpent(user, cost);
+  settleRedemption(platform, rewardId || String(S()[which + "Reward" + (platform === "kick" ? "Kick" : "Twitch")] || ""), redemptionId, userId, ok).catch((e) => OmniPulse.log("redemption: " + e.message));
+  return true;
+}
+// (kept, or given back: Twitch's redemption fulfilled or cancelled; Kick's accepted or rejected, found among the
+// reward's waiting ones by who redeemed it if Kick's live feed didn't say which)
+async function settleRedemption(platform, rewardId, redemptionId, userId, ok) {
+  if (platform === "kick") {
+    let id = redemptionId;
+    if (!id && rewardId) {
+      const j = await kickApi("GET", "channels/rewards/redemptions?reward_id=" + encodeURIComponent(rewardId) + "&status=pending", null, false, "channel");
+      const list = ((j.data || [])[0] || {}).redemptions || [];
+      const mine = list.filter((r) => !userId || String((r.redeemer || {}).user_id || "") === String(userId)).sort((a, c) => String(c.redeemed_at || "").localeCompare(String(a.redeemed_at || "")));
+      id = mine[0] && mine[0].id;
+    }
+    if (id) await kickApi("POST", "channels/rewards/redemptions/" + (ok ? "accept" : "reject"), { ids: [id] }, false, "channel");
+    return;
+  }
+  if (!redemptionId || !rewardId || !S().userId) return;
+  await helix("PATCH", "channel_points/custom_rewards/redemptions?broadcaster_id=" + S().userId + "&reward_id=" + encodeURIComponent(rewardId) + "&id=" + encodeURIComponent(redemptionId), { status: ok ? "FULFILLED" : "CANCELED" });
+}
+// The paid features' rewards made (or brought up to date: their price) on Twitch and Kick, as signed in. Only
+// rewards OmniPulse makes can have their points given back, so it makes its own
+async function makePointRewards(values) {
+  const x = Object.assign({}, S(), values || {});
+  const done = [], failed = [], keep = {};
+  const want = Object.keys(PAID).filter((k) => k !== "wheel" || yes(x.wheelOn));
+  for (const k of want) {
+    const r = PAID[k], cost = r.cost(x);
+    if (x.token && x.userId) {
+      const body = { title: r.title, cost, prompt: r.prompt, is_user_input_required: r.input, background_color: r.colour, should_redemptions_skip_request_queue: false };
+      try {
+        let id = String(x[k + "RewardTwitch"] || "");
+        if (id) { try { await helix("PATCH", "channel_points/custom_rewards?broadcaster_id=" + x.userId + "&id=" + encodeURIComponent(id), { cost, title: r.title, is_enabled: true }); } catch (e) { if (/404|403/.test(e.message)) id = ""; else throw e; } }
+        if (!id) id = String((((await helix("POST", "channel_points/custom_rewards?broadcaster_id=" + x.userId, body)).data || [])[0] || {}).id || "");
+        if (id) { keep[k + "RewardTwitch"] = id; done.push(r.title + " on Twitch (" + cost + ")"); }
+      } catch (e) { failed.push(r.title + " on Twitch: " + e.message); }
+    }
+    if (yes(x.kickOn) && x.kickToken) {
+      const body = { title: r.title, cost, description: r.prompt, is_user_input_required: r.input, background_color: r.colour, should_redemptions_skip_request_queue: false };
+      try {
+        let id = String(x[k + "RewardKick"] || "");
+        if (id) { try { await kickApi("PATCH", "channels/rewards/" + encodeURIComponent(id), { cost, title: r.title, is_enabled: true }, false, "channel"); } catch (e) { if (/404|403/.test(e.message)) id = ""; else throw e; } }
+        if (!id) { const j = await kickApi("POST", "channels/rewards", body, false, "channel"); id = String((j.data && j.data.id) || j.id || ""); }
+        if (id) { keep[k + "RewardKick"] = id; done.push(r.title + " on Kick (" + cost + ")"); }
+      } catch (e) { failed.push(r.title + " on Kick: " + e.message); }
+    }
+  }
+  Object.assign(OmniPulse.settings, keep);
+  await OmniPulse.app.saveSettings(keep);
+  if (!done.length && !failed.length) return "Sign in to Twitch or Kick first, so the rewards can be made there.";
+  return (done.length ? "Ready: " + done.join(", ") + "." : "") + (failed.length ? " Couldn't make " + failed.join("; ") : "");
+}
+
 // Every so often while you're live (or always, if it's set so): each viewer who's chatted since, given theirs
+// (none with channel points as the currency)
 function setPoints() {
   if (pointsTimer) clearInterval(pointsTimer);
   pointsTimer = null;
-  if (!yes(S().pointsOn)) return;
+  if (!yes(S().pointsOn) || channelMode()) return;
   const every = Math.max(1, num(S().pointsEvery) || 10) * 60000;
   pointsTimer = setInterval(() => {
     if (!chat || (!isLive && !yes(S().pointsOffline))) return;
@@ -1985,6 +2099,14 @@ async function kickConnect() {
 }
 
 const KICK_SEEN = {};
+// (your Kick rewards' prices, by id and by title: for what each redemption cost, which Kick's live feed may not say)
+const kickRewardCosts = {};
+let kickCostsAt = 0;
+function kickCostsFetch() {
+  if (!S().kickToken || Date.now() - kickCostsAt < 60000) return;
+  kickCostsAt = Date.now();
+  kickApi("GET", "channels/rewards", null, false, "channel").then((j) => (j.data || []).forEach((r) => { kickRewardCosts[String(r.id)] = num(r.cost); kickRewardCosts["t:" + r.title] = num(r.cost); })).catch(() => {});
+}
 // A Kick follow, from the live feed or Kick's webhook (whichever comes first): alerted and its actions started once
 const kickFollows = new Map();
 function kickFollowed(user) {
@@ -2110,6 +2232,12 @@ function onKick(event, d) {
     case "RewardRedeemedEvent": {
       const user = d.username || (d.redeemer && d.redeemer.username) || "";
       const input = String(d.user_input || "");
+      const rid = String(d.reward_id || (d.reward && d.reward.id) || ""), title = d.reward_title || (d.reward && d.reward.title) || "";
+      // (what it cost: Kick's live feed may not say, so from your rewards' list)
+      const cost = num(d.cost || (d.reward && d.reward.cost)) || num((kickRewardCosts[rid] || kickRewardCosts["t:" + title]) || 0);
+      if (!cost) kickCostsFetch();
+      if (paidOf("kick", rid, title)) { paidReward("kick", rid || "", title, String(d.redemption_id || ""), user, String(d.user_id || (d.redeemer && d.redeemer.user_id) || ""), input, cost).catch((x) => OmniPulse.log("paid reward: " + x.message)); return; }
+      addSpent(user, cost);
       go("reward", { user, reward: d.reward_title || (d.reward && d.reward.title) || "", rewardId: String(d.reward_id || (d.reward && d.reward.id) || ""), rawInput: input, message: input });
       return;
     }
@@ -2377,7 +2505,7 @@ function suitePush() {
       } : { on: hypeLive(), level: fun.level, fill: (fun.hype % hypeStep()) / hypeStep(), levelAt: fun.levelAt, label: String(x.hypeLabel || "Hype"), race: raceOf(fun.plat) },
       voteskip: { on: yes(x.skipOn), votes: fun.votes.size, need: Math.max(1, num(x.skipVotes) || 5), song: fun.song, command: String(x.skipCommand || "!skip") },
       wheel: Object.assign({ prizes: wheelPrizes(), weights: wheelList().map((p) => p.w), command: String(x.wheelCommand || "!spin"), secs: wheelSecs(), colors: String(x.wheelColors || "theme"), hide: yes(x.wheelHide) }, fun.wheel || {}),
-      leaderboard: { list: leaders(), name: pointsName() },
+      leaderboard: { list: leaders(), name: rankScoreName() },
       credits: creditsWidget(),
       tune: fun.tune || null,
       burst: fun.burst,
@@ -2694,8 +2822,9 @@ async function wheelSpin(user, id, platform, free) {
   if (!free) {
     const wait = Math.max(0, num(x.wheelCooldown)) * 1000;
     if (wait && fun.spunAt[k] && Date.now() - fun.spunAt[k] < wait) return reply(id, "@" + user + " you can spin again in " + Math.ceil((wait - (Date.now() - fun.spunAt[k])) / 1000) + " s.", platform);
+    if (channelMode() && num(x.wheelCost) > 0 && (x.wheelRewardTwitch || x.wheelRewardKick)) return reply(id, "@" + user + " to spin, redeem Spin the Wheel with your channel points.", platform);
     const cost = Math.max(0, num(x.wheelCost));
-    if (cost && yes(x.pointsOn)) {
+    if (cost && yes(x.pointsOn) && !channelMode()) {
       if (pointsOf(user) < cost) return reply(id, "@" + user + " a spin costs " + cost + " " + pointsName() + ".", platform);
       addPoints(user, -cost);
     }
@@ -2777,8 +2906,8 @@ function tuneEnd(winner) {
 
 // (the leaderboard: the most points, from the points kept)
 function leaders() {
-  const all = S().points || {};
-  return Object.keys(all).map((k) => ({ user: k, points: num(all[k]) })).filter((x) => x.points > 0).sort((a, b) => b.points - a.points).slice(0, Math.min(10, Math.max(3, num(S().boardCount) || 5)));
+  const names = new Set(Object.keys(S().points || {}).concat(Object.keys(S().spent || {})));
+  return Array.from(names).map((k) => ({ user: k, points: rankScore(k) })).filter((x) => x.points > 0).sort((a, b) => b.points - a.points).slice(0, Math.min(10, Math.max(3, num(S().boardCount) || 5)));
 }
 
 // (the timer's command: start, pause, add or take away minutes, reset; moderators and you. And the fun's own:
@@ -3320,6 +3449,7 @@ OmniPulse.register({
   signInChannelCopy(values) { return signIn("channel", TWITCH_SCOPES_CHANNEL, values, true); },
   signInBotCopy(values) { return signIn("bot", TWITCH_SCOPES_BOT, values, true); },
   signInKick(values) { return signInKick(values); },
+  makePointRewards(values) { return makePointRewards(values); },
   signInKickCopy(values) { return signInKick(values, true); },
   signInKickBot(values) { return signInKick(values, false, "bot"); },
   signInKickBotCopy(values) { return signInKick(values, true, "bot"); },

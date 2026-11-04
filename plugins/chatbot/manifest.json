@@ -187,6 +187,22 @@
       "note": "Points, then the rank's name, with commas between: %rank% in an action is a viewer's."
     },
     {
+      "key": "pointsCurrency",
+      "label": "What Viewers Spend",
+      "type": "select",
+      "default": "app",
+      "options": ["app", "channel"],
+      "note": "app: the chatbot's own points. channel: channel points, through rewards OmniPulse makes."
+    },
+    {
+      "key": "pointsRankBy",
+      "label": "Ranks Count",
+      "type": "select",
+      "default": "",
+      "options": ["", "points", "spent", "both"],
+      "note": "points: the chatbot's points. spent: channel points spent on your rewards. both: the two added up."
+    },
+    {
       "key": "pointsOffline",
       "label": "Points While Offline Too",
       "type": "toggle",

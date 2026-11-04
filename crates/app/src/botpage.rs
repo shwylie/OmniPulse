@@ -1226,14 +1226,29 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             f("link", "", "From a backup file", "Streamer.bot (an export, a .sb file or its backup zip) or Mix It Up (a .miubackup or .miucommand).", "", "import:file"),
             f("link", "", "Paste from Streamer.bot", "In Streamer.bot, click Export and copy the code it gives you. Then click this.", "", "import:paste"),
         ]),
-        "points" => ("Points".into(), vec![
-            f("toggle", "pointsOn", "Points", "Your own currency. Viewers earn it by chatting, and spend it in your actions and games.", if on(cur, "pointsOn", false) { "true" } else { "false" }, ""),
-            f("text", "pointsName", "Name", "What points are called in chat.", s(cur, "pointsName"), "points"),
-            f("number", "pointsAmount", "Points each time", "Given to each viewer who chatted since the last time.", &n(cur, "pointsAmount"), "10"),
-            f("number", "pointsEvery", "How often (minutes)", "", &n(cur, "pointsEvery"), "10"),
-            f("text", "pointsRanks", "Ranks", "Each rank is a number of points and a name, separated by commas.", s(cur, "pointsRanks"), "0 Newcomer, 100 Regular, 500 Veteran"),
-            f("toggle", "pointsOffline", "Also while you're offline", "When this is off, viewers only earn points while you're live.", if on(cur, "pointsOffline", false) { "true" } else { "false" }, ""),
-        ]),
+        "points" => ("Points".into(), {
+            let channel = s(cur, "pointsCurrency") == "channel";
+            let mut v = vec![
+                f("toggle", "pointsOn", "Points and ranks", "A currency viewers spend on song requests, the wheel and your actions, and ranks for your regulars.", if on(cur, "pointsOn", false) { "true" } else { "false" }, ""),
+                f("chips", "pointsCurrency", "What viewers spend", if channel { "Twitch and Kick don't let any app see or take channel points, so paid things become rewards viewers redeem. If one can't be done, their points are given back." } else { "The chatbot's own points: viewers earn them by chatting." }, if channel { "channel" } else { "app" }, "app=The Chatbot's Points|channel=Channel Points"),
+            ];
+            if channel {
+                v.push(f("note", "", "Request a Song and Spin the Wheel become channel points rewards, at the prices set on their pages (Song Requests, and the wheel's). Click below to make them, and again after changing a price. Games that bet points (gamble, duels, heists) are off.", "", "", ""));
+                v.push(f("buttons", "", "", "OmniPulse makes its own rewards, because Twitch only lets the app that made a reward give its points back.", "", "pts:rewards=Make the Rewards"));
+            } else {
+                v.extend([
+                    f("text", "pointsName", "Name", "What points are called in chat.", s(cur, "pointsName"), "points"),
+                    f("number", "pointsAmount", "Points each time", "Given to each viewer who chatted since the last time.", &n(cur, "pointsAmount"), "10"),
+                    f("number", "pointsEvery", "How often (minutes)", "", &n(cur, "pointsEvery"), "10"),
+                    f("toggle", "pointsOffline", "Also while you're offline", "When this is off, viewers only earn points while you're live.", if on(cur, "pointsOffline", false) { "true" } else { "false" }, ""),
+                ]);
+            }
+            let by = s(cur, "pointsRankBy");
+            let by = if by.is_empty() { if channel { "spent" } else { "points" } } else { by };
+            v.push(f("chips", "pointsRankBy", "Ranks count", "Channel points spent counts what viewers spend on any of your rewards from now on.", by, "points=The Chatbot's Points|spent=Channel Points Spent|both=Both, Added Up"));
+            v.push(f("text", "pointsRanks", "Ranks", "Each rank is a number and a name, separated by commas.", s(cur, "pointsRanks"), "0 Newcomer, 100 Regular, 500 Veteran"));
+            v
+        }),
         _ => (String::new(), Vec::new()),
     }
 }
@@ -1400,6 +1415,8 @@ pub fn method(act: &str) -> Option<&'static str> {
         "in:twitch:bot" => "signInBot", "link:twitch:bot" => "signInBotCopy", "out:twitch:bot" => "signOutBot",
         "in:kick:channel" => "signInKick", "link:kick:channel" => "signInKickCopy", "out:kick:channel" => "signOutKickChannel",
         "in:kick:bot" => "signInKickBot", "link:kick:bot" => "signInKickBotCopy", "out:kick:bot" => "signOutKickBot",
+        // (channel points as the currency: its rewards made on Twitch and Kick)
+        "pts:rewards" => "makePointRewards",
         _ => return None,
     })
 }
