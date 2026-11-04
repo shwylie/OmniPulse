@@ -2392,7 +2392,7 @@ function panelSet() {
   try { const a = JSON.parse(String(x.panelItems || "")); if (Array.isArray(a)) items = a.slice(0, 12); } catch (e) {}
   const own = (img) => (/^(\/overlay\/|https?:\/\/)/.test(String(img || "")) ? { img: String(img) } : {});
   const panels = items
-    ? items.filter((p) => p && (String(p.title || "").trim() || String(p.body || "").trim())).map((p) => Object.assign({ title: String(p.title || "").trim(), line: String(p.body || "").trim() }, own(p.img)))
+    ? items.filter((p) => p && (String(p.title || "").trim() || String(p.body || "").trim())).map((p) => Object.assign({ title: String(p.title || "").trim(), line: String(p.body || "").replace(/\r\n?/g, "\n").trim() }, own(p.img)))
     : list.map((p, n) => { const i = p.indexOf(":"), img = (String(v("panelOwnIcons", "")).split("|")[n] || "").trim(); return Object.assign(i < 0 ? { title: p, line: "" } : { title: p.slice(0, i).trim(), line: p.slice(i + 1).trim().split(" / ").join("\n") }, own(img)); });
   return {
     id: "panels", kind: "panels", logoColours: String(v("panelLogoColours", "theme")), font: themeFonts()[String(v("panelTheme", "dark"))] || "", scale: num(v("panelScale", 2)) === 1 ? 1 : 2, extended: yes(v("panelExtended", false)), powered: yes(v("panelPowered", true)), site: OMNIPULSE_SITE, theme: String(v("panelTheme", "dark")), shape: String(v("panelShape", "rounded")), height: String(v("panelHeight", "medium")), icons: yes(v("panelIcons", true)), colors: panelColors(), ink: hexOr(v("panelInk", "")), bg: hexOr(v("panelBg", "")),

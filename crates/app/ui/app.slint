@@ -132,6 +132,29 @@ export global WLive {
     in-out property <bool> live;
 }
 
+/// A channel panel's words being written (Panels): the dialog open, whose words, and where its editor goes (a web
+/// view, as the app places it on the dialog's spot); done(true) keeps what was written
+export global WEdit {
+    in-out property <bool> open;
+    in-out property <string> title;
+    in-out property <length> x;
+    in-out property <length> y;
+    in-out property <length> w;
+    in-out property <length> h;
+    callback done(bool);
+}
+
+/// Where the words' editor goes: told to WEdit as it moves
+component EditSpot inherits Rectangle {
+    property <length> lx: self.absolute-position.x;
+    property <length> ly: self.absolute-position.y;
+    changed lx => { WEdit.x = self.lx; }
+    changed ly => { WEdit.y = self.ly; }
+    changed width => { WEdit.w = self.width; }
+    changed height => { WEdit.h = self.height; }
+    init => { WEdit.x = self.lx; WEdit.y = self.ly; WEdit.w = self.width; WEdit.h = self.height; }
+}
+
 /// In a menu: while it's open, WLive's count moves
 component PopBeat inherits Rectangle {
     width: 0;
@@ -208,7 +231,7 @@ export struct BotTile { id: string, name: string, state: string, line1: string, 
 export struct BotFeat { id: string, name: string, note: string, on: bool, open: bool, changed: bool }
 export struct BotStep { id: string, title: string, note: string, state: string, optional: bool }
 export struct BotLine { who: string, heard: string, did: string, platform: string }
-export struct BotField { key: string, kind: string, label: string, note: string, value: string, extra: string, changed: bool, n: int, opts: [string], opt-ids: [string], c1: color, c2: color, cols: [color] }
+export struct BotField { key: string, kind: string, label: string, note: string, value: string, extra: string, changed: bool, n: int, opts: [string], opt-ids: [string], c1: color, c2: color, cols: [color], words: styled-text }
 // (an artist you follow: whether on SoundCloud and on Spotify, for its menu)
 export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool, on-yt: bool, row: Row }
 /// A page being loaded: each platform it asks, and whether it's answered yet
@@ -4601,15 +4624,6 @@ component PanelCard inherits Rectangle {
     // being typed is the same as what the app has, so it's left as it is)
     changed f => {
         if (ti.text != root.f.label) { ti.text = root.f.label; }
-        if (body.text != root.f.value) { body.text = root.f.value; }
-        if (root.f.opts.length >= 3 && root.f.opts[2] != root.applied) {
-            root.applied = root.f.opts[2];
-            body.focus();
-            body.set-selection-offsets(floor(root.f.opts[0].to-float()), floor(root.f.opts[1].to-float()));
-        }
-    }
-    function fmt(kind: string) {
-        root.act("pnl:" + root.f.n + ":fmt:" + kind + ":" + body.anchor-position-byte-offset + ":" + body.cursor-position-byte-offset + ":" + body.text);
     }
     pc := VerticalLayout {
         spacing: 8px;
@@ -4634,41 +4648,30 @@ component PanelCard inherits Rectangle {
             VerticalLayout { alignment: center; IconButton { d: "M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"; size: 28px; tip: "Move it down"; clicked => { root.act("pnl:" + root.f.n + ":down"); } } }
             VerticalLayout { alignment: center; IconButton { d: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"; size: 28px; tip: "Take this panel out"; clicked => { root.act("pnl:" + root.f.n + ":del"); } } }
         }
-        // (the format buttons: on what's selected in the words under them)
-        HorizontalLayout {
-            spacing: 2px;
-            alignment: start;
-            padding-left: 26px;
-            IconButton { d: "M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.71-1.7 3.71-3.79 0-1.52-.86-2.82-2.15-3.42zM10 6.5h3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-3v-3zm3.5 9H10v-3h3.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5z"; size: 30px; tint: Theme.text; tip: "Bold: select words, then click"; clicked => { root.fmt("bold"); } }
-            IconButton { d: "M10 4v3h2.21l-3.42 8H6v3h8v-3h-2.21l3.42-8H18V4z"; size: 30px; tint: Theme.text; tip: "Italics: select words, then click"; clicked => { root.fmt("italic"); } }
-            IconButton { d: "M12 17c3.31 0 6-2.69 6-6V3h-2.5v8c0 1.93-1.57 3.5-3.5 3.5S8.5 12.93 8.5 11V3H6v8c0 3.31 2.69 6 6 6zm-7 2v2h14v-2H5z"; size: 30px; tint: Theme.text; tip: "Underline: select words, then click"; clicked => { root.fmt("underline"); } }
-            Rectangle { width: 1px; background: Theme.line; }
-            IconButton { d: "M4 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5 1.5-.67 1.5-1.5-.67-1.5-1.5-1.5zm0-6c-.83 0-1.5.67-1.5 1.5S3.17 7.5 4 7.5 5.5 6.83 5.5 6 4.83 4.5 4 4.5zm0 12c-.83 0-1.5.68-1.5 1.5s.68 1.5 1.5 1.5 1.5-.68 1.5-1.5-.67-1.5-1.5-1.5zM7 19h14v-2H7v2zm0-6h14v-2H7v2zm0-8v2h14V5H7z"; size: 30px; tint: Theme.text; tip: "A bulleted list: each selected line, or the line you're on"; clicked => { root.fmt("bullet"); } }
-            IconButton { d: "M2 17h2v.5H3v1h1v.5H2v1h3v-4H2v1zm1-9h1V4H2v1h1v3zm-1 3h1.8L2 13.1v.9h3v-1H3.2L5 10.9V10H2v1zm5-6v2h14V5H7zm0 14h14v-2H7v2zm0-6h14v-2H7v2z"; size: 30px; tint: Theme.text; tip: "A numbered list: each selected line, or the line you're on"; clicked => { root.fmt("number"); } }
-        }
+        // (its words, shown as they'll look: click them, or Edit Words, to write and format them)
         HorizontalLayout {
             padding-left: 26px;
+            spacing: 8px;
             Rectangle {
                 horizontal-stretch: 1;
-                height: max(66px, body.preferred-height + 18px);
+                height: max(58px, words.preferred-height + 18px);
                 clip: true;
                 border-radius: 9px;
-                background: Theme.bg;
+                background: wt.has-hover ? Theme.panel : Theme.bg;
                 border-width: 1px;
-                border-color: body.has-focus ? Theme.accent : Theme.line;
-                body := TextInput {
+                border-color: wt.has-hover ? Theme.accent : Theme.line;
+                words := StyledText {
                     x: 10px;
                     y: 9px;
                     width: parent.width - 20px;
-                    color: Theme.text;
-                    font-size: 13px;
-                    single-line: false;
-                    wrap: word-wrap;
-                    text: root.f.value;
-                    edited => { root.act("pnl:" + root.f.n + ":body:" + self.text); }
+                    text: root.f.words;
+                    default-color: Theme.text;
+                    default-font-size: 13px;
                 }
-                if body.text == "": Text { x: 10px; y: 9px; text: "Words under the title, if you like. Press Enter for a new line."; color: Theme.muted.with-alpha(0.6); font-size: 13px; }
+                if root.f.value == "": Text { x: 10px; y: 9px; text: "No words yet. Click here to add some."; color: Theme.muted.with-alpha(0.7); font-size: 13px; }
+                wt := TouchArea { mouse-cursor: pointer; clicked => { root.act("pnl:" + root.f.n + ":edit"); } }
             }
+            VerticalLayout { alignment: start; Pill { label: "Edit Words"; tip: "Write this panel's words: bold, italics, underline and lists, as in any word processor"; clicked => { root.act("pnl:" + root.f.n + ":edit"); } } }
         }
     }
 }
@@ -6747,7 +6750,7 @@ export component AppWindow inherits Window {
     // the first-run setup: shown once, the first time OmniPulse opens (Settings > App & Look > Run Setup Again)
     in-out property <bool> setup-open;
     // (something over the page: the real Stream Widget's web view, which would draw over it, steps aside)
-    out property <bool> covered: root.setup-open || root.taste-open || root.ks-open || root.tp-open || root.la-open || root.name-open || root.ask-open || root.jam-open || root.viz-full || root.queue-open;
+    out property <bool> covered: root.setup-open || root.taste-open || root.ks-open || root.tp-open || root.la-open || root.name-open || root.ask-open || root.jam-open || root.viz-full || root.queue-open || WEdit.open;
     in property <int> setup-at;
     in property <bool> setup-web;
     callback setup-go(string);
@@ -11093,6 +11096,39 @@ export component AppWindow inherits Window {
     }
     // your Jam: its invite, who's in, and End
     // ---------- asked first (Delete, Unfollow, Restore...) ----------
+    // (a channel panel's words being written: the editor's a web view the app puts on the spot in it)
+    if WEdit.open: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #00000080;
+        TouchArea { }
+        Rectangle {
+            width: min(720px, root.width - 40px);
+            height: wcol.preferred-height;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.elevated;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.line;
+            TouchArea { }
+            wcol := VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+                Text { text: WEdit.title != "" ? "Words for " + WEdit.title : "Words for This Panel"; color: Theme.text; font-size: 18px; font-weight: 800; wrap: word-wrap; }
+                Text { text: "Type and format them as in any word processor: Ctrl+B for bold, Ctrl+I for italics and Ctrl+U to underline, or use the buttons. The list buttons start a bulleted or numbered list."; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                EditSpot { height: min(360px, root.height - 260px); border-radius: 8px; border-width: 1px; border-color: Theme.line; background: Theme.bg; }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    Pill { label: "Cancel"; clicked => { WEdit.done(false); } }
+                    Pill { label: "Done"; on: true; clicked => { WEdit.done(true); } }
+                }
+            }
+        }
+    }
     if root.ask-open: Rectangle {
         x: 0;
         y: 0;

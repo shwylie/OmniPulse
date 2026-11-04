@@ -134,7 +134,7 @@ pub fn list_items(v: &str) -> Vec<String> {
     v.split('|').map(|x| x.trim().to_string()).collect()
 }
 
-/// A channel panel as you've written it: its title, its words (formatted as rich_format marks them), and a
+/// A channel panel as you've written it: its title, its words (**bold**, *italics*, __underline__; lines starting "- " or "1. " a list), and a
 /// picture of your own for its icon ("" for the one its title picks)
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Panel { pub title: String, pub body: String, pub img: String }
@@ -148,7 +148,8 @@ const PANELS_FIRST: &str = "About Me | My Music | PC Specs | Sponsors | Donate";
 pub fn panels(cur: &Map<String, Value>) -> Vec<Panel> {
     if let Some(a) = serde_json::from_str::<Value>(s(cur, "panelItems")).ok().and_then(|v| v.as_array().cloned()) {
         let t = |p: &Value, k: &str| p[k].as_str().unwrap_or("").to_string();
-        return a.iter().take(PANELS_MAX).map(|p| Panel { title: t(p, "title"), body: t(p, "body"), img: t(p, "img") }).collect();
+        // (words typed in the app's own boxes once kept Windows' line ends: lines as the page and plugin read them)
+        return a.iter().take(PANELS_MAX).map(|p| Panel { title: t(p, "title"), body: t(p, "body").replace("\r\n", "\n").replace('\r', "\n"), img: t(p, "img") }).collect();
     }
     let list = if s(cur, "panelList").is_empty() { PANELS_FIRST } else { s(cur, "panelList") };
     let icons: Vec<String> = s(cur, "panelOwnIcons").split('|').map(|x| x.trim().to_string()).collect();
@@ -172,87 +173,49 @@ pub fn rich_plain(text: &str) -> String {
     }).collect::<Vec<_>>().join("\n")
 }
 
+/// A panel's words as the app shows them formatted (Slint's markdown): its lines paragraphs, lists' lines a list
+/// each, underline as <u>, anything else markdown reads as its own (# [ ` < and the like) kept as written
+pub fn rich_md(text: &str) -> String {
+    let inline = |s: &str| {
+        let mut out = String::new();
+        let mut u = false;
+        let mut rest = s;
+        while let Some(c) = rest.chars().next() {
+            if rest.starts_with("**") { out.push_str("**"); rest = &rest[2..]; continue; }
+            if rest.starts_with("__") { out.push_str(if u { "</u>" } else { "<u>" }); u = !u; rest = &rest[2..]; continue; }
+            if c != '*' && "\\`#[]<>!~|_&".contains(c) { out.push('\\'); }
+            out.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+        if u { out.push_str("</u>"); }
+        out
+    };
+    let mut out = String::new();
+    let mut last: Option<u8> = None;
+    for line in text.replace('\r', "").lines() {
+        if line.trim().is_empty() { continue; }
+        let (mark, rest) = list_mark(line);
+        // (0 a paragraph, 1 a bulleted list's line, 2 a numbered one's)
+        let kind = match mark { None => 0, Some(m) if m.starts_with(|c: char| c.is_ascii_digit()) => 2, _ => 1 };
+        // (a paragraph from the line before, or another list: a blank line between)
+        if let Some(was) = last { out.push_str(if kind > 0 && kind == was { "\n" } else { "\n\n" }); }
+        match mark {
+            Some(m) if m.starts_with(|c: char| c.is_ascii_digit()) => { out.push_str(m.trim_end()); out.push(' '); }
+            Some(_) => out.push_str("- "),
+            None => {}
+        }
+        out.push_str(&inline(rest.trim()));
+        last = Some(kind);
+    }
+    out
+}
+
 /// A line's list mark, if it starts with one ("- ", "\u{2022} ", "* ", "1. ", "2) "), and the rest of it
 fn list_mark(line: &str) -> (Option<&str>, &str) {
     for b in ["- ", "\u{2022} ", "* "] { if let Some(r) = line.strip_prefix(b) { return (Some(&line[..b.len()]), r); } }
     let digits = line.bytes().take_while(|c| c.is_ascii_digit()).count();
     if (1..=3).contains(&digits) && (line[digits..].starts_with(". ") || line[digits..].starts_with(") ")) { return (Some(&line[..digits + 2]), &line[digits + 2..]); }
     (None, line)
-}
-
-/// A panel's words formatted as the editor's buttons do it, on what's selected (byte offsets `a` and `c`, either
-/// way round): "bold" **, "italic" *, "underline" __ around it on each line it covers (taken off again if they're
-/// all there already; nothing selected, a pair put in with the cursor between); "bullet" "- " or "number" "1. ",
-/// "2. "... at the start of each line it touches (taken off if they all have that already). The words, and
-/// what's selected after
-pub fn rich_format(text: &str, a: usize, c: usize, kind: &str) -> (String, usize, usize) {
-    let fix = |mut i: usize| { i = i.min(text.len()); while !text.is_char_boundary(i) { i -= 1; } i };
-    let (s, e) = (fix(a.min(c)), fix(a.max(c)));
-    let line_start = |i: usize| text[..i].rfind('\n').map_or(0, |p| p + 1);
-    let line_end = |i: usize| text[i..].find('\n').map_or(text.len(), |p| i + p);
-    match kind {
-        "bold" | "italic" | "underline" => {
-            let mark = match kind { "bold" => "**", "italic" => "*", _ => "__" };
-            let m = mark.len();
-            if s == e {
-                let out = format!("{}{mark}{mark}{}", &text[..s], &text[s..]);
-                return (out, s + m, s + m);
-            }
-            // (each line's part of it, without the spaces round it; marks selected with it counted as round it)
-            let mut segs: Vec<(usize, usize)> = Vec::new();
-            let mut at = s;
-            while at < e {
-                let le = line_end(at).min(e);
-                let (mut x, mut y) = (at, le);
-                while x < y && text[x..].starts_with(char::is_whitespace) { x += text[x..].chars().next().map_or(1, char::len_utf8); }
-                while y > x && text[..y].ends_with(char::is_whitespace) { y -= text[..y].chars().next_back().map_or(1, char::len_utf8); }
-                if y - x >= 2 * m && text[x..y].starts_with(mark) && text[x..y].ends_with(mark) && !(mark == "*" && text[x..y].starts_with("**")) { x += m; y -= m; }
-                if x < y { segs.push((x, y)); }
-                at = le + 1;
-            }
-            if segs.is_empty() { return (text.to_string(), s, e); }
-            // (italic's one * isn't half of a bold's **)
-            let round = |x: usize, y: usize| x >= m && text[x - m..x] == *mark && text[y..].starts_with(mark)
-                && !(mark == "*" && ((x >= 2 && &text[x - 2..x] == "**") || text[y..].starts_with("**")));
-            let off = segs.iter().all(|&(x, y)| round(x, y));
-            let (mut out, mut last, mut ns, mut ne) = (String::new(), 0, None, 0);
-            for &(x, y) in &segs {
-                if off {
-                    out.push_str(&text[last..x - m]);
-                    ns.get_or_insert(out.len());
-                    out.push_str(&text[x..y]);
-                    last = y + m;
-                } else {
-                    out.push_str(&text[last..x]);
-                    out.push_str(mark);
-                    ns.get_or_insert(out.len());
-                    out.push_str(&text[x..y]);
-                    out.push_str(mark);
-                    last = y;
-                }
-                ne = out.len() - if off { 0 } else { m };
-            }
-            out.push_str(&text[last..]);
-            (out, ns.unwrap_or(0), ne)
-        }
-        "bullet" | "number" => {
-            let (from, to) = (line_start(s), line_end(if e > s && text[..e].ends_with('\n') { e - 1 } else { e }));
-            let lines: Vec<&str> = text[from..to].split('\n').collect();
-            let has = |l: &str| match list_mark(l).0 { Some(mk) => (kind == "number") == mk.as_bytes()[0].is_ascii_digit(), None => false };
-            let off = lines.iter().all(|l| has(l));
-            let mut n = 0;
-            let made: Vec<String> = lines.iter().map(|l| {
-                let rest = list_mark(l).1;
-                if off { return rest.to_string(); }
-                n += 1;
-                if kind == "bullet" { format!("- {rest}") } else { format!("{n}. {rest}") }
-            }).collect();
-            let block = made.join("\n");
-            let out = format!("{}{block}{}", &text[..from], &text[to..]);
-            (out, from, from + block.len())
-        }
-        _ => (text.to_string(), s, e),
-    }
 }
 
 /// The webcam overlay's parts: (id, name, on at first, place, size)
@@ -647,7 +610,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             let mut v = vec![
                 f("note", "", "Make your channel's panels here, watch them change on the right, then click Open in Your Browser. Each panel there has a Save as PNG button: add them on Twitch (your channel, About, Edit Panels) or Kick.", "", "", ""),
                 f("head", "", "1. Your panels", "", "", ""),
-                f("note", "", "Give each panel a title, and any words to go under it. To format words, select them and click B (bold), I (italics) or U (underline). For a list, click the bulleted or numbered list button. Each panel's icon is picked from its title, or click Icon to use a picture of your own.", "", "", ""),
+                f("note", "", "Give each panel a title, and any words to go under it. Click a panel's words, or Edit Words, to write them. Format them as in any word processor: Ctrl+B for bold, Ctrl+I for italics, and the list buttons for a list. Each panel's icon is picked from its title, or click Icon to use a picture of your own.", "", "", ""),
             ];
             // (each panel its own card: its title, its words with their buttons, its icon, moved or taken out)
             let list = panels(cur);
@@ -1280,30 +1243,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_panel_editor_formats_what_is_selected() {
-        let t = "Music and good vibes";
-        // (bold round "good", and off again)
-        let (b, s, e) = rich_format(t, 10, 14, "bold");
-        assert_eq!((b.as_str(), &b[s..e]), ("Music and **good** vibes", "good"));
-        assert_eq!(rich_format(&b, s, e, "bold").0, t);
-        // (selected backwards, with the space after it, as a double-click picks: the word only)
-        assert_eq!(rich_format(t, 15, 10, "italic").0, "Music and *good* vibes");
-        // (italic isn't taken for half of bold)
-        assert_eq!(rich_format(&b, s, e, "italic").0, "Music and ***good*** vibes");
-        // (the marks selected with it: taken off)
-        assert_eq!(rich_format("a __b__ c", 2, 7, "underline").0, "a b c");
-        // (nothing selected: a pair, the cursor between)
-        assert_eq!(rich_format("ab", 1, 1, "bold"), ("a****b".to_string(), 3, 3));
-        // (over two lines: each line's part)
-        assert_eq!(rich_format("one\ntwo", 0, 7, "bold").0, "**one**\n**two**");
-        // (lists: every line touched, numbered in order; again, taken off; a bullet made a number)
-        let (l, s, e) = rich_format("Games\nMusic\nArt", 2, 9, "number");
-        assert_eq!((l.as_str(), s, e), ("1. Games\n2. Music\nArt", 0, 17));
-        assert_eq!(rich_format(&l, s, e, "number").0, "Games\nMusic\nArt");
-        assert_eq!(rich_format("- a\n- b", 0, 7, "number").0, "1. a\n2. b");
-        assert_eq!(rich_format("x", 1, 1, "bullet").0, "- x");
-        // (out of range, or mid-character: kept in)
-        assert_eq!(rich_format("é", 1, 99, "bold").0, "**é**");
+    fn panel_words_show_formatted() {
+        let md = rich_md("Hi, I'm **Sam** and *you* __rock__\r\n- one\n- two #3\n\n1. first\n2. second\nThe end <3");
+        assert_eq!(md, "Hi, I'm **Sam** and *you* <u>rock</u>\n\n- one\n- two \\#3\n\n1. first\n2. second\n\nThe end \\<3");
+        let st = slint::StyledText::from_markdown(&md);
+        assert!(st.is_ok(), "{:?}", st.err());
     }
 
     #[test]

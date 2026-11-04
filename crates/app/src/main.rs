@@ -7325,7 +7325,7 @@ fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
     }
     // (a page with a preview is split: its column narrow, as Panels' is)
     let split_page = list.iter().any(|x| x.kind == "suiteprev");
-    let sig = list.iter().map(|x| format!("{}|{}|{}|{}|{}|{}", x.key, x.kind, x.value, x.label, x.extra, if x.kind == "suiteprev" { format!("{}{}", x.note, x.n) } else if x.kind == "panelcard" { x.note.clone() } else { x.cols.join(",") })).collect::<Vec<_>>().join("\n");
+    let sig = list.iter().map(|x| format!("{}|{}|{}|{}|{}|{}", x.key, x.kind, x.value, x.label, x.extra, if x.kind == "suiteprev" { format!("{}{}", x.note, x.n) } else { x.cols.join(",") })).collect::<Vec<_>>().join("\n");
     // (a row of choices: its extra, as "id=Name|id=Name", for the page to draw)
     let strs = |v: Vec<String>| ModelRc::from(Rc::new(VecModel::from(v.into_iter().map(slint::SharedString::from).collect::<Vec<_>>())));
     let rows = list.into_iter().map(|x| {
@@ -7336,8 +7336,6 @@ fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
             else if x.kind == "suiteprev" && x.value == "timer" { (Vec::new(), x.key.split('|').map(String::from).collect()) }
             else if x.kind == "suiteprev" && x.value == "emoterain" { (Vec::new(), x.label.split('|').skip(1).map(String::from).collect()) }
             else if x.kind == "suiteprev" && (x.value == "goals" || x.value == "wheel") { x.key.split('|').filter_map(|o| o.split_once('=')).map(|(n, t)| (t.to_string(), n.to_string())).unzip() }
-            // (a panel's card: what's to be selected in its words, after a format button)
-            else if x.kind == "panelcard" { (Vec::new(), x.note.split(',').filter(|s| !s.is_empty()).map(String::from).collect()) }
             else if x.kind == "list" || x.kind == "piclist" { (Vec::new(), botpage::list_items(if x.value.is_empty() { &x.extra } else { &x.value })) }
             else { (Vec::new(), Vec::new()) };
         // (a Suite preview's colours: "#a,#b" in its note; none, the accent)
@@ -7357,7 +7355,9 @@ fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
         // (a palette's swatches, two to a choice ("" the app theme's own two); your own colour's, its swatch)
         let cols: Vec<slint::Color> = x.cols.iter().enumerate().map(|(i, h)| look::Rgb::parse(h).map(|c| c.slint()).unwrap_or_else(|| look::Rgb::parse(if i % 2 == 0 { &accents.0 } else { &accents.1 }).map(|c| c.slint()).unwrap_or_default())).collect();
         let (c1, c2) = if x.kind == "colour" { (look::Rgb::parse(&x.value).map(|c| c.slint()).unwrap_or_default(), c2) } else { (c1, c2) };
-        BotField { changed: !key.is_empty() && !key.contains(':') && pf_changed(&key), key: key.into(), kind: kind.into(), label: x.label.split('|').next().unwrap_or("").into(), note: if x.kind == "suiteprev" { font.into() } else { x.note.into() }, value: x.value.into(), extra: x.extra.into(), n, opts: strs(names), opt_ids: strs(ids), c1, c2, cols: ModelRc::from(Rc::new(VecModel::from(cols))) }
+        // (a panel's words, shown formatted: as plain words, if they don't read as formatting)
+        let words = if x.kind == "panelcard" { slint::StyledText::from_markdown(&botpage::rich_md(&x.value)).unwrap_or_else(|_| slint::StyledText::from_plain_text(&botpage::rich_plain(&x.value))) } else { Default::default() };
+        BotField { changed: !key.is_empty() && !key.contains(':') && pf_changed(&key), key: key.into(), kind: kind.into(), label: x.label.split('|').next().unwrap_or("").into(), note: if x.kind == "suiteprev" { font.into() } else { x.note.into() }, value: x.value.into(), extra: x.extra.into(), n, opts: strs(names), opt_ids: strs(ids), c1, c2, cols: ModelRc::from(Rc::new(VecModel::from(cols))), words }
     }).collect();
     (rows, sig)
 }
@@ -7404,8 +7404,6 @@ fn bot_paint(shared: &Shared) {
     // (a sheet's and the step's lines: drawn again only when they've changed, so what's being typed stays put)
     let sheet = BOT_SHEET.with(|b| b.borrow().clone());
     let (title, mut lines) = botpage::sheet(&sheet, &cur);
-    // (a panel's card, its words just formatted: what's to be selected in them after, "anchor,cursor,count")
-    if let Some((i, a, c, seq)) = PNL_SEL.with(|s| s.get()) { for l in lines.iter_mut().filter(|l| l.kind == "panelcard" && l.n == i as i32) { l.note = format!("{a},{c},{seq}"); } }
     { let m = theme_accents(&shared.borrow().web.prefs); for l in lines.iter_mut().filter(|l| l.kind == "suiteprev" && l.note.is_empty()) { l.note = format!("{},{}", m.0, m.1); } }
     // (its theme's font, after its colours: a Google Font picked, fetched first; Pixel's own, Cascadia Mono)
     { let rt = shared.borrow().rt.clone(); for l in lines.iter_mut().filter(|l| l.kind == "suiteprev") {
@@ -7604,8 +7602,6 @@ thread_local! {
     static HUD_SHOT: RefCell<String> = const { RefCell::new(String::new()) };
     /// (a nudge's step: 1 pixel, or 10)
     static HUD_STEP: std::cell::Cell<f64> = const { std::cell::Cell::new(1.0) };
-    /// (a panel's words just formatted: which panel, what's to be selected (bytes), and a count, so it's done once)
-    static PNL_SEL: std::cell::Cell<Option<(usize, usize, usize, u64)>> = const { std::cell::Cell::new(None) };
 }
 
 /// The panels' look and list, as a template keeps them
@@ -7732,14 +7728,8 @@ fn bot_act(shared: &Shared, act: &str) {
         match what {
             "title" => list[i].title = arg.chars().take(60).collect(),
             "body" => list[i].body = arg.chars().take(2000).collect(),
-            // ("<kind>:<anchor>:<cursor>:<the words as they are>": formatted, and what's to be selected after)
-            "fmt" => {
-                let mut f = arg.splitn(4, ':');
-                let (kind, a, c) = (f.next().unwrap_or(""), f.next().and_then(|x| x.parse().ok()).unwrap_or(0), f.next().and_then(|x| x.parse().ok()).unwrap_or(0));
-                let (words, a, c) = botpage::rich_format(f.next().unwrap_or(""), a, c, kind);
-                list[i].body = words;
-                PNL_SEL.with(|s| { let seq = s.get().map_or(0, |x| x.3) + 1; s.set(Some((i, a, c, seq))); });
-            }
+            // (its words written in the editor: it opened over the page)
+            "edit" => { words_edit(shared, i, &list[i]); return; }
             "up" if i > 0 => list.swap(i, i - 1),
             "down" if i + 1 < list.len() => list.swap(i, i + 1),
             "del" => { list.remove(i); }
@@ -9207,6 +9197,68 @@ fn live_widget(shared: &Shared) {
         // (the drawing under it hidden once the real one has had a moment to come in)
         g.set_live(show && loaded.load(std::sync::atomic::Ordering::Relaxed));
     });
+}
+
+thread_local! {
+    /// a panel's words being written: which panel, the editor's web view (once the dialog's been laid out), the
+    /// words as last written in it, and where it was last put
+    static WORDS: RefCell<Option<(usize, Option<wry::WebView>, Arc<std::sync::Mutex<Option<String>>>, (f32, f32, f32, f32))>> = const { RefCell::new(None) };
+}
+
+/// A panel's words written in their own editor (assets/panel-words.html: bold, italics, underline and lists, as
+/// in any word processor): its dialog opened, the editor put on it by words_view; Done keeps what's written
+fn words_edit(shared: &Shared, i: usize, p: &botpage::Panel) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let g = ui.global::<WEdit>();
+    g.set_title(if p.title.trim().is_empty() { format!("Panel {}", i + 1) } else { p.title.trim().to_string() }.into());
+    WORDS.with(|w| *w.borrow_mut() = Some((i, None, Arc::new(std::sync::Mutex::new(None)), (0.0, 0.0, 0.0, 0.0))));
+    let s = shared.clone();
+    g.on_done(move |keep| {
+        let Some((i, _view, words, _)) = WORDS.with(|w| w.borrow_mut().take()) else { return };
+        if let Some(ui) = s.borrow().ui.upgrade() { ui.global::<WEdit>().set_open(false); }
+        let written = words.lock().ok().and_then(|w| w.clone());
+        if let (true, Some(md)) = (keep, written) {
+            let mut list = botpage::panels(&bot_current(&s));
+            if let Some(p) = list.get_mut(i) {
+                p.body = md.replace("\r\n", "\n").chars().take(2000).collect();
+                bot_set(&s, "panelItems", &botpage::panels_json(&list));
+                bot_paint(&s);
+            }
+        }
+    });
+    g.set_open(true);
+}
+
+/// The words editor's web view, on its dialog's spot (from the window's 40 ms timer): made once the dialog's
+/// laid out, given the words and the theme's colours, and following the spot as the window changes
+fn words_view(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let g = ui.global::<WEdit>();
+    if !g.get_open() { if WORDS.with(|w| w.borrow_mut().take().is_some()) {} return; }
+    let at = (g.get_x(), g.get_y(), g.get_w(), g.get_h());
+    if at.2 < 2.0 || at.3 < 2.0 { return; }
+    let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(at.0 as f64, at.1 as f64).into(), size: wry::dpi::LogicalSize::new(at.2 as f64, at.3 as f64).into() };
+    let made = WORDS.with(|w| w.borrow().as_ref().is_some_and(|x| x.1.is_some()));
+    if made {
+        WORDS.with(|w| if let Some(x) = w.borrow_mut().as_mut() { if x.3 != at { if let Some(v) = &x.1 { let _ = v.set_bounds(rect); } x.3 = at; } });
+        return;
+    }
+    let Some((i, sink)) = WORDS.with(|w| w.borrow().as_ref().map(|x| (x.0, x.2.clone()))) else { return };
+    let body = botpage::panels(&bot_current(shared)).get(i).map(|p| p.body.clone()).unwrap_or_default();
+    let t = ui.global::<Theme>();
+    let hex = |c: slint::Color| format!("#{:02x}{:02x}{:02x}", c.red(), c.green(), c.blue());
+    let init = serde_json::json!({ "words": body, "colours": { "bg": hex(t.get_menu()), "panel": hex(t.get_elevated()), "line": hex(t.get_line()), "text": hex(t.get_text()), "muted": hex(t.get_muted()), "accent": hex(t.get_accent_own()) } });
+    if let Ok(d) = omnipulse_core::data_dir() { unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", d.join("webview")); } }
+    use slint::winit_030::WinitWindowAccessor;
+    let view = ui.window().with_winit_window(|w| wry::WebViewBuilder::new()
+        .with_initialization_script(format!("window.__init = {init};"))
+        .with_html(include_str!("../assets/panel-words.html"))
+        .with_bounds(rect)
+        .with_ipc_handler(move |r| { if let Ok(mut s) = sink.lock() { *s = Some(r.body().clone()); } })
+        .build_as_child(w).ok()).flatten();
+    let Some(view) = view else { return };
+    let _ = view.focus();
+    WORDS.with(|w| if let Some(x) = w.borrow_mut().as_mut() { x.1 = Some(view); x.3 = at; });
 }
 
 /// The pop-out preview: the widget being set up, in a window of its own (Edge's app window, no browser
@@ -15524,7 +15576,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // (the songs' measurements: the one big file of before moved into a small file each, once, in the background)
     rt.spawn_blocking(omnipulse_core::rhythm::migrate);
     // (the Stream Widget's page: the real widget over its preview, kept in place as the page scrolls)
-    let _live = { let t = slint::Timer::default(); let s = shared.clone(); t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(40), move || live_widget(&s)); t };
+    let _live = { let t = slint::Timer::default(); let s = shared.clone(); t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(40), move || { live_widget(&s); words_view(&s); }); t };
 
     // OMNIPULSE_SELFTEST=<folder>: visits each page, plays the first track silently, saves a picture of
     // each page and quits (for checking the app without anyone at the screen)
@@ -15606,6 +15658,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("side") { vec![(9, "library"), (11, "sidefold"), (13, "sideopen"), (14, "settings"), (16, "discover"), (18, "back"), (20, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=creators: the Creators' pages, each pictured: Panels (scrolled down, too), Webcam
             // Overlay, Game HUD Frames)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("words") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "bot:pnl:0:edit"), (13, "wordsbold"), (16, "wordsgot"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("creators") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "scroll:1250"), (11, "scroll:600"), (13, "scroll:601"), (15, "bot:sheet:cam"), (17, "scroll:-3000"), (19, "bot:sheet:hud"), (20, "hudsample"), (22, "bot:hud:add:0.82,0.04,0.98,0.32"), (24, "scroll:800"), (26, "bot:hud:none"), (28, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setfit") { vec![(9, "play"), (10, "queue"), (11, "size:1150:530"), (12, "nav:settings"), (13, "cat:Sound"), (14, "scroll:4000"), (16, "cat:Integrations"), (17, "scroll:-4000"), (19, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=pagespeed: the Library, Discover and Rediscover opened twice each, timed with OMNIPULSE_PAGE_TIMING)
@@ -15788,6 +15841,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 w if w.starts_with("nav:") => { ui.invoke_nav(w[4..].into()); }
                 // (Game HUD Frames with a made-up game's screenshot (a minimap, a health bar, ammo), drawn here: never
                 // saved, as nothing in a self-test is)
+                // (the panel words editor: everything selected and made bold, as Ctrl+A, Ctrl+B would; then what
+                // it sent back, and whether it's on its dialog)
+                "wordsbold" => WORDS.with(|w| if let Some((_, Some(v), _, at)) = w.borrow().as_ref() {
+                    println!("selftest: words editor at {at:?}");
+                    let _ = v.evaluate_script("{ const b = document.getElementById('words'); b.focus(); const r = document.createRange(); r.selectNodeContents(b); const s = getSelection(); s.removeAllRanges(); s.addRange(r); document.execCommand('bold'); send(); }");
+                } else { println!("selftest: words editor not made"); }),
+                "wordsgot" => WORDS.with(|w| if let Some((_, _, sink, _)) = w.borrow().as_ref() { println!("selftest: words sent {:?}", sink.lock().ok().and_then(|s| s.clone())); }),
                 "hudsample" => {
                     let mut img = image::RgbaImage::from_pixel(1920, 1080, image::Rgba([46, 64, 52, 255]));
                     let mut fill = |x0: u32, y0: u32, w: u32, h: u32, c: [u8; 4]| for y in y0..y0 + h { for x in x0..x0 + w { img.put_pixel(x, y, image::Rgba(c)); } };

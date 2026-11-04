@@ -98,6 +98,8 @@
   // runs of words, **bold**, *italics*, __underlined__ (each on till its mark comes again, on that line only)
   function parseRich(line) {
     let mark = "", m;
+    // (a Windows line end left on it: taken off, so "." and "$" reach the line's end)
+    line = String(line || "").replace(/\r/g, "");
     if ((m = /^\s*[-•*]\s+(.*)$/.exec(line))) { mark = "•"; line = m[1]; }
     else if ((m = /^\s*(\d{1,3})[.)]\s+(.*)$/.exec(line))) { mark = m[1] + "."; line = m[2]; }
     const runs = []; let b = false, i = false, u = false, buf = "";
@@ -112,12 +114,12 @@
     return { mark, runs };
   }
   // (the words with their marks taken out: for measuring, and where only plain will do)
-  const plainOf = (text) => String(text || "").split("\n").map((l) => { const r = parseRich(l); return (r.mark ? r.mark + " " : "") + r.runs.map((x) => x.t).join(""); }).join(" ");
-  const runFont = (r, size, fam) => (r.i ? "italic " : "") + (r.b ? "800 " : "500 ") + size + "px " + fam;
+  const plainOf = (text) => String(text || "").split(/\r?\n/).map((l) => { const r = parseRich(l); return (r.mark ? r.mark + " " : "") + r.runs.map((x) => x.t).join(""); }).join(" ");
+  const runFont = (r, size, fam) => (r.i ? "italic " : "") + (r.b ? "800 " : "400 ") + size + "px " + fam;
   // Formatted words wrapped to a width: each line its runs, how far in (a list's), and its mark (on its first line)
   function wrapRich(c, text, width, size, fam) {
     const out = [];
-    for (const src of String(text || "").split("\n")) {
+    for (const src of String(text || "").split(/\r?\n/)) {
       if (!src.trim()) { out.push({ runs: [], indent: 0, mark: "" }); continue; }
       const r = parseRich(src), indent = r.mark ? Math.round(size * (r.mark === "•" ? 1.2 : 1.7)) : 0;
       const words = [];
@@ -137,11 +139,13 @@
     return out;
   }
   // One wrapped line drawn at (x, y): its mark, then its runs in their own weights, underlined where they are
-  function drawRich(c, line, x, y, size, fam, fill) {
+  // (bold ones in the title's colour, `strong`, so they stand out from the rest, as they would in a dim mono)
+  function drawRich(c, line, x, y, size, fam, fill, strong) {
     c.fillStyle = fill;
     if (line.mark) { c.font = "700 " + size + "px " + fam; c.fillText(line.mark, x, y); }
     let at = x + line.indent;
     for (const r of line.runs) {
+      c.fillStyle = r.b && strong ? strong : fill;
       c.font = runFont(r, size, fam);
       c.fillText(r.t, at, y);
       const w = c.measureText(r.t).width;
@@ -375,7 +379,7 @@
     probe.font = "500 11px " + FONT(th);
     const room = W - (set.icons !== false ? 84 : 22) - 18 - keepT;
     // (more than one line of words, or a list: always under the title)
-    const lines = String(p.line || "").split("\n");
+    const lines = String(p.line || "").split(/\r?\n/);
     const ext = !!p.line && (!!set.extended || lines.length > 1 || !!parseRich(lines[0]).mark || probe.measureText(plainOf(p.line)).width > room);
     let H = { short: 80, medium: 100, tall: 160, square: 320 }[set.height] || 100;
     let body = [];
@@ -429,7 +433,7 @@
       const lg = c.createLinearGradient(22, 0, W - 22, 0); lg.addColorStop(0, c1); lg.addColorStop(1, c2);
       c.fillStyle = th === "comic" || th === "bauhaus" ? "#111" : lg; c.fillRect(22, top + 64, bw, 2);
       halo(c, th, ink, true);
-      body.forEach((l, i) => drawRich(c, l, 22, top + 84 + i * p.lh, p.fs, font, sub));
+      body.forEach((l, i) => drawRich(c, l, 22, top + 84 + i * p.lh, p.fs, font, sub, ink));
       halo(c, th, ink, false);
       return;
     }
@@ -462,7 +466,7 @@
       while (richWidth(c, one, ls, font) > room && ls > 10) ls -= 0.5;
       c.fillStyle = sub;
       halo(c, th, ink, true);
-      if (richWidth(c, one, ls, font) <= room) drawRich(c, one, x, mid + fs * 0.5, ls, font, sub);
+      if (richWidth(c, one, ls, font) <= room) drawRich(c, one, x, mid + fs * 0.5, ls, font, sub, ink);
       else {
         c.font = "500 " + ls + "px " + font;
         const two = wrap(c, plainOf(p.line), room);
