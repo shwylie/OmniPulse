@@ -14,6 +14,8 @@ use std::{
 pub const CHAT_HTML: &str = include_str!("../widget/dock-chat.html");
 pub const ACTIVITY_HTML: &str = include_str!("../widget/dock-activity.html");
 pub const INFO_HTML: &str = include_str!("../widget/dock-info.html");
+/// Who's watching: the chatbot's viewer list (Twitch's chatters, and who's chatted on Kick and YouTube)
+pub const VIEWERS_HTML: &str = include_str!("../widget/dock-viewers.html");
 /// The multichat, on stream: the same chat, see-through, for a Browser source
 pub const MULTICHAT_HTML: &str = include_str!("../widget/multichat.html");
 
@@ -65,6 +67,18 @@ pub fn chat_gone(platform: &str, msg_id: &str, login: &str) {
 }
 
 /// The chat dock's poll: the messages after the last it has, and which of all it has are now gone
+static VIEWERS: Mutex<Option<Value>> = Mutex::new(None);
+
+/// The viewer list, as the chatbot last sent it
+pub fn viewers_set(v: Value) {
+    if let Ok(mut x) = VIEWERS.lock() { *x = Some(v); }
+}
+
+/// The viewer list for its dock (none yet: an empty one, so the dock says the chatbot isn't sending one)
+pub fn viewers_json() -> Value {
+    VIEWERS.lock().ok().and_then(|x| x.clone()).unwrap_or_else(|| json!({ "rows": [], "platforms": {}, "at": 0 }))
+}
+
 pub fn chat_json(after: u64) -> Value {
     let q = CHAT.lock().unwrap();
     let items: Vec<&Value> = q.iter().filter(|m| m["n"].as_u64().unwrap_or(0) > after).collect();

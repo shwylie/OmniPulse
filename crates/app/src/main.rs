@@ -13372,6 +13372,14 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             send(serde_json::json!({ "ok": true }));
         }
         // (OBS's docks: the chat as the chatbot hears it, messages taken down, what happened for the activity feed)
+        // (the Viewer List dock's: who's watching, as the chatbot has it)
+        "dockViewers" => {
+            if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
+            let v = args.first().cloned().unwrap_or(serde_json::Value::Null);
+            if !v.is_object() { return send(serde_json::json!({ "error": "give it an object" })); }
+            omnipulse_core::docks::viewers_set(v);
+            send(serde_json::json!({ "ok": true }));
+        }
         "dockChat" | "dockGone" | "dockActivity" => {
             if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
             let v = args.first().cloned().unwrap_or(serde_json::Value::Null);
@@ -15715,6 +15723,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // Overlay, Game HUD Frames)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("previews") { vec![(6, "size:1500:950"), (8, "openpanel:widget"), (12, "scroll:500"), (14, "openpanel:multichat"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panelpv") { vec![(6, "size:1500:2300"), (7, "bot:sheet:panels"), (10, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dockspage") { vec![(6, "size:1500:950"), (7, "bot:docks"), (10, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("pointspage") { vec![(6, "size:1500:950"), (7, "bot:sheet:points"), (8, "botset:pointsOn=true"), (9, "botset:pointsCurrency=channel"), (11, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("hudshape") { vec![(6, "size:1500:950"), (7, "bot:sheet:hud"), (8, "hudsample"), (10, "bot:hud:add:0.238,0.896,0.288,0.956"), (11, "bot:hud:add:0.29,0.896,0.339,0.956"), (12, "bot:hud:add:0.463,0.837,0.537,0.953"), (13, "bot:hud:add:0.673,0.896,0.723,0.956"), (14, "bot:hud:add:0.781,0.88,0.976,0.956"), (16, "bot:hud:none"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("camwiz") { vec![(6, "size:1500:950"), (7, "bot:sheet:cam"), (9, "bot:cam:step:0"), (10, "bot:cam:step:1"), (11, "bot:cam:step:2"), (12, "bot:cam:step:3"), (13, "bot:cam:step:4"), (14, "scroll:700"), (15, "bot:cam:step:5"), (16, "end")] }

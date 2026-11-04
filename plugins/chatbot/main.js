@@ -12,7 +12,7 @@ const TWITCH_SCOPES_CHANNEL = [
   "channel:read:predictions", "channel:read:vips", "moderation:read", "channel:read:charity",
   "channel:manage:polls", "channel:manage:predictions", "channel:manage:redemptions", "channel:edit:commercial",
   "channel:manage:raids", "moderator:manage:chat_settings", "channel:manage:vips", "channel:manage:moderators",
-  "moderator:manage:shield_mode", "moderator:read:shield_mode", "user:read:emotes",
+  "moderator:manage:shield_mode", "moderator:read:shield_mode", "user:read:emotes", "moderator:read:chatters",
 ].join(" ");
 const TWITCH_SCOPES_BOT = "chat:read chat:edit";
 
@@ -265,6 +265,7 @@ async function onChat(m) {
   if (platform === "twitch" && sharedFrom(m) && !yes(S().sharedCommands)) return;
   seen[(m.nick || user).toLowerCase()] = Date.now();
   present[platform + "|" + (m.nick || user).toLowerCase()] = { at: Date.now(), user, userId: m.tags["user-id"] || "", platform };
+  viewerSeen(platform, m.nick || user, user, m.tags["user-id"] || "", badges, m.tags.color || "");
   onActions(m, text, cmd, args, user, id);
   gameChat(user, text, platform);
   funChat(user, platform);
@@ -570,7 +571,7 @@ function onEvent(type, e) {
   // (Twitch's own hype train: ours follows it, its level at least Twitch's)
   if (ev === "hypetrain" || ev === "hypetrainprogress" || ev === "hypetrainend") trainTwitch(ev, e);
   if (ev === "hypetrainprogress") return;
-  if (ev === "online") { isLive = true; spoken.clear(); credits = {}; }
+  if (ev === "online") { isLive = true; spoken.clear(); credits = {}; chatters.clear(); viewersSoon(); }
   if (ev === "offline") isLive = false;
   const a = asAlert(type, e) || {};
   if (ev === "sub" && e.is_gift) return;
@@ -1671,6 +1672,84 @@ async function slobsScene(name) {
   return sc;
 }
 
+// ---------- the Viewer List dock: who's in your Twitch chat (Twitch's own list, which needs the moderator
+// permission to read chatters), and on Kick and YouTube (which have no such list) who's chatted this stream; each
+// with their role, sent to the app for the dock (/dock/viewers) ----------
+const chatters = new Map();
+let viewersTimer = null, viewersWait = null;
+let twitchIn = { list: [], total: 0, can: null, note: "" }, twitchMods = new Set(), twitchVips = new Set(), rolesAt = 0;
+let kickWatching = null;
+function roleOf(badges) {
+  const s = String(badges || "");
+  return /broadcaster\//.test(s) ? "broadcaster" : /moderator\//.test(s) ? "moderator" : /vip\//.test(s) ? "vip" : /(subscriber|founder)\//.test(s) ? "subscriber" : "viewer";
+}
+function viewerSeen(platform, login, name, userId, badges, color) {
+  const k = platform + "|" + String(login).toLowerCase();
+  chatters.set(k, { platform, login: String(login).toLowerCase(), name: String(name || login), userId: String(userId || ""), role: roleOf(badges), color: String(color || ""), at: Date.now() });
+  if (chatters.size > 5000) { const old = Array.from(chatters.entries()).sort((a, c) => a[1].at - c[1].at).slice(0, 1000); for (const [o] of old) chatters.delete(o); }
+  viewersSoon();
+}
+// (sent a moment after a change, at most every 3 s)
+function viewersSoon() { if (!viewersWait) viewersWait = setTimeout(() => { viewersWait = null; viewersPush(); }, 3000); }
+// Twitch's list of who's in chat (all of it, a page at a time), its moderators and VIPs (every 10 minutes), and
+// how many are watching on Kick
+async function viewersRefresh() {
+  if (S().token && S().userId && apiToken) {
+    try {
+      const list = [];
+      let cursor = "", total = 0;
+      for (let page = 0; page < 10; page++) {
+        const j = await helix("GET", "chat/chatters?broadcaster_id=" + S().userId + "&moderator_id=" + S().userId + "&first=1000" + (cursor ? "&after=" + encodeURIComponent(cursor) : ""));
+        for (const u of j.data || []) list.push({ login: String(u.user_login || "").toLowerCase(), name: u.user_name || u.user_login, userId: String(u.user_id || "") });
+        total = num(j.total) || list.length;
+        cursor = (j.pagination && j.pagination.cursor) || "";
+        if (!cursor) break;
+      }
+      twitchIn = { list, total, can: true, note: "" };
+    } catch (e) {
+      twitchIn = { list: [], total: 0, can: false, note: /40[13]/.test(e.message) ? "To see everyone in your Twitch chat, sign your channel in to Twitch again (Settings > Streaming > Suite > Twitch). Until then, this shows who's chatted." : "" };
+    }
+    if (Date.now() - rolesAt > 10 * 60000) {
+      rolesAt = Date.now();
+      const all = async (path) => { const out = new Set(); let cursor = ""; for (let page = 0; page < 10; page++) { const j = await helix("GET", path + "&first=100" + (cursor ? "&after=" + encodeURIComponent(cursor) : "")); for (const u of j.data || []) out.add(String(u.user_id)); cursor = (j.pagination && j.pagination.cursor) || ""; if (!cursor) break; } return out; };
+      try { twitchMods = await all("moderation/moderators?broadcaster_id=" + S().userId); } catch (e) {}
+      try { twitchVips = await all("channel/vips?broadcaster_id=" + S().userId); } catch (e) {}
+    }
+  }
+  if (yes(S().kickOn) && String(S().kickChannel || "").trim()) {
+    try {
+      const slug = String(S().kickChannel).trim().toLowerCase().replace(/_/g, "-");
+      const r = await OmniPulse.fetch("https://kick.com/api/v2/channels/" + encodeURIComponent(slug), { headers: { Accept: "application/json", "User-Agent": "OmniPulse" } });
+      if (r.ok) { const ch = await r.json(); kickWatching = ch.livestream ? num(ch.livestream.viewer_count) : null; }
+    } catch (e) {}
+  }
+  viewersPush();
+}
+function viewersPush() {
+  const rows = [], twitchSeen = new Set();
+  const seen = (platform, login) => chatters.get(platform + "|" + login);
+  // (Twitch: everyone in chat, by Twitch's list; who's chatted, if it can't be read)
+  for (const u of twitchIn.list) {
+    const c = seen("twitch", u.login);
+    const role = u.userId === String(S().userId) ? "broadcaster" : twitchMods.has(u.userId) ? "moderator" : twitchVips.has(u.userId) ? "vip" : c ? c.role : "viewer";
+    rows.push({ p: "twitch", login: u.login, name: u.name, userId: u.userId, role, color: c ? c.color : "", at: c ? c.at : 0 });
+    twitchSeen.add(u.login);
+  }
+  for (const c of chatters.values()) {
+    if (c.platform === "twitch" && twitchSeen.has(c.login)) continue;
+    rows.push({ p: c.platform, login: c.login, name: c.name, userId: c.userId, role: c.platform === "twitch" && twitchMods.has(c.userId) ? "moderator" : c.role, color: c.color, at: c.at });
+  }
+  const count = (pl) => rows.filter((r) => r.p === pl).length;
+  OmniPulse.app.dockViewers({
+    at: Date.now(), live: isLive, rows: rows.slice(0, 10000),
+    platforms: {
+      twitch: { on: !!(S().token && S().userId), full: twitchIn.can === true, inChat: twitchIn.can ? twitchIn.total : count("twitch"), note: twitchIn.note },
+      kick: { on: yes(S().kickOn), watching: kickWatching, chatted: count("kick") },
+      youtube: { on: count("youtube") > 0, chatted: count("youtube") },
+    },
+  }).catch(() => {});
+}
+
 // ---------- points (a currency, as Mix It Up's): for chatting while you're live, kept ----------
 const seen = {};
 // (who's chatted, and when: Each Viewer, Every Few Minutes)
@@ -2398,6 +2477,10 @@ async function start() {
   suite = null;
   suitePush();
   setPoints();
+  // (the Viewer List dock: read now, then every minute)
+  if (viewersTimer) clearInterval(viewersTimer);
+  viewersTimer = setInterval(() => { viewersRefresh().catch(() => {}); }, 60000);
+  setTimeout(() => { viewersRefresh().catch(() => {}); }, 5000);
   obsConnect();
   meldConnect();
   slobsConnect();
@@ -3369,6 +3452,7 @@ function stopAll() {
   timers = [];
   if (pointsTimer) { clearInterval(pointsTimer); pointsTimer = null; }
   if (kickRefresh) { clearInterval(kickRefresh); kickRefresh = null; }
+  if (viewersTimer) { clearInterval(viewersTimer); viewersTimer = null; }
   for (const s of [chat, botChat, events, obs, kick, meld, slobs]) { if (s) { s.onclose = null; s.close(); } }
   chat = botChat = events = obs = kick = meld = slobs = null;
   meldReady = slobsReady = false;

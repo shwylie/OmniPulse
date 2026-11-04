@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmniPulse Viewer List</title>
+<style>
+  /* OmniPulse's Viewer List dock, for OBS (Docks > Custom Browser Docks): who's in your Twitch chat (Twitch's own
+     list), and who's chatted on Kick and YouTube this stream, by role, each a time-out or ban a click away */
+  :root {
+    --bg: #1b1d24; --panel: #23262f; --line: #2e323d; --text: #e6e8ee; --dim: #8b91a1; --accent: #7aa2ff;
+    --twitch: #a970ff; --kick: #53fc18; --youtube: #ff3b3b; --danger: #ff5c6c; --fs: 13px;
+  }
+  * { box-sizing: border-box; }
+  * { scrollbar-width: thin; scrollbar-color: var(--dim) transparent; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 4px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text); }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: var(--fs) / 1.4 "Segoe UI", system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  button, input { font: inherit; color: inherit; }
+  header { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
+  .top { display: flex; flex-direction: column; gap: 2px; }
+  .top h1 { margin: 0; font-size: 13px; font-weight: 600; }
+  .sum { color: var(--dim); font-size: 11px; display: flex; gap: 4px 12px; flex-wrap: wrap; }
+  .sum:empty { display: none; }
+  .sum span { display: inline-flex; align-items: center; gap: 4px; }
+  .sum svg { width: 11px; height: 11px; }
+  input[type=search] { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; }
+  input[type=search]:focus { outline: none; border-color: var(--accent); }
+  .from { display: flex; gap: 5px; flex-wrap: wrap; }
+  .from button { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 1px 10px; color: var(--dim); cursor: pointer; font-size: 12px; }
+  .from button[aria-pressed="true"] { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  .from button:empty { display: none; }
+  main { flex: 1; overflow-y: auto; padding: 4px 6px 10px; }
+  .note { color: var(--dim); font-size: 11px; padding: 6px 4px; }
+  .note:empty { display: none; }
+  /* each role's group: its name and how many, clicked shut or open */
+  .grp > h2 { position: sticky; top: 0; z-index: 1; margin: 0; padding: 6px 4px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); font-weight: 600; background: var(--bg); cursor: pointer; display: flex; align-items: center; gap: 6px; user-select: none; }
+  .grp > h2::before { content: "\25BE"; font-size: 10px; transition: transform 0.15s; }
+  .grp.shut > h2::before { transform: rotate(-90deg); }
+  .grp.shut > .list { display: none; }
+  .grp > h2 b { color: var(--text); font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 7px; padding: 3px 4px; border-radius: 6px; min-height: 26px; }
+  .row:hover { background: var(--panel); }
+  .row svg.p { width: 12px; height: 12px; flex: none; }
+  .row .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .row .ago { color: var(--dim); font-size: 11px; white-space: nowrap; }
+  .row .on { width: 6px; height: 6px; border-radius: 3px; background: #4ad295; flex: none; }
+  .row .acts { margin-left: auto; display: flex; gap: 2px; opacity: 0; }
+  .row:hover .acts, .row .acts:focus-within { opacity: 1; }
+  .acts button { border: 0; background: transparent; color: var(--dim); width: 24px; height: 22px; border-radius: 5px; cursor: pointer; display: grid; place-items: center; }
+  .acts button:hover { color: var(--text); background: var(--line); }
+  .acts button svg { width: 14px; height: 14px; fill: currentColor; }
+  .acts button.arm { color: #fff; background: var(--danger); }
+  .more { color: var(--dim); font-size: 11px; padding: 4px; }
+  .said { position: fixed; left: 8px; right: 8px; bottom: 8px; background: #000d; color: #fff; font-size: 12px; padding: 6px 10px; border-radius: 8px; display: none; }
+  .said.show { display: block; }
+  body.sq *, body.sq *::after { border-radius: 0 !important; }
+  #tip { position: fixed; left: 0; top: 0; display: none; max-width: calc(100vw - 8px); box-sizing: border-box; background: #000c; color: #fff; font-size: 11px; line-height: 1.35; padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 1000; overflow-wrap: anywhere; }
+  #tip.show { display: block; }
+</style>
+</head>
+<body>
+<header>
+  <div class="top"><h1>Viewers</h1><div class="sum" id="sum"></div></div>
+  <input type="search" id="q" placeholder="Find someone" autocomplete="off">
+  <div class="from" id="from"></div>
+</header>
+<main id="main">
+  <div class="note" id="note"></div>
+  <div id="groups"></div>
+</main>
+<div class="said" id="said"></div>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const MARK = {
+    twitch: "M4.3 2 3 5.4v13.8h4.7V22h2.7l2.6-2.8h3.8l5.2-5.3V2zm16 11-2.9 3h-4.7l-2.6 2.6V16H6.3V3.7h14zm-2.9-6v5.3h-1.8V7zm-4.8 0v5.3h-1.8V7z",
+    kick: "M3 2h6v6h2V5h2V2h8v8h-2v2h-2v2h2v2h2v6h-8v-3h-2v-3H9v6H3z",
+    youtube: "M21.6 7.2a2.5 2.5 0 0 0-1.8-1.8C18.2 5 12 5 12 5s-6.2 0-7.8.4A2.5 2.5 0 0 0 2.4 7.2 26 26 0 0 0 2 12a26 26 0 0 0 .4 4.8 2.5 2.5 0 0 0 1.8 1.8C5.8 19 12 19 12 19s6.2 0 7.8-.4a2.5 2.5 0 0 0 1.8-1.8A26 26 0 0 0 22 12a26 26 0 0 0-.4-4.8zM10 15V9l5.2 3z",
+  };
+  const NAMES = { twitch: "Twitch", kick: "Kick", youtube: "YouTube" };
+  const ROLES = [["broadcaster", "You"], ["moderator", "Moderators"], ["vip", "VIPs"], ["subscriber", "Subscribers"], ["viewer", "Viewers"]];
+  const SHOWN = 400;
+  const NS = "http://www.w3.org/2000/svg";
+  const mark = (p) => { const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 24 24"); s.classList.add("p"); s.style.fill = "var(--" + p + ")"; const x = document.createElementNS(NS, "path"); x.setAttribute("d", MARK[p] || MARK.twitch); s.append(x); return s; };
+  const act = (cmd) => fetch("/dock/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cmd) }).then((r) => r.json()).catch(() => ({ ok: false, error: "OmniPulse isn't answering (is it open, with the Stream Suite on?)" }));
+  let data = { rows: [], platforms: {}, at: 0 }, from = "all", drawnAt = -1, drawnKey = "";
+  const shut = new Set();
+  try { for (const k of JSON.parse(localStorage.getItem("viewersShut") || "[]")) shut.add(k); } catch (e) {}
+  let saidOff = null;
+  const say = (t) => { const s = $("said"); s.textContent = t; s.classList.add("show"); clearTimeout(saidOff); saidOff = setTimeout(() => s.classList.remove("show"), 4000); };
+  const ago = (t) => { if (!t) return ""; const s = Math.max(0, (Date.now() - t) / 1000); return s < 60 ? "just now" : s < 3600 ? Math.floor(s / 60) + "m ago" : Math.floor(s / 3600) + "h ago"; };
+  const ICON = {
+    timeout: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm.5-13H11v6l5.2 3.2.8-1.2-4.5-2.7z",
+    ban: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM4 12a8 8 0 0 1 12.9-6.3L5.7 16.9A7.9 7.9 0 0 1 4 12zm8 8a7.9 7.9 0 0 1-4.9-1.7L18.3 7.1A8 8 0 0 1 12 20z",
+  };
+  function btn(kind, tip, onClick) {
+    const b = document.createElement("button"); b.type = "button"; b.dataset.tip = tip;
+    const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 24 24"); const x = document.createElementNS(NS, "path"); x.setAttribute("d", ICON[kind]); s.append(x); b.append(s);
+    b.onclick = (e) => { e.stopPropagation(); onClick(b); };
+    return b;
+  }
+  function row(r) {
+    const d = document.createElement("div"); d.className = "row";
+    d.append(mark(r.p));
+    const n = document.createElement("span"); n.className = "n"; n.textContent = r.name; if (/^#[0-9a-f]{6}$/i.test(r.color || "")) n.style.color = r.color; d.append(n);
+    // (chatted in the last ten minutes: a green dot; when they last did)
+    if (r.at && Date.now() - r.at < 10 * 60000) { const o = document.createElement("span"); o.className = "on"; o.dataset.tip = "Chatting now"; d.append(o); }
+    if (r.at) { const a = document.createElement("span"); a.className = "ago"; a.textContent = ago(r.at); d.append(a); }
+    // (a time-out and a ban: Twitch's and Kick's; you and YouTube's chatters have none here)
+    if (r.role !== "broadcaster" && r.p !== "youtube") {
+      const acts = document.createElement("span"); acts.className = "acts";
+      const who = { platform: r.p, user: r.name, login: r.login, userId: r.userId };
+      acts.append(btn("timeout", "Time out for 10 minutes", async () => { const x = await act(Object.assign({ do: "timeout", seconds: 600 }, who)); say(x.ok === false ? x.error || "Couldn't." : "Timing out " + r.name + " for 10 minutes."); }));
+      acts.append(btn("ban", "Ban", async (b) => {
+        if (!b.classList.contains("arm")) { b.classList.add("arm"); b.dataset.tip = "Click again to ban " + r.name; setTimeout(() => { b.classList.remove("arm"); b.dataset.tip = "Ban"; }, 3000); return; }
+        const x = await act(Object.assign({ do: "ban" }, who)); say(x.ok === false ? x.error || "Couldn't." : "Banning " + r.name + ".");
+      }));
+      d.append(acts);
+    }
+    return d;
+  }
+  function draw(force) {
+    const q = $("q").value.trim().toLowerCase();
+    const key = data.at + "|" + q + "|" + from + "|" + Array.from(shut).join(",");
+    if (!force && key === drawnKey) return;
+    drawnKey = key;
+    // (how many on each)
+    const pf = data.platforms || {}, sum = $("sum");
+    sum.textContent = "";
+    const part = (p, text) => { const s = document.createElement("span"); s.append(mark(p), document.createTextNode(text)); sum.append(s); };
+    if (pf.twitch && pf.twitch.on) part("twitch", (pf.twitch.inChat || 0) + (pf.twitch.full ? " in chat" : " chatted"));
+    if (pf.kick && pf.kick.on) part("kick", (pf.kick.watching != null ? pf.kick.watching + " watching, " : "") + (pf.kick.chatted || 0) + " chatted");
+    if (pf.youtube && pf.youtube.on) part("youtube", (pf.youtube.chatted || 0) + " chatted");
+    // (the platforms to pick from: those on)
+    const on = Object.keys(NAMES).filter((p) => pf[p] && pf[p].on);
+    const fb = $("from");
+    fb.textContent = "";
+    if (on.length > 1) for (const p of ["all"].concat(on)) {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = p === "all" ? "All" : NAMES[p]; b.setAttribute("aria-pressed", String(from === p));
+      b.onclick = () => { from = p; draw(true); }; fb.append(b);
+    }
+    if (from !== "all" && !on.includes(from)) from = "all";
+    $("note").textContent = !data.at ? "Waiting for the chatbot. It needs to be on (Settings > Streaming > Suite), signed in to Twitch or Kick." : (pf.twitch && pf.twitch.note) || "";
+    const rows = (data.rows || []).filter((r) => (from === "all" || r.p === from) && (!q || String(r.name).toLowerCase().includes(q) || String(r.login).includes(q)));
+    const box = $("groups");
+    box.textContent = "";
+    for (const [role, title] of ROLES) {
+      const list = rows.filter((r) => (r.role || "viewer") === role).sort((a, b) => (b.at && Date.now() - b.at < 600000 ? 1 : 0) - (a.at && Date.now() - a.at < 600000 ? 1 : 0) || String(a.name).localeCompare(String(b.name)));
+      if (!list.length) continue;
+      const g = document.createElement("section"); g.className = "grp" + (shut.has(role) ? " shut" : "");
+      const h = document.createElement("h2"); h.append(document.createTextNode(title + " "), Object.assign(document.createElement("b"), { textContent: String(list.length) }));
+      h.onclick = () => { if (shut.has(role)) shut.delete(role); else shut.add(role); try { localStorage.setItem("viewersShut", JSON.stringify(Array.from(shut))); } catch (e) {} draw(true); };
+      const l = document.createElement("div"); l.className = "list";
+      for (const r of list.slice(0, SHOWN)) l.append(row(r));
+      if (list.length > SHOWN) { const m = document.createElement("div"); m.className = "more"; m.textContent = "And " + (list.length - SHOWN) + " more. Search to find someone."; l.append(m); }
+      g.append(h, l);
+      box.append(g);
+    }
+    if (data.at && !rows.length) { const m = document.createElement("div"); m.className = "note"; m.textContent = q ? "No one by that name." : "No one yet. Chatters show here as they chat."; box.append(m); }
+  }
+  $("q").oninput = () => draw();
+  async function poll() {
+    try {
+      const j = await (await fetch("/dock/viewers.json", { cache: "no-store" })).json();
+      if (j && j.at !== drawnAt) { data = j; drawnAt = j.at; }
+    } catch (e) {}
+    draw();
+    setTimeout(poll, 4000);
+  }
+  // (the "ago"s kept true, a minute at a time)
+  setInterval(() => draw(true), 60000);
+  async function look() {
+    try {
+      const j = await (await fetch("/dock/settings.json?page=viewers", { cache: "no-store" })).json();
+      const t = j.theme;
+      if (t) {
+        const r = document.documentElement.style;
+        r.setProperty("--bg", t.bg); r.setProperty("--panel", t.panel); r.setProperty("--line", t.line); r.setProperty("--text", t.text); r.setProperty("--dim", t.muted); r.setProperty("--accent", t.accent);
+        document.body.classList.toggle("light", !!t.light);
+        document.body.classList.toggle("sq", !t.rounded);
+      }
+    } catch (e) {}
+    setTimeout(look, 5000);
+  }
+  look();
+  poll();
+})();
+</script>
+<div id="tip" role="tooltip"></div>
+<script>
+  // ---------- the tip on hover: below what it's for, or above it if there's no room, kept inside the dock ----------
+  (() => {
+    const tip = document.getElementById("tip");
+    let on = null;
+    const place = () => {
+      if (!on || !on.isConnected || !on.dataset.tip) { tip.classList.remove("show"); on = null; return; }
+      if (tip.textContent !== on.dataset.tip) tip.textContent = on.dataset.tip;
+      tip.classList.add("show");
+      const r = on.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight, gap = 6, edge = 4;
+      let y = r.bottom + gap;
+      if (y + h > innerHeight - edge) y = r.top - gap - h;
+      y = Math.min(Math.max(edge, y), innerHeight - h - edge);
+      const x = Math.min(Math.max(edge, r.right - w), innerWidth - w - edge);
+      tip.style.left = Math.max(edge, x) + "px"; tip.style.top = Math.max(edge, y) + "px";
+    };
+    document.addEventListener("mouseover", (e) => {
+      const t = e.target.closest ? e.target.closest("[data-tip]") : null;
+      const next = t && t.dataset.tip ? t : null;
+      if (next !== on) { on = next; place(); }
+    });
+    document.addEventListener("mouseout", (e) => { if (on && !on.contains(e.relatedTarget)) { on = null; place(); } });
+    addEventListener("scroll", () => { if (on) place(); }, true);
+    addEventListener("blur", () => { on = null; place(); });
+    new MutationObserver((ms) => { if (on && ms.some((m) => m.target !== tip && !tip.contains(m.target))) place(); }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-tip"] });
+  })();
+</script>
+</body>
+</html>
