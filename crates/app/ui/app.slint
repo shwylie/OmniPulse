@@ -114,7 +114,7 @@ export struct KeyStep { text: string, has-url: bool, copies: [string] }
 export struct KeyField { label: string, value: string, ok: bool }
 // the Lyrics Widget's look, for its page's preview
 /// The Stream Widget's preview: its design and look as they're set
-export struct WidgetLook { design: string, theme: string, right: bool, rounded: bool, text: float, c1: color, c2: color, spin: bool, requester: bool }
+export struct WidgetLook { design: string, theme: string, right: bool, rounded: bool, text: float, c1: color, c2: color, spin: bool, requester: bool, bg: float }
 
 /// The alerts' preview: their theme and colours as they're set
 /// A HUD frame, for its editor: where it is on the screenshot (fractions), and whether it's the one picked
@@ -221,7 +221,7 @@ export global CamLook {
 export struct AlertLook { theme: string, c1: color, c2: color, glow: bool, icon: float, transition: string, anim: string, in-widget: bool }
 
 /// The Multichat Overlay's preview: its look as it's set
-export struct ChatLook { style: string, size: float, bg: float, shadow: bool, top: bool, badges: bool, marks: bool, from: string, above: bool, right: bool, row: bool }
+export struct ChatLook { style: string, size: float, bg: float, shadow: bool, top: bool, down: bool, badges: bool, marks: bool, from: string, above: bool, right: bool, row: bool }
 /// (a made-up message, for the preview)
 export struct ChatSample { name: string, text: string, kick: bool, colour: color, badge: string }
 
@@ -875,6 +875,14 @@ component CtxMenu inherits Rectangle {
 /// Rounded corners for a gradient (the software renderer draws gradients square-cornered): at each
 /// corner asked for, the colour outside it with a quarter circle of the gradient's colour there. Laid
 /// over the shape, the size of it.
+/// A checkerboard, the previews' backdrop: what's see-through in them shows as see-through
+component Checker inherits Image {
+    source: @image-url("checker.svg");
+    horizontal-tiling: repeat;
+    vertical-tiling: repeat;
+    image-fit: preserve;
+}
+
 component Caps inherits Rectangle {
     in property <length> r;
     in property <color> outside: Theme.bg;
@@ -2820,16 +2828,13 @@ component DesignSketch inherits VerticalLayout {
             Rectangle { x: 4px; y: 4px; width: 22px; height: 22px; border-radius: 3px; background: Theme.text.with-alpha(0.5); }
             Rectangle { x: 5px; y: 31px; width: 20px; height: 3px; border-radius: 2px; background: Theme.text.with-alpha(0.85); }
             Rectangle { x: 8px; y: 37px; width: 14px; height: 3px; border-radius: 2px; background: Theme.text.with-alpha(0.45); } }
-        // waveform: the cover, the song in a panel, its waveform between the times in another, the progress under
-        if root.k == 16: Rectangle { x: 10px; y: 9px; width: parent.width - 20px; height: 42px;
-            Rectangle { x: 0; y: 0; width: 30px; height: 30px; border-radius: 4px; background: Theme.text.with-alpha(0.5); }
-            Rectangle { x: 34px; y: 0; width: parent.width - 34px; height: 14px; border-radius: 3px; background: sk.fill;
-                Rectangle { x: 4px; y: 4px; width: 45%; height: 3px; border-radius: 1px; background: Theme.text.with-alpha(0.85); }
-                Rectangle { x: 4px; y: 9px; width: 28%; height: 2px; border-radius: 1px; background: Theme.text.with-alpha(0.45); } }
-            Rectangle { x: 34px; y: 17px; width: parent.width - 34px; height: 13px; border-radius: 3px; background: sk.fill;
-                for b in 12: Rectangle { x: 6px + b * (parent.width - 12px) / 12; width: (parent.width - 12px) / 12 * 0.5; height: parent.height * (0.25 + 0.45 * abs(sin(b * 47deg))); y: (parent.height - self.height) / 2; border-radius: 1px; background: Theme.text.with-alpha(b < 7 ? 0.85 : 0.35); } }
-            Rectangle { x: 0; y: 36px; width: parent.width; height: 3px; border-radius: 1px; background: sk.fill;
-                Rectangle { x: 0; width: parent.width * 0.6; border-radius: 1px; background: Theme.text.with-alpha(0.8); } } }
+        // waveform: the cover, then one solid panel: the song, who asked for it, and its waveform between the times
+        if root.k == 16: Rectangle { x: 10px; y: 12px; width: parent.width - 20px; height: 36px;
+            Rectangle { x: 0; y: 0; width: 36px; height: 36px; border-radius: 4px; background: Theme.text.with-alpha(0.5); }
+            Rectangle { x: 40px; y: 0; width: parent.width - 40px; height: 36px; border-radius: 4px; background: sk.fill;
+                Rectangle { x: 5px; y: 5px; width: 45%; height: 3px; border-radius: 1px; background: Theme.text.with-alpha(0.85); }
+                Rectangle { x: 5px; y: 11px; width: 28%; height: 2px; border-radius: 1px; background: Theme.text.with-alpha(0.45); }
+                for bb in 14: Rectangle { x: 5px + bb * (parent.width - 10px) / 14; width: (parent.width - 10px) / 14 * 0.5; height: 14px * (0.25 + 0.75 * abs(sin(bb * 47deg))); y: 27px - self.height / 2; border-radius: 1px; background: Theme.text.with-alpha(bb < 8 ? 0.85 : 0.35); } } }
         dsa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.clicked(); } }
         // (its recommended Browser source size in OBS, as you point at it: its own shape, sharp at 1080p)
         TipSpot { hover: dsa.has-hover; tip: root.name + ". Recommended Browser source size: " + ["920 × 260", "1120 × 128", "600 × 760", "920 × 180", "960 × 160", "920 × 300", "960 × 540", "1280 × 96", "1040 × 340", "1240 × 180", "840 × 440", "1040 × 300", "920 × 300", "600 × 720", "440 × 440", "480 × 840", "840 × 300"][root.k] + " px."; }
@@ -2859,8 +2864,8 @@ component LiveSpot inherits Rectangle {
 component LiveCover inherits Rectangle {
     in property <string> note: "The real thing, as it will look in OBS.";
     visible: WLive.live;
-    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
-    Caps { r: 14px; outside: Theme.bg; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
+    Checker { x: 0; y: 0; width: parent.width; height: parent.height; }
+    Caps { r: 14px; outside: Theme.bg; tl: #2a2d36; tr: #2a2d36; bl: #2a2d36; br: #2a2d36; top: true; bottom: true; }
     Text { x: 12px; y: 8px; text: root.note; color: #ffffffa0; font-size: 11px; }
 }
 
@@ -2927,8 +2932,8 @@ component WidgetPreview inherits Rectangle {
     border-width: 1px;
     border-color: Theme.line;
     clip: true;
-    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
-    Caps { r: 14px; outside: Theme.bg; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
+    Checker { x: 0; y: 0; width: parent.width; height: parent.height; }
+    Caps { r: 14px; outside: Theme.bg; tl: #2a2d36; tr: #2a2d36; bl: #2a2d36; br: #2a2d36; top: true; bottom: true; }
     Text { x: 12px; y: 8px; text: WLive.live ? "The real widget, as it will look in OBS. Pop Out Preview below shows it bigger." : "A preview, near enough. Pop Out Preview below shows it exactly."; color: #ffffffa0; font-size: 11px; }
     // (where the card is, for the real widget to be put over it)
     property <length> lx: card.absolute-position.x;
@@ -2971,7 +2976,11 @@ component WidgetPreview inherits Rectangle {
         border-radius: root.rad;
         // (its panel: Colours is the two colours' gradient (blended into one with rounded corners, which the
         // software renderer can't draw a gradient into), Lower Third and Equaliser their own dark one under it)
-        background: root.d == "polaroid" || root.th == "clear" ? transparent
+        background: root.d == "polaroid" || root.d == "cassette" || root.look.bg < 0 ? self.panel : self.solid-panel.with-alpha(root.look.bg);
+        // (its Background set: the theme's panel as it shows over a dark scene, as solid as that)
+        property <color> solid-panel: root.th == "frosted" ? #3a3b45 : root.th == "neon" ? #080514 : root.th == "solid" ? #0d0d13 : root.th == "paper" ? #f7f4ee : root.th == "clear" ? #101018
+            : root.d == "lower" ? #080612 : root.d == "equaliser" ? #0b0a16 : root.look.c1.mix(root.look.c2, 0.5);
+        property <brush> panel: root.d == "polaroid" || root.th == "clear" ? transparent
             : root.d == "cassette" ? @linear-gradient(180deg, #2d2d33 0%, #1d1d22 100%)
             : root.th == "frosted" ? #ffffff24 : root.th == "neon" ? #0603109e : root.th == "solid" ? #0d0d13eb : root.th == "paper" ? #f7f4ee
             : root.d == "lower" ? #080612e0 : root.d == "equaliser" ? #06050e99
@@ -3229,8 +3238,8 @@ component AlertPreview inherits Rectangle {
     border-width: 1px;
     border-color: Theme.line;
     clip: true;
-    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
-    Caps { r: 14px; outside: Theme.bg; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
+    Checker { x: 0; y: 0; width: parent.width; height: parent.height; }
+    Caps { r: 14px; outside: Theme.bg; tl: #2a2d36; tr: #2a2d36; bl: #2a2d36; br: #2a2d36; top: true; bottom: true; }
     Text { x: 12px; y: 8px; text: root.look.in-widget ? "A preview: made-up alerts in the Stream Widget" : "A preview: made-up alerts, on their own"; color: #ffffffa0; font-size: 11px; }
     property <[{ head: string, main: string, msg: string, d: string }]> samples: [
         { head: "New Follower", main: "PixelPanda", msg: "", d: Icons.heart-out },
@@ -3770,7 +3779,7 @@ component CamPreview inherits Rectangle {
     border-color: Theme.line;
     clip: true;
     background: #2a2e3c;
-    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
+    Checker { x: 0; y: 0; width: parent.width; height: parent.height; }
     for r in CamLook.rects: Rectangle {
         x: parent.width * r.x;
         y: parent.height * r.y;
@@ -3844,7 +3853,7 @@ component SuitePreview inherits Rectangle {
     border-width: 1px;
     border-color: Theme.line;
     clip: true;
-    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
+    Checker { x: 0; y: 0; width: parent.width; height: parent.height; }
     Caps { r: 14px; outside: Theme.panel; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
     Text { x: 12px; y: 8px; text: "A preview, with made-up numbers"; color: #ffffffa0; font-size: 11px; }
     property <string> t: root.theme == "" ? "dark" : root.theme;
@@ -4295,8 +4304,8 @@ component ChatPreview inherits Rectangle {
     border-color: Theme.line;
     clip: true;
     // (two colours only: a third stop drew a seam across it in the software renderer)
-    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
-    Caps { r: 14px; outside: Theme.bg; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
+    Checker { x: 0; y: 0; width: parent.width; height: parent.height; }
+    Caps { r: 14px; outside: Theme.bg; tl: #2a2d36; tr: #2a2d36; bl: #2a2d36; br: #2a2d36; top: true; bottom: true; }
     Text { x: 12px; y: 8px; text: "A preview, with made-up chat"; color: #ffffffa0; font-size: 11px; }
     // (a new one every 2 s: the newest is the turn's, the rest the ones before it)
     property <int> n: max(1, root.samples.length);
@@ -4309,9 +4318,10 @@ component ChatPreview inherits Rectangle {
         y: 26px;
         width: parent.width * 0.55;
         height: parent.height - 34px;
-        alignment: root.look.top ? LayoutAlignment.start : LayoutAlignment.end;
+        alignment: root.look.top || root.look.down ? LayoutAlignment.start : LayoutAlignment.end;
         spacing: 6px;
-        // (newest at the bottom: the oldest first; at the top, the newest first)
+        // (newest at the bottom: the oldest first (filling from the top, or pushed up from the bottom); at the
+        // top, the newest first)
         for k in 5: ChatRow {
             property <int> age: root.look.top ? k : 4 - k;
             m: root.samples[mod(root.turn - self.age + root.n * 100, root.n)];
@@ -4415,9 +4425,9 @@ component SocialPreview inherits Rectangle {
     border-color: Theme.line;
     clip: true;
     // (two colours only: a third stop drew a seam across it in the software renderer)
-    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
+    Checker { x: 0; y: 0; width: parent.width; height: parent.height; }
     // (its corners rounded off over the stream behind it: the software renderer draws a gradient square)
-    Caps { r: 14px; outside: Theme.bg; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
+    Caps { r: 14px; outside: Theme.bg; tl: #2a2d36; tr: #2a2d36; bl: #2a2d36; br: #2a2d36; top: true; bottom: true; }
     if root.look.sample: Text { x: 12px; y: 8px; text: "Sample platforms: add yours below to see them here."; color: #ffffffb0; font-size: 11px; }
     // (one at a time: which one's up, and how far into its turn)
     property <int> secs: max(3, root.look.secs);
@@ -4470,7 +4480,7 @@ component LyricsPreview inherits Rectangle {
     border-color: Theme.line;
     clip: true;
     // (a game behind it, to read it over; two colours only: a third stop drew a seam across it)
-    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
+    Checker { x: 0; y: 0; width: parent.width; height: parent.height; }
     property <length> fs: clamp(root.look.size * 0.42, 12, 34) * 1px;
     property <color> hi: root.look.own-hi ? root.look.hi : Theme.accent;
     property <TextHorizontalAlignment> al: root.look.align == "left" ? TextHorizontalAlignment.left : root.look.align == "right" ? TextHorizontalAlignment.right : TextHorizontalAlignment.center;
@@ -9399,9 +9409,10 @@ export component AppWindow inherits Window {
                              if f.kind == "designpick": VerticalLayout {
                               spacing: 8px;
                               Text { text: f.label; color: Theme.text; font-weight: 700; }
-                              for r in 4: HorizontalLayout {
+                              // (as many rows of four as there are designs; the last row's spare places left empty)
+                              for r in ceil(f.options.length / 4): HorizontalLayout {
                                   spacing: 10px;
-                                  for c in 4: DesignSketch { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; k: r * 4 + c; name: f.options[r * 4 + c]; on: f.at == r * 4 + c; clicked => { root.pf-set(i, "\u{2}" + (r * 4 + c)); } }
+                                  for c in 4: DesignSketch { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; k: r * 4 + c; name: f.options[r * 4 + c]; on: f.at == r * 4 + c; opacity: r * 4 + c < f.options.length ? 1 : 0; clicked => { if (r * 4 + c < f.options.length) { root.pf-set(i, "\u{2}" + (r * 4 + c)); } } }
                               }
                              }
                              if f.kind == "themepick": VerticalLayout {

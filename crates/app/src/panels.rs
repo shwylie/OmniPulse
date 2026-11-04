@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value};
 /// A widget's look: what each of its outputs can have of its own (the rest, its address and port, are the first's)
 pub fn look_keys(kind: &str) -> Vec<&'static str> {
     match kind {
-        "widget" => vec!["widgetDesign", "widgetTheme", "widgetAlign", "widgetRounded", "widgetText", "wEnter", "wFade", "wScroll", "wSpin", "wUpNext", "wRequester", "wColor", "widgetOwnCol", "widgetCol1", "widgetCol2"],
+        "widget" => vec!["widgetDesign", "widgetTheme", "widgetBg", "widgetAlign", "widgetRounded", "widgetText", "wEnter", "wFade", "wScroll", "wSpin", "wUpNext", "wRequester", "wColor", "widgetOwnCol", "widgetCol1", "widgetCol2"],
         "lyricsw" => keys("lyricsw").into_iter().map(|(k, _)| k).collect(),
         _ => Vec::new(),
     }
@@ -96,7 +96,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "smart" => vec![("shareRatings", json!(true)), ("smartBlend", json!(true)), ("smartKeys", json!(true)), ("smartMax", json!(10)), ("smartTape", json!(false)), ("smartRoll", json!(false)), ("smartVoices", json!(true))],
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqNoAi", json!(false)), ("reqLimits", json!(true)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
         "socials" => vec![("socialStyle", json!("card")), ("socialAlign", json!("left")), ("socialSecs", json!(8)), ("socialAll", json!(false)), ("socialRounded", json!(true)), ("socialColoured", json!(false)), ("socialMotion", json!("rise"))],
-        "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetTheme", json!("colours")), ("wEnter", json!("fade")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wUpNext", json!("soon")), ("wRequester", json!(true)), ("wColor", json!(1.2)), ("alertInWidget", json!(false)), ("widgetOwnCol", json!(false)), ("widgetCol1", json!("#8e9bff")), ("widgetCol2", json!("#b48eff"))],
+        "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetTheme", json!("colours")), ("widgetBg", json!("theme")), ("wEnter", json!("fade")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wUpNext", json!("soon")), ("wRequester", json!(true)), ("wColor", json!(1.2)), ("alertInWidget", json!(false)), ("widgetOwnCol", json!(false)), ("widgetCol1", json!("#8e9bff")), ("widgetCol2", json!("#b48eff"))],
         "report" => vec![("reportKind", json!("bug")), ("reportTitle", json!("")), ("reportText", json!("")), ("reportContact", json!("")), ("reportInfo", json!(true))],
         "alerts" => vec![("alertsOn", json!(false)), ("alertInWidget", json!(false)), ("alertGif", json!("")), ("alertTheme", json!("widget")), ("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
         "remote" => vec![("remotePort", json!(7880))],
@@ -550,6 +550,8 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 stepper("widgetText", "Text Size", "", pct(0.7, 1.6, 0.1)),
                 note("Theme"),
                 themepick("widgetTheme", "Panel and Colours"),
+                // (how see-through its panels are: as the theme has them, or solid, or a set amount)
+                sel("widgetBg", "Background", "How see-through its panel is. As Designed keeps each theme's own; Solid hides what's behind it.", &[(json!("theme"), "As Designed"), (json!("100"), "Solid"), (json!("90"), "90%"), (json!("75"), "75%"), (json!("50"), "50%"), (json!("25"), "25%")]),
                 tog("widgetOwnCol", "Own Colours", "When this is off, it uses your app theme's accent colours."),
             ];
             if vals["widgetOwnCol"].as_bool() == Some(true) {

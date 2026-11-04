@@ -8282,7 +8282,7 @@ fn chat_preview(ui: &AppWindow, vals: &serde_json::Map<String, serde_json::Value
     ui.set_pf_chat(ChatLook {
         style: vals.get("style").and_then(|v| v.as_str()).unwrap_or("plain").into(),
         size: num("size", 20.0) as f32, bg: num("bg", 0.0) as f32, shadow: on("shadow"),
-        top: vals.get("dir").and_then(|v| v.as_str()) == Some("top"), badges: on("badges"), marks: on("marks"), from: from.clone().into(),
+        top: vals.get("dir").and_then(|v| v.as_str()) == Some("top"), down: vals.get("dir").and_then(|v| v.as_str()) == Some("down"), badges: on("badges"), marks: on("marks"), from: from.clone().into(),
         above: vals.get("name").and_then(|v| v.as_str()) == Some("above"),
         right: vals.get("align").and_then(|v| v.as_str()) == Some("right"),
         row: vals.get("flow").and_then(|v| v.as_str()) == Some("row"),
@@ -8472,6 +8472,8 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
                 text: vals.get("widgetText").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
                 c1: col("widgetCol1", t.get_accent()), c2: col("widgetCol2", t.get_accent_2()),
                 spin: on("wSpin", true), requester: on("wRequester", true),
+                // (how see-through its panel is: -1 as the theme has it)
+                bg: vals.get("widgetBg").and_then(|v| v.as_str()).and_then(|v| v.parse::<f32>().ok()).map_or(-1.0, |v| (v / 100.0).clamp(0.0, 1.0)),
             });
         }
         if name == "alerts" {
@@ -15701,6 +15703,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("side") { vec![(9, "library"), (11, "sidefold"), (13, "sideopen"), (14, "settings"), (16, "discover"), (18, "back"), (20, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=creators: the Creators' pages, each pictured: Panels (scrolled down, too), Webcam
             // Overlay, Game HUD Frames)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("previews") { vec![(6, "size:1500:950"), (8, "openpanel:widget"), (12, "scroll:500"), (14, "openpanel:multichat"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("hudshape") { vec![(6, "size:1500:950"), (7, "bot:sheet:hud"), (8, "hudsample"), (10, "bot:hud:add:0.238,0.896,0.288,0.956"), (11, "bot:hud:add:0.29,0.896,0.339,0.956"), (12, "bot:hud:add:0.463,0.837,0.537,0.953"), (13, "bot:hud:add:0.673,0.896,0.723,0.956"), (14, "bot:hud:add:0.781,0.88,0.976,0.956"), (16, "bot:hud:none"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("camwiz") { vec![(6, "size:1500:950"), (7, "bot:sheet:cam"), (9, "bot:cam:step:0"), (10, "bot:cam:step:1"), (11, "bot:cam:step:2"), (12, "bot:cam:step:3"), (13, "bot:cam:step:4"), (14, "scroll:700"), (15, "bot:cam:step:5"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("icons") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "bot:pnl:1:icon:trophy"), (11, "click:933,309"), (13, "end")] }

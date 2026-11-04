@@ -508,6 +508,36 @@
   <div id="aText"><div id="aHead"></div><div id="aMain" class="marq"><span></span></div><div id="aMsg" class="marq"><span></span></div></div>
 </div>
 <script>
+  // How see-through the panels are, if set (else as the theme has them): each panel's own colours (its colour and
+  // its gradient's), as they look over a dark scene, at that much. Done again when the look or colours change.
+  let bgDone = "";
+  function panelBg(v) {
+    v = String(v || "theme");
+    const cs = document.documentElement.style;
+    const key = v + "|" + document.body.className + "|" + ["--bg1", "--bg2", "--hi"].map((k) => cs.getPropertyValue(k)).join(",");
+    if (key === bgDone) return;
+    bgDone = key;
+    const els = [document.getElementById("card")];
+    if (document.body.classList.contains("wave")) els.push(document.getElementById("info"), document.getElementById("track"));
+    const want = Math.max(0, Math.min(100, Number(v))) / 100;
+    const base = [16, 16, 24];
+    const redo = (c) => c.replace(/rgba?\(([^)]+)\)/g, (all, inner) => {
+      const p = inner.split(/[\s,\/]+/).filter(Boolean).map(Number);
+      const a = p.length > 3 ? p[3] : 1;
+      if (!(a > 0)) return all;
+      // (more solid than it was: its colour as it shows over a dark scene; less: its own colour, fainter)
+      const rgb = want >= a ? p.slice(0, 3).map((x, k) => Math.round(x * a + base[k] * (1 - a))) : p.slice(0, 3);
+      return "rgba(" + rgb.join(", ") + ", " + want + ")";
+    });
+    for (const el of els) {
+      if (!el) continue;
+      el.style.backgroundColor = ""; el.style.backgroundImage = "";
+      if (v === "theme" || !isFinite(want)) continue;
+      const st = getComputedStyle(el);
+      if (/rgba?\(/.test(st.backgroundColor)) el.style.backgroundColor = redo(st.backgroundColor);
+      if (/gradient/.test(st.backgroundImage)) el.style.backgroundImage = redo(st.backgroundImage);
+    }
+  }
   const MY_VERSION = "__WIDGET_VERSION__";
   const PLATFORMS = {
     soundcloud: { d: "M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z", color: "#fff" },
@@ -690,6 +720,7 @@
     }
     const root = document.documentElement.style;
     if (!seamColours) cardColours();
+    panelBg(s.bg);
     const ts = String(s.text_scale || 1);
     if (document.documentElement.style.getPropertyValue("--ts") !== ts) {
       document.documentElement.style.setProperty("--ts", ts);
@@ -1386,6 +1417,7 @@
         root.setProperty("--hi", s.accent || "#8e9bff");
         const ts = String(s.text_scale || 1);
         root.setProperty("--ts", ts);
+        panelBg(s.bg);
       }
       alertsFromPoll(s.alerts);
       paint();

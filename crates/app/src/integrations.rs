@@ -365,6 +365,8 @@ fn np_look(prefs: &Value, accent: (&str, &str)) -> Value {
         "accent2": if own { prefs["widgetCol2"].as_str().unwrap_or("#b48eff") } else { accent.1 },
         "design": prefs["widgetDesign"].as_str().unwrap_or("card"),
         "theme": prefs["widgetTheme"].as_str().unwrap_or("colours"),
+        // (how see-through its panels are: "theme" as the theme has them, else a percentage)
+        "bg": prefs["widgetBg"].as_str().unwrap_or("theme"),
         "rounded": on(prefs, "widgetRounded"),
         "align": if prefs["widgetAlign"].as_str() == Some("right") { "right" } else { "left" },
         "text_scale": prefs["widgetText"].as_f64().unwrap_or(1.0),

@@ -196,7 +196,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             f.extend([
                 tog("shadow", "Shadow", "Makes the words easier to read over a busy picture."),
                 sel("align", "Line Up On The", "Right suits chat placed on the right of your stream.", &[(json!("left"), "Left"), (json!("right"), "Right")]),
-                sel("dir", "Newest Messages", "", &[(json!("bottom"), "At the Bottom"), (json!("top"), "At the Top")]),
+                sel("dir", "Newest Messages", "", &[(json!("bottom"), "At the Bottom, Older Ones Pushed Up"), (json!("down"), "At the Bottom, Filling From the Top"), (json!("top"), "At the Top")]),
                 note("What It Shows"),
                 sel("from", "Chat From", "", &[(json!("all"), "Every Platform"), (json!("twitch"), "Twitch"), (json!("kick"), "Kick"), (json!("youtube"), "YouTube")]),
                 tog("badges", "Badges", "Subscriber, moderator and VIP badges next to names."),

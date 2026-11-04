@@ -13,6 +13,9 @@
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font: 600 var(--fs) / 1.35 "Segoe UI", system-ui, sans-serif; color: #fff; }
   #list { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: var(--gap); padding: 12px; }
   body.top #list { justify-content: flex-start; flex-direction: column-reverse; }
+  /* newest at the bottom, filling from the top: the first at the top, each one under the last, the oldest
+     going off the top once it's full */
+  body.down #list { justify-content: flex-start; overflow: hidden; }
   .m { flex-shrink: 0; display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; border-radius: 12px; background: rgba(10, 12, 18, var(--bg)); animation: in 0.35s ease-out; max-width: 100%; overflow-wrap: anywhere; }
   body.shadow .m { text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85), 0 0 2px rgba(0, 0, 0, 0.9); }
   /* its themes (Settings > Streaming > Suite > Widgets > Multichat Overlay, or the gear): Plain uses the
@@ -187,7 +190,7 @@
   <label>Background <select id="oBg"><option value="0">None</option><option value="0.35">Faint</option><option value="0.6">Half</option><option value="0.85">Solid</option></select></label>
   <label>Shadow <input type="checkbox" id="oShadow" checked></label>
   <label>Line up on the <select id="oAlign"><option value="left">Left</option><option value="right">Right</option></select></label>
-  <label>Newest at the <select id="oDir"><option value="bottom">Bottom</option><option value="top">Top</option></select></label>
+  <label>Newest at the <select id="oDir"><option value="bottom">Bottom, older ones pushed up</option><option value="down">Bottom, filling from the top</option><option value="top">Top</option></select></label>
   <h2>Time</h2>
   <label>Fade after (seconds, 0: never) <input type="number" id="oFade" min="0" max="600" step="1"></label>
   <label>At most <input type="number" id="oMax" min="1" max="100" step="1"></label>
@@ -231,6 +234,15 @@
     note: "M9 3v12.3A3.5 3.5 0 1 0 11 18V8h6V3z",
   };
   let ribbonAt = 0;
+  // (filling from the top: the oldest taken off the top while the newest would be below the bottom)
+  function fit() {
+    const list = $("list");
+    if (!list || !document.body.classList.contains("down")) return;
+    while (list.children.length > 1 && list.scrollHeight > list.clientHeight + 1) { const x = list.firstChild; for (const [n, v] of rows) if (v === x) rows.delete(n); x.remove(); }
+  }
+  // (and again as emotes and badges load in, and the source is resized, as those make the messages taller)
+  document.addEventListener("load", (e) => { if (e.target && e.target.tagName === "IMG") fit(); }, true);
+  addEventListener("resize", () => fit());
   function apply() {
     document.documentElement.style.setProperty("--fs", Math.max(10, Math.min(60, Number(opt.size) || 20)) + "px");
     document.documentElement.style.setProperty("--bg", opt.bg);
@@ -250,6 +262,8 @@
     $("oFlow").value = opt.flow; $("oOut").value = opt.out; $("oSpeed").value = opt.speed;
     $("oName").value = opt.name; $("oAnim").value = opt.anim; $("oEvents").checked = opt.events; $("oPronouns").checked = opt.pronouns; $("oFirst").checked = opt.first;
     document.body.classList.toggle("top", opt.dir === "top");
+    document.body.classList.toggle("down", opt.dir === "down" && opt.flow !== "row");
+    fit();
     document.body.classList.toggle("right", opt.align === "right");
     $("oAlign").value = opt.align;
     $("oFrom").value = opt.from; $("oCmds").checked = opt.cmds; $("oBot").checked = opt.bot; $("oBadges").checked = opt.badges; $("oMarks").checked = opt.marks;
@@ -433,6 +447,7 @@
     list.append(r);
     rows.set(m.n, r);
     while (list.children.length > Math.max(1, Number(opt.max) || 30)) { const x = list.firstChild; for (const [n, v] of rows) if (v === x) rows.delete(n); x.remove(); }
+    fit();
     if (Number(opt.fade) > 0) setTimeout(() => gone(m.n), Number(opt.fade) * 1000);
   }
   // (pronouns, as viewers set them at pronouns.alejo.io: the list once, each chatter's once)
@@ -483,6 +498,7 @@
     const n = "ev" + e.n;
     rows.set(n, r);
     while (list.children.length > Math.max(1, Number(opt.max) || 30)) { const x = list.firstChild; for (const [i, v] of rows) if (v === x) rows.delete(i); x.remove(); }
+    fit();
     if (Number(opt.fade) > 0) setTimeout(() => gone(n), Number(opt.fade) * 1000);
   }
   let evLast = -1;
