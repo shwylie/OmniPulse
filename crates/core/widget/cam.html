@@ -77,24 +77,81 @@
     const s = c.spot === "custom" ? [Number(c.x) || 70, Number(c.y) || 60, Number(c.w) || 26, Number(c.h) || 34] : SPOTS[c.spot] || SPOTS.br;
     return { x: s[0], y: s[1], w: s[2], h: s[3] };
   }
-  // (a part's place round the camera: its slot's size from the camera's width, then put where it's set)
-  function placed(el, p, b, ratio) {
-    const W = innerWidth, H = innerHeight, bx = (b.x / 100) * W, by = (b.y / 100) * H, bw = (b.w / 100) * W, bh = (b.h / 100) * H;
-    const k = SIZES[p.size] || SIZES.medium;
-    let w = bw * k, h = w / ratio;
-    if (p.type === "chat") { h = bh; w = h * ratio; }
-    const gap = 10;
-    let x = bx + (bw - w) / 2, y = by + bh + gap;
-    if (p.place === "above") y = by - h - gap;
-    if (p.place === "left") { x = bx - w - gap; y = by + (bh - h) / 2; }
-    if (p.place === "right") { x = bx + bw + gap; y = by + (bh - h) / 2; }
-    if (p.place === "in-top") y = by + gap;
-    if (p.place === "in-bottom") y = by + bh - h - gap;
-    if (p.place === "corner") { w *= 0.45; h *= 0.45; x = bx + bw - w * 0.6; y = by - h * 0.45; }
-    // (kept on the canvas)
-    x = Math.max(0, Math.min(W - w, x)); y = Math.max(0, Math.min(H - h, y));
-    Object.assign(el.style, { left: x + "px", top: y + "px", width: w + "px", height: h + "px" });
+  // The parts laid out round the camera, as the app lays them out (botpage.rs's cam_arrange_in: keep the two the
+  // same): sharing a side, stacked one after another or side by side (its flow: "auto" stacked if there's room);
+  // a side without the room moved to the other side if there's room there; each side's parts kept on the canvas
+  // together; the corner's just inside it while something's above the camera. Each part's box, by its index
+  const SIDES = ["above", "below", "left", "right", "in-top", "in-bottom"];
+  const RATIO = { now: 3.6, alerts: 3.6, follow: 4.6, sub: 4.6, hype: 4.6, goals: 1.8, chat: 0.7, socials: 4.2, name: 4.4, live: 3.2, clock: 3.2 };
+  function arrange(c, b, W, H) {
+    const bx = (b.x / 100) * W, by = (b.y / 100) * H, bw = (b.w / 100) * W, bh = (b.h / 100) * H, gap = 10;
+    const parts = (c.parts || []).filter((p) => p.on !== false);
+    const sized = parts.map((p) => {
+      const k = SIZES[p.size] || SIZES.medium, ratio = RATIO[p.type] || 1;
+      let w = bw * k, h = w / ratio;
+      if (p.type === "chat") { h = bh; w = h * ratio; }
+      if (p.place === "corner") { w *= 0.45; h *= 0.45; }
+      return { p, w, h, place: SIDES.includes(p.place) || p.place === "corner" ? p.place : "below" };
+    });
+    const flowSet = (side) => { const f = (c.flows || {})[side]; return f === "row" || f === "column" ? f : "auto"; };
+    const sum = (a) => a.reduce((n, x) => n + x, 0);
+    const need = (side, items, flow) => {
+      const deep = items.map((i) => (side === "left" || side === "right" ? sized[i].w : sized[i].h));
+      const all = sum(deep) + gap * Math.max(0, deep.length - 1), most = Math.max(0, ...deep);
+      return (side === "left" || side === "right") === (flow === "column") ? most : all;
+    };
+    const room = (side) => ({ above: by - gap, below: H - by - bh - gap, left: bx - gap, right: W - bx - bw - gap })[side] ?? bh - gap * 2;
+    const resolve = (side, items) => {
+      const set = flowSet(side);
+      if (set !== "auto") return set;
+      if (side === "left" || side === "right") return sum(items.map((i) => sized[i].h)) + gap * Math.max(0, items.length - 1) <= H ? "column" : "row";
+      if (side === "in-top" || side === "in-bottom") return sum(items.map((i) => sized[i].w)) + gap * (items.length + 1) <= bw ? "row" : "column";
+      return need(side, items, "column") <= room(side) ? "column" : "row";
+    };
+    const groups = Object.fromEntries(SIDES.map((s) => [s, sized.map((_, i) => i).filter((i) => sized[i].place === s)]));
+    for (const [a, o] of [["below", "above"], ["above", "below"], ["right", "left"], ["left", "right"]]) {
+      if (!groups[a].length || need(a, groups[a], resolve(a, groups[a])) <= room(a)) continue;
+      const both = groups[o].concat(groups[a]);
+      if (need(o, both, resolve(o, both)) <= room(o) || room(o) > room(a)) { groups[o] = both; groups[a] = []; }
+    }
+    const boxes = [], cx = bx + bw / 2, cy = by + bh / 2;
+    for (const side of SIDES) {
+      const items = groups[side];
+      if (!items.length) continue;
+      const flow = resolve(side, items), col = flow === "column";
+      const sumW = sum(items.map((i) => sized[i].w)) + gap * (items.length - 1), sumH = sum(items.map((i) => sized[i].h)) + gap * (items.length - 1);
+      let at = 0;
+      for (const i of items) {
+        const { w, h } = sized[i];
+        let x, y;
+        if (side === "above") { if (col) { y = by - gap - at - h; x = cx - w / 2; at += h + gap; } else { x = cx - sumW / 2 + at; y = by - gap - h; at += w + gap; } }
+        else if (side === "below") { if (col) { y = by + bh + gap + at; x = cx - w / 2; at += h + gap; } else { x = cx - sumW / 2 + at; y = by + bh + gap; at += w + gap; } }
+        else if (side === "left") { if (col) { y = cy - sumH / 2 + at; x = bx - gap - w; at += h + gap; } else { x = bx - gap - at - w; y = cy - h / 2; at += w + gap; } }
+        else if (side === "right") { if (col) { y = cy - sumH / 2 + at; x = bx + bw + gap; at += h + gap; } else { x = bx + bw + gap + at; y = cy - h / 2; at += w + gap; } }
+        else if (side === "in-top") { if (col) { y = by + gap + at; x = cx - w / 2; at += h + gap; } else { x = cx - sumW / 2 + at; y = by + gap; at += w + gap; } }
+        else { if (col) { y = by + bh - gap - at - h; x = cx - w / 2; at += h + gap; } else { x = cx - sumW / 2 + at; y = by + bh - gap - h; at += w + gap; } }
+        boxes[i] = { x, y, w, h };
+      }
+      // (kept on the canvas together)
+      const x0 = Math.min(...items.map((i) => boxes[i].x)), y0 = Math.min(...items.map((i) => boxes[i].y));
+      const x1 = Math.max(...items.map((i) => boxes[i].x + boxes[i].w)), y1 = Math.max(...items.map((i) => boxes[i].y + boxes[i].h));
+      const dx = x0 < 0 ? -x0 : x1 > W ? Math.max(W - x1, -x0) : 0, dy = y0 < 0 ? -y0 : y1 > H ? Math.max(H - y1, -y0) : 0;
+      for (const i of items) { boxes[i].x += dx; boxes[i].y += dy; }
+    }
+    // (on the corner: each in the first of its spots that's free, else the first)
+    const free = (r) => boxes.every((o) => !o || Math.min(r.x + r.w, o.x + o.w) - Math.max(r.x, o.x) <= 2 || Math.min(r.y + r.h, o.y + o.h) - Math.max(r.y, o.y) <= 2);
+    let at = 0;
+    sized.forEach((s, i) => {
+      if (s.place !== "corner") return;
+      const { w, h } = s;
+      const spots = [[bx + bw - w * 0.6 - at, by - h * 0.45], [bx + bw - gap - w - at, by + gap], [bx + bw - gap - w - at, by + bh - gap - h], [bx + gap + at, by + gap], [bx + gap + at, by + bh - gap - h]];
+      const fit = ([x, y]) => ({ x: Math.max(0, Math.min(W - w, x)), y: Math.max(0, Math.min(H - h, y)), w, h });
+      boxes[i] = spots.map(fit).find(free) || fit(spots[0]);
+      at += w + gap;
+    });
+    return parts.map((p, i) => ({ p, box: boxes[i] }));
   }
+  const put = (el, r) => Object.assign(el.style, { left: r.x + "px", top: r.y + "px", width: r.w + "px", height: r.h + "px" });
   // (a theme's font, from Google Fonts: loaded once, then used)
   const fontsLoaded = new Set();
   function useFont(name, el) {
@@ -127,28 +184,28 @@
     cam.style.borderRadius = getComputedStyle(document.body).getPropertyValue("--r") || "";
     fr.innerHTML = '<div class="edge"></div>';
     stage.append(cam, fr);
-    for (const p of c.parts || []) {
-      if (p.on === false) continue;
+    for (const { p, box: r } of arrange(c, b, W, H)) {
+      if (!r) continue;
       let el;
       if (LIVE[p.type]) {
         const src = LIVE[p.type][0] + (PREVIEW ? "?preview=1" : "");
         el = keep[src] || Object.assign(document.createElement("div"), { innerHTML: '<iframe src="' + src + '" allowtransparency="true"></iframe>' });
         el.className = "part live"; el.dataset.src = src;
-        placed(el, p, b, LIVE[p.type][1]);
+        put(el, r);
       } else if (p.type === "name") {
         el = document.createElement("div"); el.className = "part tag"; el.textContent = p.text || "Your Name";
-        placed(el, p, b, 4.4);
-        el.style.setProperty("--fs", parseFloat(el.style.height) * 0.48 + "px");
+        put(el, r);
+        el.style.setProperty("--fs", r.h * 0.48 + "px");
       } else if (p.type === "live") {
         el = document.createElement("div"); el.className = "part badge"; el.textContent = "LIVE";
-        placed(el, Object.assign({ size: "small" }, p), b, 3.2);
+        put(el, r);
       } else if (p.type === "clock") {
         el = document.createElement("div"); el.className = "part tag clock";
-        placed(el, Object.assign({ size: "small" }, p), b, 3.2);
-        el.style.setProperty("--fs", parseFloat(el.style.height) * 0.5 + "px");
+        put(el, r);
+        el.style.setProperty("--fs", r.h * 0.5 + "px");
       } else if (p.type === "sticker" && p.img) {
         el = document.createElement("div"); el.className = "part sticker"; el.style.setProperty("--img", 'url("' + String(p.img).replace(/["\\]/g, "") + '")');
-        placed(el, p, b, 1);
+        put(el, r);
       }
       if (el) stage.append(el);
     }

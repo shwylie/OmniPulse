@@ -2356,6 +2356,8 @@ function camOverlay() {
   return {
     id: "main", kind: "cam", spot: String(v("camSpot", "br")), x: num(v("camX", 72)), y: num(v("camY", 62)), w: num(v("camW", 26)), h: num(v("camH", 34)),
     shape: String(v("camShape", "rounded")), border: String(v("camBorder", "glow")), theme: String(v("camTheme", "dark")), colors: suiteColors(), font: themeFonts()[String(v("camTheme", "dark"))] || "",
+    // (each side's parts, stacked or side by side; "auto" stacked if there's room)
+    flows: Object.fromEntries(["above", "below", "left", "right", "in-top", "in-bottom"].map((k) => [k, String(v("camFlow_" + k, "auto"))])),
     parts: CAM_PARTS.filter(([id, on]) => yes(v("camP_" + id, on))).map(([id, , place, size]) => ({
       type: id, place: String(v("camP_" + id + "Place", place)), size: String(v("camP_" + id + "Size", size)),
       text: id === "name" ? String(v("camNameText", x.login || "Your Name")) : "", img: id === "sticker" ? String(v("camStickerImg", "")) : "",

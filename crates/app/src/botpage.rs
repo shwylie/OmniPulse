@@ -34,7 +34,12 @@ pub fn sign_in_extras(vals: &mut Map<String, Value>, relay: &str) {
 thread_local! {
     /// Tips and Donations' platforms clicked open
     pub static TIPS_OPEN: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(std::collections::HashSet::new());
+    /// The webcam overlay's setup: the step it's on
+    pub static CAM_STEP: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
+
+/// The webcam overlay's setup, step by step
+pub const CAM_STEPS: [&str; 6] = ["Your Camera", "Frame", "Look", "What's On It", "Arrange", "Add to OBS"];
 
 /// A setting that changes only how widgets look or behave: taken by the running Suite as it's saved, no
 /// restart. Anything to do with an account, a connection, a sign-in, commands or actions isn't
@@ -222,43 +227,164 @@ fn list_mark(line: &str) -> (Option<&str>, &str) {
 /// The webcam overlay's parts: (id, name, on at first, place, size)
 pub const CAM_PARTS: [(&str, &str, bool, &str, &str); 12] = [("name", "Name Tag", true, "below", "medium"), ("live", "LIVE Badge", true, "corner", "small"), ("now", "Now Playing", false, "above", "medium"), ("alerts", "Alerts", true, "above", "large"), ("follow", "Latest Follow", false, "left", "medium"), ("sub", "Latest Sub", false, "left", "medium"), ("goals", "Goals", false, "left", "medium"), ("hype", "Hype Train", false, "above", "medium"), ("chat", "Chat", false, "left", "medium"), ("socials", "Social Plug", false, "below", "medium"), ("clock", "Clock", false, "in-top", "small"), ("sticker", "A GIF or Picture", false, "corner", "medium")];
 
-/// The webcam overlay laid out as cam.html lays it out, on a 1920 × 1080 canvas: the camera's box, then each
-/// part that's on: (id, name, x, y, w, h), as fractions of the canvas
-pub fn cam_layout(cur: &Map<String, Value>) -> Vec<(String, String, f32, f32, f32, f32)> {
+/// The sides a part can go on round the camera, and the places inside it, in the order they're laid out
+pub const CAM_SIDES: [(&str, &str); 6] = [("above", "Above"), ("below", "Below"), ("left", "Left"), ("right", "Right"), ("in-top", "Inside, Top"), ("in-bottom", "Inside, Bottom")];
+
+/// A webcam overlay part where it's put: its id, its name, what it shows (the name tag's words), its box (pixels on a 1920 × 1080 canvas), and the
+/// place it ended up in
+#[derive(Clone, Debug, PartialEq)]
+pub struct CamPart { pub id: String, pub name: String, pub label: String, pub x: f32, pub y: f32, pub w: f32, pub h: f32, pub place: String }
+
+/// The webcam overlay laid out: the camera first, then each part that's on; the parts moved to the other side
+/// for want of room (name, the side they went to); and the parts that still overlap (two names; the camera's
+/// "your camera"; a part off the canvas's edge, its name and "")
+#[derive(Clone, Debug, Default)]
+pub struct CamArranged { pub parts: Vec<CamPart>, pub moved: Vec<(String, String)>, pub overlaps: Vec<(String, String)> }
+
+/// The webcam overlay laid out as cam.html lays it out (the two kept the same), on a 1920 × 1080 canvas. Parts
+/// sharing a side are stacked (one after another, out from the camera) or side by side, as that side's flow is
+/// set ("auto" picks stacked if there's room for it); a side without the room for its parts has them moved to the
+/// other side if there's room there; each side's parts are kept on the canvas together
+pub fn cam_arrange(cur: &Map<String, Value>) -> CamArranged {
     let num = |k: &str, d: f32| cur.get(k).and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).map(|v| v as f32).unwrap_or(d);
-    let or = |k: &str, d: &'static str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
-    let spot = or("camSpot", "br");
-    let (bx, by, bw, bh) = match spot.as_str() {
+    let or = |k: &str, d: &str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
+    let (bx, by, bw, bh) = match or("camSpot", "br").as_str() {
         "bl" => (2.0, 62.0, 26.0, 34.0), "tr" => (72.0, 4.0, 26.0, 34.0), "tl" => (2.0, 4.0, 26.0, 34.0),
         "custom" => (num("camX", 72.0), num("camY", 62.0), num("camW", 26.0), num("camH", 34.0)),
         _ => (72.0, 62.0, 26.0, 34.0),
     };
-    let (w0, h0) = (1920.0f32, 1080.0f32);
-    let (bx, by, bw, bh) = (bx / 100.0 * w0, by / 100.0 * h0, bw / 100.0 * w0, bh / 100.0 * h0);
-    let mut out = vec![("cam".to_string(), "Your camera".to_string(), bx / w0, by / h0, bw / w0, bh / h0)];
-    for (id, name, dflt, place0, size0) in CAM_PARTS {
-        if !on(cur, &format!("camP_{id}"), dflt) { continue; }
-        let place = or(&format!("camP_{id}Place"), place0);
-        let k = match or(&format!("camP_{id}Size"), size0).as_str() { "small" => 0.6, "large" => 1.1, _ => 0.85 };
-        let ratio = match id { "now" | "alerts" => 3.6, "follow" | "sub" | "hype" => 4.6, "goals" => 1.8, "chat" => 0.7, "socials" => 4.2, "name" => 4.4, "live" | "clock" => 3.2, _ => 1.0 };
+    let parts: Vec<(String, String, String, String)> = CAM_PARTS.iter().filter(|p| on(cur, &format!("camP_{}", p.0), p.2))
+        .map(|(id, name, _, place, size)| (id.to_string(), name.to_string(), or(&format!("camP_{id}Place"), place), or(&format!("camP_{id}Size"), size))).collect();
+    let flows: Vec<(String, String)> = CAM_SIDES.iter().map(|(k, _)| (k.to_string(), or(&format!("camFlow_{k}"), "auto"))).collect();
+    let mut a = cam_arrange_in(1920.0, 1080.0, (bx, by, bw, bh), &parts, &flows);
+    for p in a.parts.iter_mut().filter(|p| p.id == "name") { p.label = or("camNameText", "Your Name"); }
+    a
+}
+
+/// The layout itself (see cam_arrange): the canvas's size, the camera's box (percent of it), the parts on
+/// (id, name, place, size), and each side's flow ("row", "column" or "auto")
+pub fn cam_arrange_in(cw: f32, ch: f32, cam: (f32, f32, f32, f32), parts: &[(String, String, String, String)], flows: &[(String, String)]) -> CamArranged {
+    let (bx, by, bw, bh) = (cam.0 / 100.0 * cw, cam.1 / 100.0 * ch, cam.2 / 100.0 * cw, cam.3 / 100.0 * ch);
+    let gap = 10.0f32;
+    // (each part's size: from the camera's width, its shape as its widget's)
+    let sized: Vec<(String, String, String, f32, f32)> = parts.iter().map(|(id, name, place, size)| {
+        let k = match size.as_str() { "small" => 0.6, "large" => 1.1, _ => 0.85 };
+        let ratio = match id.as_str() { "now" | "alerts" => 3.6, "follow" | "sub" | "hype" => 4.6, "goals" => 1.8, "chat" => 0.7, "socials" => 4.2, "name" => 4.4, "live" | "clock" => 3.2, _ => 1.0 };
         let (mut w, mut h) = (bw * k, bw * k / ratio);
         if id == "chat" { h = bh; w = h * ratio; }
-        let gap = 10.0;
-        let (mut x, mut y) = (bx + (bw - w) / 2.0, by + bh + gap);
-        match place.as_str() {
-            "above" => y = by - h - gap,
-            "left" => { x = bx - w - gap; y = by + (bh - h) / 2.0; }
-            "right" => { x = bx + bw + gap; y = by + (bh - h) / 2.0; }
-            "in-top" => y = by + gap,
-            "in-bottom" => y = by + bh - h - gap,
-            "corner" => { w *= 0.45; h *= 0.45; x = bx + bw - w * 0.6; y = by - h * 0.45; }
-            _ => {}
+        if place == "corner" { w *= 0.45; h *= 0.45; }
+        let place = if CAM_SIDES.iter().any(|s| s.0 == place) || place == "corner" { place.clone() } else { "below".to_string() };
+        (id.clone(), name.clone(), place, w, h)
+    }).collect();
+    let flow_set = |side: &str| flows.iter().find(|f| f.0 == side).map_or("auto", |f| f.1.as_str()).to_string();
+    // (the room a side's parts take out from the camera: above and below, stacked their heights one after
+    // another, side by side the tallest; left and right, stacked (one under another) the widest, side by side
+    // their widths one after another)
+    let need = |side: &str, items: &[usize], flow: &str| -> f32 {
+        let deep: Vec<f32> = items.iter().map(|&i| if side == "left" || side == "right" { sized[i].3 } else { sized[i].4 }).collect();
+        let all = deep.iter().sum::<f32>() + gap * (deep.len() as f32 - 1.0).max(0.0);
+        let most = deep.iter().cloned().fold(0.0, f32::max);
+        if (side == "left" || side == "right") == (flow == "column") { most } else { all }
+    };
+    let room = |side: &str| match side { "above" => by - gap, "below" => ch - by - bh - gap, "left" => bx - gap, "right" => cw - bx - bw - gap, _ => bh - gap * 2.0 };
+    // (auto: stacked if that fits, else side by side; inside the camera, side by side if they fit across it)
+    let resolve = |side: &str, items: &[usize]| -> String {
+        let set = flow_set(side);
+        if set == "row" || set == "column" { return set; }
+        match side {
+            "left" | "right" => { let tall: f32 = items.iter().map(|&i| sized[i].4).sum::<f32>() + gap * (items.len() as f32 - 1.0).max(0.0); if tall <= ch { "column" } else { "row" }.into() }
+            "in-top" | "in-bottom" => { let wide: f32 = items.iter().map(|&i| sized[i].3).sum::<f32>() + gap * (items.len() as f32 + 1.0); if wide <= bw { "row" } else { "column" }.into() }
+            _ => if need(side, items, "column") <= room(side) { "column".into() } else { "row".into() },
         }
-        x = x.clamp(0.0, (w0 - w).max(0.0)); y = y.clamp(0.0, (h0 - h).max(0.0));
-        let label = if id == "name" { or("camNameText", "Your Name") } else { name.to_string() };
-        out.push((id.to_string(), label, x / w0, y / h0, w / w0, h / h0));
+    };
+    let mut groups: Vec<(String, Vec<usize>)> = CAM_SIDES.iter().map(|(k, _)| (k.to_string(), (0..sized.len()).filter(|&i| sized[i].2 == *k).collect())).collect();
+    let mut moved = Vec::new();
+    // (a side without room for its parts: them on the other side, if they'd fit there with what's there already)
+    for (a, b) in [("below", "above"), ("above", "below"), ("right", "left"), ("left", "right")] {
+        let ia = groups.iter().position(|g| g.0 == a).unwrap_or(0);
+        let ib = groups.iter().position(|g| g.0 == b).unwrap_or(0);
+        if groups[ia].1.is_empty() { continue; }
+        let here = need(a, &groups[ia].1, &resolve(a, &groups[ia].1));
+        if here <= room(a) { continue; }
+        let mut both = groups[ib].1.clone();
+        both.extend(groups[ia].1.iter().cloned());
+        let there = need(b, &both, &resolve(b, &both));
+        if there <= room(b) || room(b) > room(a) {
+            for &i in &groups[ia].1 { moved.push((sized[i].1.clone(), b.to_string())); }
+            let mut items = std::mem::take(&mut groups[ia].1);
+            groups[ib].1.append(&mut items);
+        }
     }
-    out
+    let mut out = vec![CamPart { id: "cam".into(), name: "Your camera".into(), label: "Your camera".into(), x: bx, y: by, w: bw, h: bh, place: String::new() }];
+    let mut place_of = vec![String::new(); sized.len()];
+    let mut boxes = vec![(0f32, 0f32, 0f32, 0f32); sized.len()];
+    for (side, items) in &groups {
+        if items.is_empty() { continue; }
+        let flow = resolve(side, items);
+        let n = items.len() as f32;
+        let sum_w: f32 = items.iter().map(|&i| sized[i].3).sum::<f32>() + gap * (n - 1.0);
+        let sum_h: f32 = items.iter().map(|&i| sized[i].4).sum::<f32>() + gap * (n - 1.0);
+        let (cx, cy) = (bx + bw / 2.0, by + bh / 2.0);
+        let mut at = 0.0f32;
+        for &i in items {
+            let (w, h) = (sized[i].3, sized[i].4);
+            let (x, y) = match (side.as_str(), flow.as_str()) {
+                ("above", "column") => { let y = by - gap - at - h; at += h + gap; (cx - w / 2.0, y) }
+                ("above", _) => { let x = cx - sum_w / 2.0 + at; at += w + gap; (x, by - gap - h) }
+                ("below", "column") => { let y = by + bh + gap + at; at += h + gap; (cx - w / 2.0, y) }
+                ("below", _) => { let x = cx - sum_w / 2.0 + at; at += w + gap; (x, by + bh + gap) }
+                ("left", "column") => { let y = cy - sum_h / 2.0 + at; at += h + gap; (bx - gap - w, y) }
+                ("left", _) => { let x = bx - gap - at - w; at += w + gap; (x, cy - h / 2.0) }
+                ("right", "column") => { let y = cy - sum_h / 2.0 + at; at += h + gap; (bx + bw + gap, y) }
+                ("right", _) => { let x = bx + bw + gap + at; at += w + gap; (x, cy - h / 2.0) }
+                ("in-top", "column") => { let y = by + gap + at; at += h + gap; (cx - w / 2.0, y) }
+                ("in-top", _) => { let x = cx - sum_w / 2.0 + at; at += w + gap; (x, by + gap) }
+                ("in-bottom", "column") => { let y = by + bh - gap - at - h; at += h + gap; (cx - w / 2.0, y) }
+                (_, _) => { let x = cx - sum_w / 2.0 + at; at += w + gap; (x, by + bh - gap - h) }
+            };
+            boxes[i] = (x, y, w, h);
+            place_of[i] = side.clone();
+        }
+        // (the side's parts kept on the canvas together, so they don't slide onto each other)
+        let (x0, y0) = items.iter().fold((f32::MAX, f32::MAX), |a, &i| (a.0.min(boxes[i].0), a.1.min(boxes[i].1)));
+        let (x1, y1) = items.iter().fold((f32::MIN, f32::MIN), |a, &i| (a.0.max(boxes[i].0 + boxes[i].2), a.1.max(boxes[i].1 + boxes[i].3)));
+        let dx = if x0 < 0.0 { -x0 } else if x1 > cw { (cw - x1).max(-x0) } else { 0.0 };
+        let dy = if y0 < 0.0 { -y0 } else if y1 > ch { (ch - y1).max(-y0) } else { 0.0 };
+        for &i in items { boxes[i].0 += dx; boxes[i].1 += dy; }
+    }
+    // (on the corner: each in the first of its spots that's free, else the first: on the camera's top right
+    // corner, then just inside it, inside its bottom right, top left and bottom left; more than one, each further
+    // in along the edge)
+    let free = |b: (f32, f32, f32, f32), boxes: &[(f32, f32, f32, f32)]| boxes.iter().all(|o| {
+        o.2 <= 0.0 || (b.0 + b.2).min(o.0 + o.2) - b.0.max(o.0) <= 2.0 || (b.1 + b.3).min(o.1 + o.3) - b.1.max(o.1) <= 2.0
+    });
+    let mut at = 0.0f32;
+    for i in (0..sized.len()).filter(|&i| sized[i].2 == "corner") {
+        let (w, h) = (sized[i].3, sized[i].4);
+        let spots = [(bx + bw - w * 0.6 - at, by - h * 0.45), (bx + bw - gap - w - at, by + gap), (bx + bw - gap - w - at, by + bh - gap - h), (bx + gap + at, by + gap), (bx + gap + at, by + bh - gap - h)];
+        let fit = |(x, y): (f32, f32)| (x.clamp(0.0, (cw - w).max(0.0)), y.clamp(0.0, (ch - h).max(0.0)), w, h);
+        boxes[i] = spots.iter().map(|&s| fit(s)).find(|&b| free(b, &boxes)).unwrap_or_else(|| fit(spots[0]));
+        at += w + gap;
+        place_of[i] = "corner".into();
+    }
+    for (i, p) in sized.iter().enumerate() {
+        out.push(CamPart { id: p.0.clone(), name: p.1.clone(), label: p.1.clone(), x: boxes[i].0, y: boxes[i].1, w: boxes[i].2, h: boxes[i].3, place: place_of[i].clone() });
+    }
+    // (what still overlaps: two parts over each other by more than a sliver; a part outside the camera over it)
+    let over = |a: &CamPart, b: &CamPart| {
+        let (ix, iy) = ((a.x + a.w).min(b.x + b.w) - a.x.max(b.x), (a.y + a.h).min(b.y + b.h) - a.y.max(b.y));
+        ix > 2.0 && iy > 2.0 && ix * iy > 0.04 * (a.w * a.h).min(b.w * b.h)
+    };
+    let mut overlaps = Vec::new();
+    for i in 1..out.len() {
+        // (and one partly off the canvas: with "" for what it's over)
+        let p = &out[i];
+        if p.x < -2.0 || p.y < -2.0 || p.x + p.w > cw + 2.0 || p.y + p.h > ch + 2.0 { overlaps.push((p.name.clone(), String::new())); }
+        let inside = out[i].place.starts_with("in-") || out[i].place == "corner";
+        if !inside && over(&out[0], &out[i]) { overlaps.push((out[i].name.clone(), "your camera".to_string())); }
+        for j in i + 1..out.len() { if over(&out[i], &out[j]) { overlaps.push((out[i].name.clone(), out[j].name.clone())); } }
+    }
+    CamArranged { parts: out, moved, overlaps }
 }
 
 /// The widgets' colours, as hex: a palette's, your own, or none (your accent)
@@ -636,38 +762,95 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         "cam" => ("Webcam Overlay".into(), {
             let or = |k: &str, d: &'static str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
             let spot = or("camSpot", "br");
-            let mut v = vec![
-                // (its words above its box, not in its card: the card's too narrow to fit them, split as the page is)
-                f("note", "", "Add it as a Browser source the size of your canvas (1920 × 1080), above your camera. It's see-through: the frame goes round your camera, and the parts you switch on below come with it, live ones included, so it's all one source.", "", "", ""),
-                addr("/cam/main", ""),
-                f("head", "", "Your camera", "", "", ""),
-                f("chips", "camSpot", "Where it is", "Put your camera there in OBS, or choose Your Own Spot and match it.", &spot, "br=Bottom Right|bl=Bottom Left|tr=Top Right|tl=Top Left|custom=Your Own Spot"),
-            ];
-            if spot == "custom" {
-                v.push(f("number", "camX", "Across (%)", "Where the left edge sits: 0 is the left of the canvas, 100 the right.", &n(cur, "camX"), "72"));
-                v.push(f("number", "camY", "Down (%)", "Where the top edge sits: 0 is the top of the canvas, 100 the bottom.", &n(cur, "camY"), "62"));
-                v.push(f("number", "camW", "Width (%)", "Of the canvas's width.", &n(cur, "camW"), "26"));
-                v.push(f("number", "camH", "Height (%)", "Of the canvas's height.", &n(cur, "camH"), "34"));
+            let step = CAM_STEP.with(|c| c.get()).min(CAM_STEPS.len() - 1);
+            let mut wiz = f("wizard", "cam", "", "", &step.to_string(), &CAM_STEPS.join("|"));
+            wiz.n = step as i32;
+            let mut v = vec![wiz];
+            match step {
+                // (1: where your camera is on your canvas)
+                0 => {
+                    v.push(f("note", "", "First, where your camera sits on your stream. Pick its corner, or choose Your Own Spot to set it exactly.", "", "", ""));
+                    v.push(f("chips", "camSpot", "Where it is", "Put your camera there in OBS too, or choose Your Own Spot and match it.", &spot, "br=Bottom Right|bl=Bottom Left|tr=Top Right|tl=Top Left|custom=Your Own Spot"));
+                    if spot == "custom" {
+                        v.push(f("number", "camX", "Across (%)", "Where the left edge sits: 0 is the left of the canvas, 100 the right.", &n(cur, "camX"), "72"));
+                        v.push(f("number", "camY", "Down (%)", "Where the top edge sits: 0 is the top of the canvas, 100 the bottom.", &n(cur, "camY"), "62"));
+                        v.push(f("number", "camW", "Width (%)", "Of the canvas's width.", &n(cur, "camW"), "26"));
+                        v.push(f("number", "camH", "Height (%)", "Of the canvas's height.", &n(cur, "camH"), "34"));
+                    }
+                }
+                // (2: the frame round it)
+                1 => {
+                    v.push(f("note", "", "Now the frame that goes round your camera.", "", "", ""));
+                    v.push(f("chips", "camShape", "Shape", "", &or("camShape", "rounded"), "rounded=Rounded|square=Square|circle=Circle|hex=Hexagon|arch=Arch"));
+                    v.push(f("chips", "camBorder", "Border", "", &or("camBorder", "glow"), "thin=Thin|thick=Thick|double=Double|glow=Glow|gradient=Gradient|brackets=Corner Brackets|edge=Edge Light"));
+                }
+                // (3: its look)
+                2 => {
+                    v.push(f("note", "", "Pick a look for the name tag and the clock, and the colours for it all.", "", "", ""));
+                    v.push(f("chips", "camTheme", "Theme", "For the name tag and the clock.", &or("camTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|gradient=Gradient|minimal=Minimal"));
+                    v.push(f("chips", "suiteColors", "Colours", "Shared with the Suite's widgets.", if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") }, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"));
+                }
+                // (4: what's on it)
+                3 => {
+                    v.push(f("note", "", "Switch on what you'd like round your camera. The live ones are your widgets, as you've set them up on their own pages. You'll arrange them next.", "", "", ""));
+                    for (id, name, dflt, _, _) in CAM_PARTS {
+                        let k = format!("camP_{id}");
+                        let is = on(cur, &k, dflt);
+                        v.push(f("toggle", &k, name, "", if is { "true" } else { "false" }, ""));
+                        if !is { continue; }
+                        if id == "name" { v.push(f("text", "camNameText", "Name tag text", "Your name, or anything you like.", s(cur, "camNameText"), if s(cur, "login").is_empty() { "Your Name" } else { s(cur, "login") })); }
+                        if id == "sticker" { v.push(f("text", "camStickerImg", "Sticker address", "A GIF's or picture's address (on GIPHY or Tenor: right-click it, Copy Image Address).", s(cur, "camStickerImg"), "https://…/your.gif")); }
+                    }
+                }
+                // (5: where each part goes, and how the parts sharing a side sit; overlaps found and said)
+                4 => {
+                    let a = cam_arrange(cur);
+                    let on_parts: Vec<_> = CAM_PARTS.iter().filter(|p| on(cur, &format!("camP_{}", p.0), p.2)).collect();
+                    if on_parts.is_empty() {
+                        v.push(f("note", "", "Nothing's switched on yet. Go back a step to choose what goes round your camera.", "", "", ""));
+                    } else {
+                        let names = |l: &[String]| match l.len() { 0 => String::new(), 1 => l[0].clone(), n => format!("{} and {}", l[..n - 1].join(", "), l[n - 1]) };
+                        if a.overlaps.is_empty() {
+                            v.push(f("status", "", "Nothing overlaps. Parts on the same side are lined up one after another.", "ok", "", ""));
+                        } else {
+                            let mut said: Vec<String> = a.overlaps.iter().map(|(x, y)| if y.is_empty() { format!("{x} goes off the edge of your canvas") } else { format!("{x} is over {y}") }).collect();
+                            said.dedup();
+                            v.push(f("status", "", &format!("{}. Try another place, a smaller size, or Side by Side instead of Stacked.", names(&said)), "warn", "", ""));
+                        }
+                        for side in CAM_SIDES.iter().map(|s| s.0) {
+                            let went: Vec<String> = a.moved.iter().filter(|m| m.1 == side).map(|m| m.0.clone()).collect();
+                            if !went.is_empty() {
+                                let from = match side { "above" => "below", "below" => "above", "left" => "on the left of", _ => "on the right of" };
+                                let to = match side { "above" | "below" => side.to_string(), s => format!("on the {s} of") };
+                                v.push(f("status", "", &format!("There isn't room for {} {from} your camera, so {} shown {to} it instead.", names(&went), if went.len() == 1 { "it's" } else { "they're" }), "ok", "", ""));
+                            }
+                        }
+                        // (each side with two or more parts: stacked or side by side)
+                        for (side, side_name) in CAM_SIDES {
+                            let here = a.parts.iter().skip(1).filter(|p| p.place == side).count();
+                            if here < 2 { continue; }
+                            let k = format!("camFlow_{side}");
+                            v.push(f("chips", &k, &format!("{side_name} your camera"), "How the parts there sit together.", &or(&k, "auto"), "auto=Automatic|column=Stacked|row=Side by Side"));
+                        }
+                        for (id, name, _, place, size) in on_parts {
+                            let k = format!("camP_{id}");
+                            v.push(f("head", "", name, "", "", ""));
+                            v.push(f("chips", &format!("{k}Place"), "Where", "", &or(&format!("{k}Place"), place), "above=Above|below=Below|left=Left|right=Right|in-top=Inside, Top|in-bottom=Inside, Bottom|corner=On the Corner"));
+                            v.push(f("chips", &format!("{k}Size"), "Size", "", &or(&format!("{k}Size"), size), "small=Small|medium=Medium|large=Large"));
+                        }
+                    }
+                }
+                // (6: into OBS)
+                _ => {
+                    v.push(f("note", "", "Last, add it to OBS. Add a Browser source the size of your canvas (1920 × 1080), above your camera, with the address below. It's see-through: the frame goes round your camera, and the parts come with it, live ones included, so it's all one source.", "", "", ""));
+                    v.push(addr("/cam/main", ""));
+                    v.push(f("note", "", "Change anything later by clicking a step above.", "", "", ""));
+                }
             }
-            v.extend([
-                f("head", "", "Frame", "", "", ""),
-                f("chips", "camShape", "Shape", "", &or("camShape", "rounded"), "rounded=Rounded|square=Square|circle=Circle|hex=Hexagon|arch=Arch"),
-                f("chips", "camBorder", "Border", "", &or("camBorder", "glow"), "thin=Thin|thick=Thick|double=Double|glow=Glow|gradient=Gradient|brackets=Corner Brackets|edge=Edge Light"),
-                f("chips", "camTheme", "Theme", "For the name tag and the clock.", &or("camTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|gradient=Gradient|minimal=Minimal"),
-                f("chips", "suiteColors", "Colours", "Shared with the Suite's widgets.", if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") }, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"),
-                f("head", "", "What's on it", "", "", ""),
-                f("note", "", "Each one you switch on sits round your camera, where you put it. The live ones are your widgets, as you've set them up on their own pages.", "", "", ""),
-            ]);
-            for (id, name, dflt, place, size) in CAM_PARTS {
-                let k = format!("camP_{id}");
-                let is = on(cur, &k, dflt);
-                v.push(f("toggle", &k, name, "", if is { "true" } else { "false" }, ""));
-                if !is { continue; }
-                if id == "name" { v.push(f("text", "camNameText", "Name tag text", "Your name, or anything you like.", s(cur, "camNameText"), if s(cur, "login").is_empty() { "Your Name" } else { s(cur, "login") })); }
-                if id == "sticker" { v.push(f("text", "camStickerImg", "Sticker address", "A GIF's or picture's address (on GIPHY or Tenor: right-click it, Copy Image Address).", s(cur, "camStickerImg"), "https://…/your.gif")); }
-                v.push(f("chips", &format!("{k}Place"), "Where", "", &or(&format!("{k}Place"), place), "above=Above|below=Below|left=Left|right=Right|in-top=Inside, Top|in-bottom=Inside, Bottom|corner=On the Corner"));
-                v.push(f("chips", &format!("{k}Size"), "Size", "", &or(&format!("{k}Size"), size), "small=Small|medium=Medium|large=Large"));
-            }
+            let last = CAM_STEPS.len() - 1;
+            let back = if step > 0 { format!("cam:step:{}=Back", step - 1) } else { "=".into() };
+            let next = if step < last { format!("cam:step:{}=Next: {}", step + 1, CAM_STEPS[step + 1]) } else { "=".into() };
+            v.push(f("wiznav", "", &format!("Step {} of {}", step + 1, CAM_STEPS.len()), "", "", &format!("{back}|{next}")));
             v
         }),
         "tips" => ("Tips and Donations".into(), {
@@ -1223,6 +1406,28 @@ pub fn method(act: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn webcam_parts_sharing_a_side_dont_overlap() {
+        let p = |id: &str, place: &str, size: &str| (id.to_string(), id.to_string(), place.to_string(), size.to_string());
+        // (the camera bottom right: no room under it, so the name tag goes above, with the rest stacked there)
+        let parts = [p("name", "below", "medium"), p("live", "corner", "small"), p("now", "above", "medium"), p("alerts", "above", "large"), p("hype", "above", "medium"), p("follow", "left", "medium"), p("sub", "left", "medium")];
+        let a = cam_arrange_in(1920.0, 1080.0, (72.0, 62.0, 26.0, 34.0), &parts, &[]);
+        assert!(a.overlaps.is_empty(), "{:?}", a.overlaps);
+        assert_eq!(a.moved, vec![("name".to_string(), "above".to_string())]);
+        assert!(a.parts.iter().all(|q| q.x >= 0.0 && q.y >= 0.0 && q.x + q.w <= 1920.1 && q.y + q.h <= 1080.1));
+        // (side by side above, as asked: one row, not one over another)
+        let a = cam_arrange_in(1920.0, 1080.0, (72.0, 62.0, 26.0, 34.0), &parts[2..4], &[("above".into(), "row".into())]);
+        assert!((a.parts[1].y + a.parts[1].h - (a.parts[2].y + a.parts[2].h)).abs() < 0.5);
+        assert!(a.overlaps.is_empty(), "{:?}", a.overlaps);
+        // (the corner badge kept off the clock inside the top, with something above the camera too)
+        let a = cam_arrange_in(1920.0, 1080.0, (72.0, 62.0, 26.0, 34.0), &[p("live", "corner", "small"), p("alerts", "above", "large"), p("clock", "in-top", "small")], &[]);
+        assert!(a.overlaps.is_empty(), "{:?}", a.overlaps);
+        // (too many for anywhere: the overlap's found)
+        let big: Vec<_> = (0..6).map(|_| p("chat", "left", "large")).collect();
+        let a = cam_arrange_in(1920.0, 1080.0, (40.0, 30.0, 26.0, 34.0), &big, &[("left".into(), "column".into())]);
+        assert!(!a.overlaps.is_empty());
+    }
 
     #[test]
     fn panel_words_show_formatted() {

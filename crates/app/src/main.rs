@@ -7318,7 +7318,7 @@ fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
     // (the app theme's two colours: a palette's "Your Theme's", and where it's left to them)
     let accents = SHARED.with(|s| s.borrow().as_ref().and_then(|sh| sh.try_borrow().ok().map(|a| theme_accents(&a.web.prefs)))).unwrap_or_else(|| ("#8e9bff".to_string(), "#b48eff".to_string()));
     // (labels, headings, buttons and choices in Title Case, as everywhere in the app; notes and steps are sentences)
-    for x in list.iter_mut().filter(|x| !matches!(x.kind, "note" | "step" | "suiteprev" | "hudedit" | "goalrow" | "addr")) {
+    for x in list.iter_mut().filter(|x| !matches!(x.kind, "note" | "step" | "suiteprev" | "hudedit" | "goalrow" | "addr" | "status" | "wiznav")) {
         x.label = botpage::title_case(&x.label);
         if matches!(x.kind, "chips" | "buttons" | "palettes" | "panelthemes" | "camthemes") {
             x.extra = x.extra.split('|').map(|o| match o.split_once('=') { Some((id, name)) => format!("{id}={}", botpage::title_case(name)), None => o.to_string() }).collect::<Vec<_>>().join("|");
@@ -7330,7 +7330,7 @@ fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
     // (a row of choices: its extra, as "id=Name|id=Name", for the page to draw)
     let strs = |v: Vec<String>| ModelRc::from(Rc::new(VecModel::from(v.into_iter().map(slint::SharedString::from).collect::<Vec<_>>())));
     let rows = list.into_iter().map(|x| {
-        let (ids, names): (Vec<String>, Vec<String>) = if matches!(x.kind, "chips" | "buttons" | "palettes" | "panelthemes" | "camthemes") { x.extra.split('|').filter_map(|o| o.split_once('=')).map(|(i, n)| (i.to_string(), n.to_string())).unzip() }
+        let (ids, names): (Vec<String>, Vec<String>) = if matches!(x.kind, "chips" | "buttons" | "palettes" | "panelthemes" | "camthemes" | "wiznav") { x.extra.split('|').filter_map(|o| o.split_once('=')).map(|(i, n)| (i.to_string(), n.to_string())).unzip() }
             // (a list: its items, from what's kept, or the default in extra)
             // (the goals' preview: each goal shown, its name, and its target as its id)
             // (Emote Rain's: its size and spin, after its way in the label)
@@ -7338,6 +7338,8 @@ fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
             else if x.kind == "suiteprev" && x.value == "emoterain" { (Vec::new(), x.label.split('|').skip(1).map(String::from).collect()) }
             else if x.kind == "suiteprev" && (x.value == "goals" || x.value == "wheel") { x.key.split('|').filter_map(|o| o.split_once('=')).map(|(n, t)| (t.to_string(), n.to_string())).unzip() }
             // (a panel's card: its icon chosen ("" the title's) and its picture made into an icon, as ids; the icon shown's shape)
+            // (a setup's steps: their names)
+            else if x.kind == "wizard" { (Vec::new(), x.extra.split('|').map(String::from).collect()) }
             else if x.kind == "panelcard" { let (k, m) = x.note.split_once('|').unwrap_or(("", "")); (vec![k.to_string(), m.to_string()], vec![panelicon::shape(panelicon::of(k, &x.label)).to_string()]) }
             else if x.kind == "list" || x.kind == "piclist" { (Vec::new(), botpage::list_items(if x.value.is_empty() { &x.extra } else { &x.value })) }
             else { (Vec::new(), Vec::new()) };
@@ -7508,13 +7510,16 @@ fn bot_paint(shared: &Shared) {
         let g = ui.global::<CamLook>();
         // (only the webcam's area: round the camera and its parts, with a little room, not the whole canvas;
         // each piece as a fraction of that, and its shape as tall as it is wide)
-        let all = botpage::cam_layout(&cur);
+        let arranged = botpage::cam_arrange(&cur);
+        // (the parts overlapping something, outlined in the preview)
+        let clashing: Vec<String> = arranged.overlaps.iter().flat_map(|(a, b)| [a.clone(), b.clone()]).collect();
+        let all: Vec<(String, String, f32, f32, f32, f32, bool)> = arranged.parts.into_iter().map(|p| { let clash = p.id != "cam" && clashing.contains(&p.name); (p.id, p.label, p.x / 1920.0, p.y / 1080.0, p.w / 1920.0, p.h / 1080.0, clash) }).collect();
         let (mut x0, mut y0, mut x1, mut y1) = (1f32, 1f32, 0f32, 0f32);
-        for (_, _, x, y, w, h) in &all { x0 = x0.min(*x); y0 = y0.min(*y); x1 = x1.max(x + w); y1 = y1.max(y + h); }
+        for (_, _, x, y, w, h, _) in &all { x0 = x0.min(*x); y0 = y0.min(*y); x1 = x1.max(x + w); y1 = y1.max(y + h); }
         let pad = 0.02;
         let (x0, y0, x1, y1) = ((x0 - pad).max(0.0), (y0 - pad * 1.78).max(0.0), (x1 + pad).min(1.0), (y1 + pad * 1.78).min(1.0));
         let (bw, bh) = ((x1 - x0).max(0.05), (y1 - y0).max(0.05));
-        let rects: Vec<CamRect> = all.into_iter().map(|(id, label, x, y, w, h)| CamRect { id: id.into(), label: label.into(), x: (x - x0) / bw, y: (y - y0) / bh, w: w / bw, h: h / bh }).collect();
+        let rects: Vec<CamRect> = all.into_iter().map(|(id, label, x, y, w, h, clash)| CamRect { clash, id: id.into(), label: label.into(), x: (x - x0) / bw, y: (y - y0) / bh, w: w / bw, h: h / bh }).collect();
         g.set_rects(ModelRc::from(Rc::new(VecModel::from(rects))));
         // (its height for its width, as the canvas is 16:9)
         g.set_ratio((bh * 9.0) / (bw * 16.0));
@@ -7924,6 +7929,11 @@ fn bot_act(shared: &Shared, act: &str) {
         if let Some(ui) = shared.borrow().ui.upgrade() { let w = ui.global::<Wid>(); w.set_rev(w.get_rev() + 1); }
         say(if now_on { "Switched on." } else { "Switched off: its page in OBS shows nothing, and costs nothing." });
         return;
+    }
+    // (the webcam overlay's setup: to another step)
+    if let Some(n) = act.strip_prefix("cam:step:").and_then(|n| n.parse::<usize>().ok()) {
+        botpage::CAM_STEP.with(|c| c.set(n.min(botpage::CAM_STEPS.len() - 1)));
+        return bot_paint(shared);
     }
     // (a platform's row in Tips and Donations: opened, or shut)
     if let Some(id) = act.strip_prefix("fold:") {
@@ -15674,6 +15684,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("side") { vec![(9, "library"), (11, "sidefold"), (13, "sideopen"), (14, "settings"), (16, "discover"), (18, "back"), (20, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=creators: the Creators' pages, each pictured: Panels (scrolled down, too), Webcam
             // Overlay, Game HUD Frames)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("camwiz") { vec![(6, "size:1500:950"), (7, "bot:sheet:cam"), (9, "bot:cam:step:0"), (10, "bot:cam:step:1"), (11, "bot:cam:step:2"), (12, "bot:cam:step:3"), (13, "bot:cam:step:4"), (14, "scroll:700"), (15, "bot:cam:step:5"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("icons") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "bot:pnl:1:icon:trophy"), (11, "click:933,309"), (13, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("words") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "bot:pnl:0:edit"), (13, "wordsbold"), (16, "wordsgot"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("creators") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "scroll:1250"), (11, "scroll:600"), (13, "scroll:601"), (15, "bot:sheet:cam"), (17, "scroll:-3000"), (19, "bot:sheet:hud"), (20, "hudsample"), (22, "bot:hud:add:0.82,0.04,0.98,0.32"), (24, "scroll:800"), (26, "bot:hud:none"), (28, "end")] }

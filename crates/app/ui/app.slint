@@ -206,7 +206,7 @@ export global PanelLook {
     in-out property <string> font;
 }
 /// A webcam overlay's piece, for its preview: the camera, or a part (fractions of the canvas)
-export struct CamRect { id: string, label: string, x: float, y: float, w: float, h: float }
+export struct CamRect { id: string, label: string, x: float, y: float, w: float, h: float, clash: bool }
 /// The webcam overlay being set up: its layout and look (the app sets it as its page opens and changes)
 export global CamLook {
     in-out property <[CamRect]> rects;
@@ -3758,8 +3758,8 @@ component CamPreview inherits Rectangle {
         property <bool> light: CamLook.theme == "comic" || CamLook.theme == "pastel";
         border-radius: self.cam ? (CamLook.shape == "circle" ? min(self.width, self.height) / 2 : CamLook.shape == "square" || CamLook.shape == "hex" ? 0px : 12px) : 6px;
         background: self.cam ? #3b4766 : r.id == "live" ? #e5243b : r.id == "name" || r.id == "clock" ? (self.light ? #ffffff : CamLook.theme == "gradient" ? CamLook.c1.mix(CamLook.c2, 0.5) : #0a0814d9) : #ffffff1f;
-        border-width: self.cam ? (CamLook.border == "thick" ? 5px : CamLook.border == "double" ? 4px : CamLook.border == "brackets" ? 0px : 2.5px) : r.id == "name" && CamLook.theme == "neon" ? 2px : 1px;
-        border-color: self.cam ? CamLook.c1 : r.id == "name" && CamLook.theme == "neon" ? CamLook.c1 : #ffffff55;
+        border-width: self.cam ? (CamLook.border == "thick" ? 5px : CamLook.border == "double" ? 4px : CamLook.border == "brackets" ? 0px : 2.5px) : r.clash || (r.id == "name" && CamLook.theme == "neon") ? 2px : 1px;
+        border-color: self.cam ? CamLook.c1 : r.clash ? #ff5a5a : r.id == "name" && CamLook.theme == "neon" ? CamLook.c1 : #ffffff55;
         drop-shadow-blur: self.cam && (CamLook.border == "glow" || CamLook.border == "edge") ? 14px : 0px;
         drop-shadow-color: CamLook.c1;
         // (the camera: someone in it)
@@ -4889,6 +4889,68 @@ component BotFieldRow inherits VerticalLayout {
     spacing: 4px;
     if root.f.kind == "head": Text { text: root.f.label; color: Theme.muted; font-size: 12px; font-weight: 700; }
     if root.f.kind == "note": Text { text: root.f.label; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+    // (a setup in steps: each step's number and name, the one you're on lit, the ones before it ticked; click
+    // one to go to it)
+    if root.f.kind == "wizard": wz := Rectangle {
+        property <length> each: max(64px, self.width / max(1, root.f.opts.length));
+        height: 54px;
+        // (the line through them)
+        Rectangle { x: wz.each / 2; y: 13px; width: parent.width - wz.each; height: 2px; background: Theme.line; }
+        Rectangle { x: wz.each / 2; y: 13px; width: wz.each * root.f.n; height: 2px; background: Theme.accent; }
+        for t[i] in root.f.opts: ws := Rectangle {
+            x: wz.each * i;
+            width: wz.each;
+            property <bool> now: i == root.f.n;
+            property <bool> done: i < root.f.n;
+            Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: 0;
+                width: 28px;
+                height: 28px;
+                border-radius: 14px;
+                background: ws.now || ws.done ? Theme.accent : wa.has-hover ? Theme.elevated : Theme.panel;
+                border-width: ws.now || ws.done ? 0px : 1.5px;
+                border-color: Theme.line;
+                drop-shadow-blur: ws.now ? 10px : 0px;
+                drop-shadow-color: Theme.accent.with-alpha(0.6);
+                if !ws.done: Text { text: "" + (i + 1); color: ws.now ? Theme.bg : Theme.muted; font-size: 12px; font-weight: 800; }
+                if ws.done: Glyph { d: "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"; width: 16px; height: 16px; fill: Theme.bg; }
+            }
+            Text {
+                y: 34px;
+                width: parent.width;
+                text: t;
+                color: ws.now ? Theme.text : Theme.muted;
+                font-size: 11px;
+                font-weight: ws.now ? 700 : 500;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+            wa := TouchArea { mouse-cursor: pointer; clicked => { root.act(root.f.key + ":step:" + i); } }
+        }
+    }
+    // (a setup's way on: back, where you are, and on)
+    if root.f.kind == "wiznav": HorizontalLayout {
+        spacing: 10px;
+        if root.f.opts.length > 0 && root.f.opts[0] != "": Pill { label: root.f.opts[0]; clicked => { root.act(root.f.opt-ids[0]); } }
+        Text { horizontal-stretch: 1; text: root.f.label; color: Theme.muted; font-size: 12px; vertical-alignment: center; horizontal-alignment: center; }
+        if root.f.opts.length > 1 && root.f.opts[1] != "": Pill { label: root.f.opts[1]; on: true; clicked => { root.act(root.f.opt-ids[1]); } }
+    }
+    // (how something's going: fine (value "ok"), or something to look at ("warn"))
+    if root.f.kind == "status": sb := Rectangle {
+        property <color> c: root.f.value == "warn" ? #ffb547 : #4ad295;
+        height: st.preferred-height + 20px;
+        border-radius: 10px;
+        background: self.c.with-alpha(0.1);
+        border-width: 1px;
+        border-color: self.c.with-alpha(0.45);
+        HorizontalLayout {
+            padding: 10px;
+            spacing: 10px;
+            Glyph { width: 18px; height: 18px; fill: sb.c; d: root.f.value == "warn" ? "M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" : "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"; }
+            st := Text { horizontal-stretch: 1; text: root.f.label; color: Theme.text; font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
+        }
+    }
     if root.f.kind == "step": HorizontalLayout {
         spacing: 10px;
         Rectangle {
