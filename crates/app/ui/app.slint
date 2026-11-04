@@ -3575,8 +3575,8 @@ component PanelPreview inherits Rectangle {
                 property <bool> upper: self.th == "pixel" || self.th == "bauhaus" || self.th == "cyber";
                 property <string> shown-title: (self.th == "terminal" ? "> " : "") + (self.upper ? p.title.to-uppercase() : p.title) + (self.th == "terminal" ? " \u{2588}" : "");
                 width: 320px;
-                // (as tall as its words, up to Twitch's 600)
-                height: p.body ? min(600px, 74px + p.lines * 17px + 18px + self.top) : root.ph;
+                // (as tall as its words, wrapped as they're drawn, up to Twitch's 600)
+                height: p.body ? min(600px, bl.preferred-height + 18px) : root.ph;
                 clip: true;
                 border-radius: PanelLook.shape == "square" || self.th == "pixel" || self.th == "cyber" ? 0px : self.th == "paper" ? 3px : self.th == "bauhaus" ? 6px : self.th == "terminal" || self.th == "ticket" ? 8px : PanelLook.shape == "pill" && !p.body ? self.height / 2 : 14px;
                 // (a plain background: your own colour instead, if you've set one)
@@ -3735,8 +3735,11 @@ component PanelPreview inherits Rectangle {
                         if p.line != "": Text { text: p.line; color: pi.ink.with-alpha(0.78); font-size: 11px; font-family: pi.ff; }
                     }
                 }
-                // (a long one, or extended: its header, a line in its colours, then all its words)
-                if p.body: VerticalLayout {
+                // (a long one, or extended: its header, a line in its colours, then all its words; there, unseen,
+                // for the short ones too, so the panel's height can be taken from it)
+                bl := VerticalLayout {
+                    visible: p.body;
+                    height: self.preferred-height;
                     padding-left: 22px;
                     padding-top: 14px + pi.top;
                     padding-right: 22px + (pi.th == "ticket" ? 66px : 0px);
