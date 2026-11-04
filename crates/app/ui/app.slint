@@ -6162,7 +6162,13 @@ component CustomThemeControls inherits VerticalLayout {
     Rectangle { height: 8px; }
 }
 
+/// The whole window drawn again (flip): the software renderer draws only what's changed, and a web view put over the
+/// window (a widget's live preview, the panel words editor) leaves its spot unpainted when it goes
+export global Repaint { in-out property <bool> flip; }
+
 export component AppWindow inherits Window {
+    // (under everything, the window's size: changed by Repaint.flip, so all of it's drawn again)
+    Rectangle { x: 0; y: 0; width: root.width; height: root.height; background: Repaint.flip ? #00000001 : #00000000; }
     // (the title bar's pulses' clock: kept by a timer there)
     property <int> pulse-ms;
     changed width => { Win.w = self.width; root.window-resized(); }

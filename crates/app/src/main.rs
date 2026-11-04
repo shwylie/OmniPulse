@@ -9162,7 +9162,7 @@ fn live_widget(shared: &Shared) {
     let g = ui.global::<WLive>();
     let path = if ui.get_pf_open() { live_path(&ui) } else { None };
     let Some(path) = path else {
-        if LIVE.with(|l| l.borrow_mut().take().is_some()) { g.set_live(false); }
+        if LIVE.with(|l| l.borrow_mut().take().is_some()) { g.set_live(false); repaint_all(&ui); }
         return;
     };
     // (a menu open: its count moving, or it moved a moment ago)
@@ -9210,12 +9210,21 @@ fn live_widget(shared: &Shared) {
         if *last != at {
             if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: live {was} at {at:?}"); }
             if show { let _ = view.set_bounds(rect); }
-            if show != last.4 { let _ = view.set_visible(show); }
+            if show != last.4 { let _ = view.set_visible(show); if !show { repaint_all(&ui); } }
             *last = at;
         }
         // (the drawing under it hidden once the real one has had a moment to come in)
         g.set_live(show && loaded.load(std::sync::atomic::Ordering::Relaxed));
     });
+}
+
+/// The whole window drawn again, now and a moment later (once a web view that was over it has gone): the
+/// software renderer otherwise leaves the spot it covered as it was
+fn repaint_all(ui: &AppWindow) {
+    let g = ui.global::<Repaint>();
+    g.set_flip(!g.get_flip());
+    let w = ui.as_weak();
+    slint::Timer::single_shot(std::time::Duration::from_millis(150), move || if let Some(ui) = w.upgrade() { let g = ui.global::<Repaint>(); g.set_flip(!g.get_flip()); });
 }
 
 /// The HUD screenshot, in colour (to trace parts' shapes) and in grey (to snap to edges): read once, kept while
@@ -9257,8 +9266,9 @@ fn words_edit(shared: &Shared, i: usize, p: &botpage::Panel) {
     WORDS.with(|w| *w.borrow_mut() = Some((i, None, Arc::new(std::sync::Mutex::new(None)), (0.0, 0.0, 0.0, 0.0))));
     let s = shared.clone();
     g.on_done(move |keep| {
-        let Some((i, _view, words, _)) = WORDS.with(|w| w.borrow_mut().take()) else { return };
-        if let Some(ui) = s.borrow().ui.upgrade() { ui.global::<WEdit>().set_open(false); }
+        let Some((i, view, words, _)) = WORDS.with(|w| w.borrow_mut().take()) else { return };
+        drop(view);
+        if let Some(ui) = s.borrow().ui.upgrade() { ui.global::<WEdit>().set_open(false); repaint_all(&ui); }
         let written = words.lock().ok().and_then(|w| w.clone());
         if let (true, Some(md)) = (keep, written) {
             let mut list = botpage::panels(&bot_current(&s));
@@ -9277,7 +9287,7 @@ fn words_edit(shared: &Shared, i: usize, p: &botpage::Panel) {
 fn words_view(shared: &Shared) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     let g = ui.global::<WEdit>();
-    if !g.get_open() { if WORDS.with(|w| w.borrow_mut().take().is_some()) {} return; }
+    if !g.get_open() { if WORDS.with(|w| w.borrow_mut().take().is_some()) { repaint_all(&ui); } return; }
     let at = (g.get_x(), g.get_y(), g.get_w(), g.get_h());
     if at.2 < 2.0 || at.3 < 2.0 { return; }
     let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(at.0 as f64, at.1 as f64).into(), size: wry::dpi::LogicalSize::new(at.2 as f64, at.3 as f64).into() };
