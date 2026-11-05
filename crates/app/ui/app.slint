@@ -2388,6 +2388,16 @@ component LookPreview inherits Rectangle {
 }
 
 /// A section's heading (App & Look's: Look, Layout...)
+/// A section's heading in the Suite's pages: an accent mark, its name, and a line fading away after it
+component ArtHead inherits HorizontalLayout {
+    in property <string> text;
+    spacing: 10px;
+    height: 24px;
+    VerticalLayout { alignment: center; Rectangle { width: 18px; height: 4px; border-radius: 2px; background: Theme.accent; } }
+    Text { text: root.text; color: Theme.text; font-size: 13px; font-weight: 800; font-family: Theme.head-font; vertical-alignment: center; }
+    VerticalLayout { alignment: center; horizontal-stretch: 1; Rectangle { height: 1px; background: @linear-gradient(90deg, Theme.accent.with-alpha(0.55) 0%, transparent 100%); } }
+}
+
 component SectionHead inherits Text {
     color: Theme.muted;
     font-family: Theme.head-font;
@@ -2701,19 +2711,25 @@ component StreamTile inherits Rectangle {
     callback toggle(string);
     callback more(string);
     callback copy(string);
-    height: 124px;
-    border-radius: 14px;
-    background: Theme.panel.mix(root.tint, 0.9);
+    height: 132px;
+    border-radius: 16px;
+    clip: true;
+    background: root.r.on ? Theme.panel.mix(root.tint, 0.82) : Theme.panel;
     border-width: 1px;
-    border-color: root.r.on ? root.tint.with-alpha(0.65) : root.tint.with-alpha(0.25);
-    HiGlow { lit: Hi.label != "" && Hi.label == root.r.label; r: 14px; }
+    border-color: root.r.on ? root.tint.with-alpha(0.75) : Theme.line;
+    for k in 3: Rectangle { x: parent.width - 40px - self.width / 2; y: 34px - self.height / 2; width: 60px + k * 40px; height: self.width; border-radius: self.width / 2; border-width: 1px; border-color: root.tint.with-alpha(root.r.on ? 0.2 : 0.07); }
+    HiGlow { lit: Hi.label != "" && Hi.label == root.r.label; r: 16px; }
     VerticalLayout {
         padding: 12px;
         spacing: 5px;
         HorizontalLayout {
-            spacing: 8px;
-            VerticalLayout { alignment: center; Glyph { d: root.d; width: 16px; height: 16px; fill: root.r.on ? Theme.accent : Theme.muted; } }
-            Text { text: root.name; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-stretch: 1; }
+            spacing: 10px;
+            Rectangle {
+                width: 36px; height: 36px; border-radius: 12px;
+                background: root.r.on ? root.tint : root.tint.with-alpha(0.16);
+                Glyph { d: root.d; width: 18px; height: 18px; x: 9px; y: 9px; fill: root.r.on ? Theme.bg : root.tint; }
+            }
+            Text { text: root.name; color: Theme.text; font-weight: 800; font-size: 14px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
         }
         Text { text: root.r.note; color: Theme.muted; font-size: 12px; overflow: elide; }
         if root.r.on && root.addr != "": Text { text: root.addr; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
@@ -2725,6 +2741,56 @@ component StreamTile inherits Rectangle {
             if root.r.on && root.addr != "": IconButton { d: Icons.copy; size: 30px; tip: "Copy the address for a Browser source in OBS"; clicked => { root.copy(root.addr); } }
             if root.r.more: IconButton { d: Icons.gear; size: 30px; tip: root.r.label + ": its settings"; clicked => { root.more(root.r.key); } }
         }
+    }
+}
+
+/// A widget of the Suite's, as a tile: its mark in a tile of its own colour (filled while it's on, rings round it),
+/// its name, then whether it's on and its address's end (or a line about it), and its switch, copy and settings
+component WidgetTile inherits Rectangle {
+    in property <color> tint: Theme.accent;
+    in property <string> name;
+    in property <string> d;
+    in property <string> path;
+    in property <string> note;
+    in property <bool> on;
+    in property <bool> has-toggle: true;
+    in property <bool> has-copy: true;
+    in property <string> open-tip;
+    in property <string> gear-tip: "Settings";
+    callback toggle();
+    callback copy();
+    callback open();
+    callback gear();
+    height: 76px;
+    border-radius: 16px;
+    clip: true;
+    background: root.on ? Theme.panel.mix(root.tint, 0.82) : Theme.panel;
+    border-width: 1px;
+    border-color: root.on ? root.tint.with-alpha(0.75) : Theme.line;
+    for k in 2: Rectangle { x: 32px - self.width / 2; y: (root.height - self.height) / 2; width: 56px + k * 16px; height: self.width; border-radius: self.width / 2; border-width: 1px; border-color: root.tint.with-alpha(root.on ? 0.22 : 0.08); }
+    HorizontalLayout {
+        padding: 12px;
+        spacing: 12px;
+        VerticalLayout { alignment: center; Rectangle {
+            width: 40px; height: 40px; border-radius: 13px;
+            background: root.on ? root.tint : root.tint.with-alpha(0.16);
+            Glyph { d: root.d; width: 20px; height: 20px; x: 10px; y: 10px; fill: root.on ? Theme.bg : root.tint; }
+        } }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            min-width: 0px;
+            alignment: center;
+            spacing: 2px;
+            Text { text: root.name; color: Theme.text; font-size: 13px; font-weight: 700; overflow: elide; }
+            Text { text: root.note != "" ? root.note : (root.on ? "On" : "Off") + (root.path != "" ? " \u{b7} " + root.path : ""); color: root.on ? root.tint.mix(Theme.text, 0.55) : Theme.muted; font-size: 11px; overflow: elide; }
+        }
+        VerticalLayout { alignment: center; HorizontalLayout {
+            spacing: 2px;
+            if root.has-toggle: VerticalLayout { alignment: center; CenterToggle { checked: root.on; toggled => { root.toggle(); } } }
+            if root.has-copy: IconButton { d: Icons.copy; size: 28px; tip: "Copy the address for OBS"; clicked => { root.copy(); } }
+            if root.open-tip != "": IconButton { d: Icons.open; size: 28px; tip: root.open-tip; clicked => { root.open(); } }
+            IconButton { d: Icons.gear; size: 28px; tip: root.gear-tip; clicked => { root.gear(); } }
+        } }
     }
 }
 
@@ -4953,7 +5019,7 @@ component BotFieldRow inherits VerticalLayout {
     callback set(string, string);
     callback act(string);
     spacing: 4px;
-    if root.f.kind == "head": Text { text: root.f.label; color: Theme.muted; font-size: 12px; font-weight: 700; }
+    if root.f.kind == "head": VerticalLayout { padding-top: 6px; ArtHead { text: root.f.label; } }
     if root.f.kind == "note": Text { text: root.f.label; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
     // (a setup in steps: each step's number and name, the one you're on lit, the ones before it ticked; click
     // one to go to it)
@@ -5756,32 +5822,32 @@ component BotPage inherits Rectangle {
                     }
                 }
                 Text { text: "Creators"; color: Theme.muted; font-size: 12px; font-weight: 700; }
-                Rectangle {
-                    height: 74px;
-                    border-radius: 16px;
-                    background: creatorsa.has-hover ? Theme.elevated.mix(BotLook.tile(6), 0.86) : Theme.panel.mix(BotLook.tile(6), 0.9);
-                    border-width: 1px;
-                    border-color: BotLook.tile(6).with-alpha(0.45);
-                    creatorsa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("creators"); } }
-                    HorizontalLayout {
-                        padding: 14px;
-                        spacing: 12px;
-                        Rectangle {
-                            width: 40px;
-                            height: 40px;
-                            y: (parent.height - self.height) / 2;
-                            border-radius: 12px;
-                            background: BotLook.tile(6).with-alpha(0.18);
-                            Glyph { d: Icons.star-out; width: 22px; height: 22px; x: 9px; y: 9px; fill: BotLook.tile(6); }
-                        }
-                        VerticalLayout {
-                            horizontal-stretch: 1;
-                            alignment: center;
-                            spacing: 2px;
-                            Text { text: "Your Creators"; color: Theme.text; font-size: 14px; font-weight: 700; }
-                            Text { text: "Make your own: a webcam overlay with your widgets built in, and your channel panels."; color: Theme.muted; font-size: 12px; overflow: elide; }
-                        }
-                        VerticalLayout { alignment: center; Pill { label: "Open"; clicked => { root.act("creators"); } } }
+                // (the three of them here, each its own card: its switch, its address and its page a click away)
+                HorizontalLayout {
+                    spacing: 10px;
+                    WidgetTile {
+                        horizontal-stretch: 1; preferred-width: 0px; min-width: 0px;
+                        tint: BotLook.tile(6); name: "Webcam Overlay"; d: Icons.star-out; on: Wid.on("cam", Wid.rev); gear-tip: "Make it yours";
+                        note: "A frame round your camera with your widgets on it.";
+                        toggle => { root.act("woff:cam"); }
+                        copy => { root.act("copy:http://127.0.0.1:" + root.port + "/cam/main"); }
+                        gear => { root.act("sheet:cam"); }
+                    }
+                    WidgetTile {
+                        horizontal-stretch: 1; preferred-width: 0px; min-width: 0px;
+                        tint: BotLook.tile(7); name: "Panels"; d: Icons.actions; on: true; has-toggle: false; has-copy: false; gear-tip: "Make them yours";
+                        note: "Your channel's panels in one theme, saved as pictures.";
+                        open-tip: "Open them to save as pictures";
+                        open => { root.act("url:http://127.0.0.1:" + root.port + "/panels"); }
+                        gear => { root.act("sheet:panels"); }
+                    }
+                    WidgetTile {
+                        horizontal-stretch: 1; preferred-width: 0px; min-width: 0px;
+                        tint: BotLook.tile(8); name: "Game HUD Frames (WIP)"; d: Icons.broadcast; on: Wid.on("hud", Wid.rev); gear-tip: "Make them";
+                        note: "Frames round your game's minimap, health and the rest.";
+                        toggle => { root.act("woff:hud"); }
+                        copy => { root.act("copy:http://127.0.0.1:" + root.port + "/hud"); }
+                        gear => { root.act("sheet:hud"); }
                     }
                 }
                 // what it's been doing: a section like the others, each line who, what they typed, and what it did
@@ -5836,13 +5902,14 @@ component BotPage inherits Rectangle {
             if root.widgets-view != "": VerticalLayout {
                 spacing: 14px;
                 // the widgets (here while the chatbot's on), its OBS docks, and chat on stream
+                if root.widgets-view == "widgets": ArtHead { text: "On Stream"; }
                 if root.widgets-view == "widgets": HorizontalLayout {
                     spacing: 0px;
                     for r in root.stream-rows: HorizontalLayout {
                         horizontal-stretch: (r.key == "widget" || r.key == "lyricsWidget" || r.key == "socials") ? 1 : 0;
                         preferred-width: 0px;
                         min-width: 0px;
-                        padding-right: r.key == "widget" || r.key == "lyricsWidget" ? 8px : 0px;
+                        padding-right: r.key == "widget" || r.key == "lyricsWidget" ? 10px : 0px;
                         // (in the Suite, the Stream Widget is its Now Playing)
                         if r.key == "widget": StreamTile { tint: BotLook.tile(0); horizontal-stretch: 1; r: r; name: "Now Playing"; d: Icons.broadcast; addr: "http://127.0.0.1:" + root.port + "/"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
                         if r.key == "lyricsWidget": StreamTile { tint: BotLook.tile(1); horizontal-stretch: 1; r: r; d: Icons.lyrics; addr: "http://127.0.0.1:" + root.port + "/lyrics"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
@@ -5888,8 +5955,8 @@ component BotPage inherits Rectangle {
                 if root.widgets-view == "widgets": wgrid := Rectangle {
                     // (three across at most, as the Fun ones below, so their names fit)
                     property <int> cols: max(1, min(3, floor((self.width + 8px) / 208px)));
-                    property <length> cw: (self.width - (self.cols - 1) * 8px) / self.cols;
-                    height: ceil(6 / self.cols) * 82px - 8px;
+                    property <length> cw: (self.width - (self.cols - 1) * 10px) / self.cols;
+                    height: ceil(6 / self.cols) * 86px - 10px;
                     for w[wi] in [
                         { n: "Goals", k: "goals", p: "/goals", s: "goals", i: Icons.check, h: "127.0.0.1" },
                         { n: "Timer", k: "timer", p: "/timer", s: "timer", i: Icons.refresh, h: "127.0.0.1" },
@@ -5898,97 +5965,21 @@ component BotPage inherits Rectangle {
                         { n: "Raid Shoutout", k: "raid", p: "/raid", s: "raid", i: Icons.broadcast, h: "localhost" },
                         // (chat on stream: a tile like the rest; its settings a page of their own)
                         { n: "Multichat Overlay", k: "multichat", p: "/chat", s: "", i: Icons.chat, h: "127.0.0.1" },
-                    ]: Rectangle {
-                        x: mod(wi, wgrid.cols) * (wgrid.cw + 8px);
-                        y: floor(wi / wgrid.cols) * 82px;
+                    ]: WidgetTile {
+                        x: mod(wi, wgrid.cols) * (wgrid.cw + 10px);
+                        y: floor(wi / wgrid.cols) * 86px;
                         width: wgrid.cw;
-                        height: 74px;
-                        border-radius: 14px;
-                        background: Theme.panel.mix(BotLook.tile(wi + 1), 0.9);
-                        border-width: 1px;
-                        border-color: BotLook.tile(wi + 1).with-alpha(0.3);
-                        VerticalLayout {
-                            padding: 10px;
-                            spacing: 4px;
-                            HorizontalLayout {
-                                spacing: 6px;
-                                VerticalLayout { alignment: center; Glyph { d: w.i; width: 15px; height: 15px; fill: Theme.accent; } }
-                                Text { text: w.n; color: Theme.text; font-weight: 700; font-size: 12px; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.k); } }
-                                IconButton { d: Icons.copy; size: 28px; tip: "Copy the address for OBS"; clicked => { root.act("copy:http://" + w.h + ":" + root.port + w.p); } }
-                                IconButton { d: Icons.gear; size: 28px; tip: "Settings"; clicked => { root.act(w.k == "multichat" ? "dockset:multichat" : "sheet:" + w.s); } }
-                            }
-                            Text { text: "http://" + w.h + ":" + root.port + w.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 10px; font-family: "Consolas"; overflow: elide; }
-                        }
+                        tint: BotLook.tile(wi + 1); name: w.n; d: w.i; path: w.p; on: Wid.on(w.k, Wid.rev);
+                        toggle => { root.act("woff:" + w.k); }
+                        copy => { root.act("copy:http://" + w.h + ":" + root.port + w.p); }
+                        gear => { root.act(w.k == "multichat" ? "dockset:multichat" : "sheet:" + w.s); }
                     }
                 }
                 // the fun: chat playing along, shown
-                // the Creators: what you've made, each its own source
-                if root.widgets-view == "creators": Rectangle {
-                    height: 92px;
-                    border-radius: 14px;
-                    background: Theme.panel.mix(BotLook.tile(6), 0.9);
-                    border-width: 1px;
-                    border-color: BotLook.tile(6).with-alpha(0.3);
-                    VerticalLayout {
-                        padding: 12px;
-                        spacing: 4px;
-                        HorizontalLayout {
-                            spacing: 7px;
-                            VerticalLayout { alignment: center; Glyph { d: Icons.star-out; width: 16px; height: 16px; fill: Theme.accent; } }
-                            Text { text: "Webcam Overlay"; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
-CenterToggle { checked: Wid.on("cam", Wid.rev); toggled => { root.act("woff:" + "cam"); } }
-                            IconButton { d: Icons.copy; size: 30px; tip: "Copy the address for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + "/cam/main"); } }
-                            IconButton { d: Icons.gear; size: 30px; tip: "Make it yours"; clicked => { root.act("sheet:cam"); } }
-                        }
-                        Text { text: "http://127.0.0.1:" + root.port + "/cam/main"; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
-                        Text { text: "A frame round your camera, with your name, alerts, Now Playing, chat and more on it: one Browser source."; color: Theme.muted; font-size: 11px; overflow: elide; }
-                    }
-                }
-                if root.widgets-view == "creators": Rectangle {
-                    height: 92px;
-                    border-radius: 14px;
-                    background: Theme.panel.mix(BotLook.tile(7), 0.9);
-                    border-width: 1px;
-                    border-color: BotLook.tile(7).with-alpha(0.3);
-                    VerticalLayout {
-                        padding: 12px;
-                        spacing: 4px;
-                        HorizontalLayout {
-                            spacing: 7px;
-                            VerticalLayout { alignment: center; Glyph { d: Icons.actions; width: 16px; height: 16px; fill: Theme.accent; } }
-                            Text { text: "Panels"; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
-                            IconButton { d: Icons.open; size: 30px; tip: "Open them to save as pictures"; clicked => { root.act("url:http://127.0.0.1:" + root.port + "/panels"); } }
-                            IconButton { d: Icons.gear; size: 30px; tip: "Make them yours"; clicked => { root.act("sheet:panels"); } }
-                        }
-                        Text { text: "Your channel's panels (About, Schedule, Rules...) in one theme, saved as pictures for Twitch or Kick."; color: Theme.muted; font-size: 11px; overflow: elide; }
-                    }
-                }
-                if root.widgets-view == "creators": Rectangle {
-                    height: 92px;
-                    border-radius: 14px;
-                    background: Theme.panel.mix(BotLook.tile(8), 0.9);
-                    border-width: 1px;
-                    border-color: BotLook.tile(8).with-alpha(0.3);
-                    VerticalLayout {
-                        padding: 12px;
-                        spacing: 4px;
-                        HorizontalLayout {
-                            spacing: 7px;
-                            VerticalLayout { alignment: center; Glyph { d: Icons.broadcast; width: 16px; height: 16px; fill: Theme.accent; } }
-                            Text { text: "Game HUD Frames (WIP)"; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
-CenterToggle { checked: Wid.on("hud", Wid.rev); toggled => { root.act("woff:" + "hud"); } }
-                            IconButton { d: Icons.copy; size: 30px; tip: "Copy the address for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + "/hud"); } }
-                            IconButton { d: Icons.gear; size: 30px; tip: "Make them"; clicked => { root.act("sheet:hud"); } }
-                        }
-                        Text { text: "http://127.0.0.1:" + root.port + "/hud"; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
-                        Text { text: "Frames round your game's minimap, health and the rest, marked on a screenshot of it."; color: Theme.muted; font-size: 11px; overflow: elide; }
-                    }
-                }
-                if root.widgets-view == "widgets": Text { text: "Fun"; color: Theme.muted; font-size: 12px; font-weight: 700; }
+                if root.widgets-view == "widgets": ArtHead { text: "Fun"; }
                 // (two rows of three: six in one cut their names short)
                 if root.widgets-view == "widgets": VerticalLayout {
-                  spacing: 8px;
+                  spacing: 10px;
                   for row[ri] in [
                     [{ n: "Hype Train", k: "hype", p: "/hype", s: "hype", i: Icons.broadcast },
                         { n: "Vote Skip", k: "voteskip", p: "/voteskip", s: "voteskip", i: Icons.next },
@@ -6000,29 +5991,15 @@ CenterToggle { checked: Wid.on("hud", Wid.rev); toggled => { root.act("woff:" + 
                         { n: "Stream Credits", k: "credits", p: "/credits", s: "credits", i: Icons.star },
                         { n: "Visualiser", k: "vis", p: "/vis", s: "vis", i: Icons.mix }],
                   ]: HorizontalLayout {
-                    spacing: 8px;
-                    for w[wi] in row: Rectangle {
+                    spacing: 10px;
+                    for w[wi] in row: WidgetTile {
                         horizontal-stretch: 1;
                         preferred-width: 0px;
                         min-width: 0px;
-                        height: 74px;
-                        border-radius: 14px;
-                        background: Theme.panel.mix(BotLook.tile(wi + ri * 3 + 3), 0.9);
-                        border-width: 1px;
-                        border-color: BotLook.tile(wi + ri * 3 + 3).with-alpha(0.3);
-                        VerticalLayout {
-                            padding: 10px;
-                            spacing: 4px;
-                            HorizontalLayout {
-                                spacing: 6px;
-                                VerticalLayout { alignment: center; Glyph { d: w.i; width: 15px; height: 15px; fill: Theme.accent; } }
-                                Text { text: w.n; color: Theme.text; font-weight: 700; font-size: 12px; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.k); } }
-                                IconButton { d: Icons.copy; size: 28px; tip: "Copy the address for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + w.p); } }
-                                IconButton { d: Icons.gear; size: 28px; tip: "Settings"; clicked => { root.act(w.k == "multichat" ? "dockset:multichat" : "sheet:" + w.s); } }
-                            }
-                            Text { text: "http://127.0.0.1:" + root.port + w.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 10px; font-family: "Consolas"; overflow: elide; }
-                        }
+                        tint: BotLook.tile(wi + ri * 3 + 3); name: w.n; d: w.i; path: w.p; on: Wid.on(w.k, Wid.rev);
+                        toggle => { root.act("woff:" + w.k); }
+                        copy => { root.act("copy:http://127.0.0.1:" + root.port + w.p); }
+                        gear => { root.act("sheet:" + w.s); }
                     }
                   }
                 }
