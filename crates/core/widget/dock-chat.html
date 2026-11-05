@@ -122,6 +122,99 @@
   #modBtn.on { color: var(--danger); }
   #modBtn .lbl { font-size: 11px; margin-left: 3px; vertical-align: 1px; }
   #modHide { float: right; margin: -2px 0 0 8px; }
+  /* ---------- Designs (the dock's settings > Design): Plain as above, and four of their own. Each follows the
+     colours chosen (your theme's two accents, or Classic's), and puts reading first: full-strength text on solid
+     backgrounds, each message on a band of its own, every other one a shade apart. They dress the Moderation
+     panel too. ---------- */
+  :root { --accent2: var(--accent); --grad: linear-gradient(120deg, var(--accent2), var(--accent)); --band: #ffffff0b; }
+  body.light { --band: #0000000d; }
+  /* (each message apart from the next, in every design) */
+  .msg:nth-child(even) { background: var(--band); }
+  .msg:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+  /* Glass: soft light behind, a gradient title, the buttons in a floating pill */
+  body.st-glass { background: radial-gradient(90% 60% at 0% 0%, color-mix(in srgb, var(--accent2) 22%, transparent), transparent 70%), radial-gradient(90% 60% at 100% 100%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%), var(--bg); }
+  body.st-glass header, body.st-glass form, body.st-glass #settings { background: color-mix(in srgb, var(--panel) 70%, transparent); border-color: #ffffff1c; }
+  body.st-glass header h1 { font-size: 15px; font-weight: 800; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  body.st-glass #log { padding: 6px 8px; }
+  body.st-glass .msg { border-left: 0; border-radius: 10px; padding: 5px 10px; margin-bottom: 2px; background: color-mix(in srgb, var(--panel) 55%, transparent); }
+  body.st-glass .msg:nth-child(even) { background: color-mix(in srgb, var(--panel) 88%, transparent); box-shadow: inset 0 0 0 1px #ffffff12; }
+  body.st-glass .msg:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent); }
+  body.st-glass .mod { background: #000a; border: 1px solid #ffffff26; border-radius: 999px; padding: 1px 4px; opacity: 1; }
+  body.st-glass .mod .ib { border: 0; background: none; }
+  body.st-glass .notice { margin: 4px 0; padding: 6px 10px; border-radius: 10px; color: var(--text); border: 1px solid transparent; background-image: linear-gradient(var(--panel), var(--panel)), var(--grad); background-origin: border-box; background-clip: padding-box, border-box; }
+  body.st-glass form input, body.st-glass form select { border-radius: 999px; background: color-mix(in srgb, var(--bg) 70%, transparent); padding-left: 12px; }
+  body.st-glass form button[type="submit"], body.st-glass #more { background: var(--grad); border-radius: 999px; }
+  body.st-glass #mod { background: color-mix(in srgb, var(--panel) 80%, transparent); border-color: #ffffff1c; }
+  body.st-glass #mod section { background: color-mix(in srgb, var(--bg) 60%, transparent); border: 1px solid #ffffff14; border-radius: 12px; padding: 8px 10px; }
+  body.st-glass #mod h2 { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  body.st-glass #mod h2 span, body.st-glass #mod h2 button { -webkit-text-fill-color: initial; color: var(--dim); }
+  body.st-glass .sw { background: #ffffff0e; color: var(--text); }
+  body.st-glass .sw.on { background: var(--grad); border-color: transparent; color: #111; font-weight: 700; }
+
+  /* Bubbles: each message a bubble */
+  body.st-bubbles { background: radial-gradient(120% 70% at 0% 0%, color-mix(in srgb, var(--accent) 16%, var(--bg)), var(--bg) 62%); }
+  body.st-bubbles header { background: none; border: 0; padding: 10px 12px; }
+  body.st-bubbles header h1 { font-size: 15px; font-weight: 700; }
+  body.st-bubbles #log { padding: 4px 10px 8px; display: flex; flex-direction: column; align-items: flex-start; }
+  body.st-bubbles .msg { border: 1px solid var(--line); border-left-width: 3px; border-radius: 4px 14px 14px 14px; padding: 5px 11px; margin-bottom: 6px; max-width: 94%; background: var(--panel); }
+  body.st-bubbles .msg:nth-child(even) { background: color-mix(in srgb, var(--panel) 80%, var(--text) 7%); }
+  body.st-bubbles .msg.twitch { border-left-color: #a970ff; } body.st-bubbles .msg.kick { border-left-color: #53fc18; } body.st-bubbles .msg.youtube { border-left-color: #ff3355; }
+  body.st-bubbles .notice { align-self: center; background: var(--panel); border-radius: 999px; padding: 3px 12px; margin: 4px 0 8px; font-style: normal; font-size: 0.9em; }
+  body.st-bubbles form { background: none; border: 0; padding: 8px 10px; }
+  body.st-bubbles form input, body.st-bubbles form select { border-radius: 999px; background: var(--panel); padding-left: 12px; }
+  body.st-bubbles form button[type="submit"], body.st-bubbles #more { background: var(--grad); border-radius: 999px; }
+  body.st-bubbles #mod { background: none; border: 0; }
+  body.st-bubbles #mod section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 9px 11px; }
+  body.st-bubbles .sw { background: var(--bg); color: var(--text); padding: 3px 12px; }
+  body.st-bubbles .sw.on { background: var(--grad); border-color: transparent; color: #111; font-weight: 700; }
+
+  /* Neon: monospace, glowing edges, each message's edge in its platform's colour */
+  body.st-neon { background: #010402; font-family: "Cascadia Code", "Cascadia Mono", Consolas, monospace; box-shadow: inset 0 0 0 1px var(--accent), inset 0 0 30px color-mix(in srgb, var(--accent) 12%, transparent); }
+  body.st-neon.light { background: #f6fff9; }
+  body.st-neon header, body.st-neon form, body.st-neon #settings { background: none; border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  body.st-neon header h1 { color: var(--accent); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; text-shadow: 0 0 8px var(--accent); }
+  body.st-neon header h1::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: var(--accent2); box-shadow: 0 0 10px var(--accent2); }
+  body.st-neon #log { padding: 8px 10px; }
+  body.st-neon .msg { border-left-width: 2px; padding: 4px 6px 4px 10px; margin-bottom: 4px; background: #ffffff08; }
+  body.st-neon .msg:nth-child(even) { background: #ffffff14; }
+  body.st-neon.light .msg { background: #0000000a; } body.st-neon.light .msg:nth-child(even) { background: #00000014; }
+  body.st-neon .msg.twitch { border-left-color: #a970ff; box-shadow: -6px 0 12px -8px #a970ff; }
+  body.st-neon .msg.kick { border-left-color: #53fc18; box-shadow: -6px 0 12px -8px #53fc18; }
+  body.st-neon .msg.youtube { border-left-color: #ff3355; box-shadow: -6px 0 12px -8px #ff3355; }
+  body.st-neon .name { text-shadow: 0 0 8px currentColor; }
+  body.st-neon .time { color: color-mix(in srgb, var(--accent) 60%, var(--dim)); }
+  body.st-neon .mod .ib, body.st-neon .sw, body.st-neon form input, body.st-neon form select, body.st-neon form button, body.st-neon #mod select, body.st-neon .chip { border-radius: 3px; }
+  body.st-neon .mod { opacity: 1; }
+  body.st-neon .mod .ib { background: none; border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); }
+  body.st-neon .notice { color: var(--accent2); border: 1px dashed color-mix(in srgb, var(--accent2) 60%, transparent); padding: 5px 9px; margin: 6px 0; font-style: normal; }
+  body.st-neon .notice::before { content: "> "; }
+  body.st-neon form input, body.st-neon form select { background: color-mix(in srgb, var(--accent) 6%, transparent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+  body.st-neon form button[type="submit"], body.st-neon #more { background: var(--grad); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 70%, transparent); }
+  body.st-neon #mod { background: none; border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  body.st-neon #mod section { border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); padding: 8px 10px; background: #ffffff08; }
+  body.st-neon #mod h2 { color: var(--accent); text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); letter-spacing: 0.12em; }
+  body.st-neon .sw { color: var(--text); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+  body.st-neon .sw.on { background: var(--accent); color: #011; font-weight: 700; box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 70%, transparent); }
+  body.st-neon .sw.red.on, body.st-neon .sw.red.sure { box-shadow: 0 0 10px var(--danger); }
+
+  /* Ribbon: each message fading in from its platform's colour, a gradient line under the header */
+  body.st-ribbon { background: var(--panel); }
+  body.st-ribbon header { background: var(--bg); border-bottom: 2px solid transparent; border-image: var(--grad) 1; }
+  body.st-ribbon header h1 { font-size: 15px; font-weight: 800; }
+  body.st-ribbon #log { padding: 2px 6px 8px; }
+  body.st-ribbon .msg { border-left-width: 3px; border-radius: 0 10px 10px 0; padding: 5px 10px 5px 11px; margin-bottom: 3px; background: linear-gradient(90deg, var(--pc, #ffffff22) -60%, var(--bg) 36%); }
+  body.st-ribbon .msg:nth-child(even) { background: linear-gradient(90deg, var(--pc, #ffffff22) -60%, color-mix(in srgb, var(--bg) 70%, var(--text) 9%) 36%); }
+  body.st-ribbon .msg.twitch { --pc: #a970ff66; border-left-color: #a970ff; } body.st-ribbon .msg.kick { --pc: #53fc1855; border-left-color: #53fc18; } body.st-ribbon .msg.youtube { --pc: #ff335566; border-left-color: #ff3355; }
+  body.st-ribbon .notice { margin: 5px 0; padding: 6px 11px; border-radius: 0 10px 10px 0; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); color: var(--text); font-style: normal; }
+  body.st-ribbon form { background: var(--bg); }
+  body.st-ribbon form button[type="submit"], body.st-ribbon #more { background: var(--grad); }
+  body.st-ribbon #mod { background: var(--bg); border-color: var(--line); }
+  body.st-ribbon #mod section { border-left: 3px solid var(--accent); border-radius: 0 10px 10px 0; padding: 7px 10px; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 22%, transparent) -40%, var(--panel) 40%); }
+  body.st-ribbon #mod h2 { color: var(--text); }
+  body.st-ribbon .sw { background: var(--bg); color: var(--text); }
+  body.st-ribbon .sw.on { background: var(--grad); border-color: transparent; color: #111; font-weight: 700; }
+  body.sq.st-glass .msg, body.sq.st-bubbles .msg, body.sq.st-ribbon .msg, body.sq #mod section, body.sq .notice { border-radius: 0; }
   /* the Mod Suite's: no Auto-Ban (the streamer's chatbot has that); the platform filters and where it goes only while
      watching both (multi-streaming); a platform you're not a moderator on: its messages' mod buttons greyed out */
   .suite #mAb, .suite .mod .ab, .suite #oModAb { display: none !important; }
@@ -212,6 +305,7 @@
   <label><input type="checkbox" id="oHover"> Buttons only on hover</label>
   <label><input type="checkbox" id="oConfirm" checked> Ask before banning</label>
   <label>Time-out <select id="oSecs"><option value="60">1 min</option><option value="300">5 min</option><option value="600" selected>10 min</option><option value="3600">1 hour</option><option value="86400">1 day</option></select></label>
+  <label>Design <select id="oStyle"><option value="plain">Plain</option><option value="glass">Glass</option><option value="bubbles">Bubbles</option><option value="neon">Neon</option><option value="ribbon">Ribbon</option></select></label>
   <label>Text <select id="oSize"><option value="12">Small</option><option value="13" selected>Normal</option><option value="15">Large</option><option value="17">Larger</option></select></label>
   <button class="chip" id="clearView" type="button">Clear the View</button>
   <span class="head">Moderation shows</span>
@@ -257,7 +351,7 @@
     twitch: store.get("twitch", true), kick: store.get("kick", true), time: store.get("time", false), badges: store.get("badges", true),
     hover: store.get("hover", false), confirm: store.get("confirm", true), secs: store.get("secs", "600"), size: store.get("size", "13"), to: store.get("to", "all"),
     bttv: store.get("bttv", true), ffz: store.get("ffz", true), stv: store.get("stv", true),
-    look: store.get("look", "app"), accent: store.get("accent", "app"), font: store.get("font", "app"), corners: store.get("corners", "app"), density: store.get("density", "normal"),
+    look: store.get("look", "app"), style: store.get("style", "plain"), accent: store.get("accent", "app"), font: store.get("font", "app"), corners: store.get("corners", "app"), density: store.get("density", "normal"),
     modLock: store.get("modLock", true), modModes: store.get("modModes", true), modShield: store.get("modShield", true), modAb: store.get("modAb", true),
     modPile: store.get("modPile", true), lkPile: store.get("lkPile", true), pileMin: store.get("pileMin", "3"),
     lkShield: store.get("lkShield", true), lkFollow: store.get("lkFollow", true), lkSlow: store.get("lkSlow", true), lkEmote: store.get("lkEmote", false), lkSub: store.get("lkSub", false),
@@ -269,10 +363,15 @@
   const CLASSIC = { bg: "#1b1d24", panel: "#23262f", line: "#2e323d", text: "#e6e8ee", muted: "#8b91a1", accent: "#7aa2ff", light: false, rounded: true, font: "" };
   const PALS = { sunset: "#ff8a5c", ocean: "#3ec7ff", candy: "#ff8fd8", mint: "#5ef2b8", fire: "#ffb03a", gold: "#ffd76e", mono: "#f2f2f2" };
   let appTheme = null, fontOn = "";
+  // (?design=neon: that design whatever's set, to look at one)
+  const DESIGN = new URLSearchParams(location.search).get("design") || "";
   function applyLook() {
     const t = opt.look === "classic" || !appTheme ? CLASSIC : appTheme, r = document.documentElement.style;
     r.setProperty("--bg", t.bg); r.setProperty("--panel", t.panel); r.setProperty("--line", t.line); r.setProperty("--text", t.text); r.setProperty("--dim", t.muted);
     r.setProperty("--accent", PALS[opt.accent] || t.accent);
+    // (the designs' second colour: your theme's second accent; with an accent of the dock's own, a lighter shade of it)
+    r.setProperty("--accent2", PALS[opt.accent] ? "color-mix(in srgb, " + PALS[opt.accent] + " 60%, #fff)" : t.accent2 || t.accent);
+    ["glass", "bubbles", "neon", "ribbon"].forEach((d) => document.body.classList.toggle("st-" + d, (DESIGN || opt.style) === d));
     document.body.classList.toggle("light", !!t.light);
     document.body.classList.toggle("sq", opt.corners === "square" || (opt.corners !== "rounded" && !t.rounded));
     ["compact", "roomy"].forEach((d) => document.body.classList.toggle("d-" + d, opt.density === d));
@@ -287,7 +386,7 @@
     $("fTwitch").setAttribute("aria-pressed", String(opt.twitch));
     $("fKick").setAttribute("aria-pressed", String(opt.kick));
     $("oTime").checked = opt.time; $("oBadges").checked = opt.badges; $("oHover").checked = opt.hover; $("oConfirm").checked = opt.confirm;
-    $("oSecs").value = opt.secs; $("oSize").value = opt.size; $("to").value = opt.to;
+    $("oSecs").value = opt.secs; $("oSize").value = opt.size; $("to").value = opt.to; $("oStyle").value = opt.style;
     document.documentElement.style.setProperty("--fs", opt.size + "px");
     document.body.classList.toggle("modhover", opt.hover);
     applyLook();
@@ -336,6 +435,7 @@
     .forEach(([c, k]) => ($(c).onchange = (e) => setOpt(k, e.target.checked)));
   $("oSecs").onchange = (e) => setOpt("secs", e.target.value);
   $("oSize").onchange = (e) => setOpt("size", e.target.value);
+  $("oStyle").onchange = (e) => setOpt("style", e.target.value);
   $("to").onchange = (e) => setOpt("to", e.target.value);
   $("clearView").onclick = () => { cleared = last; log.querySelectorAll(".msg, .notice").forEach((r) => r.remove()); rows.clear(); };
 

@@ -19,7 +19,7 @@ fn defaults(page: &str) -> Map<String, Value> {
     let v = match page {
         "chat" => json!({ "twitch": true, "kick": true, "time": false, "badges": true, "hover": false, "confirm": true, "secs": "600", "size": "13", "to": "all", "bttv": true, "ffz": true, "stv": true,
             "modPile": true, "lkPile": true, "pileMin": "3", "modLock": true, "modModes": true, "modShield": true, "modAb": true, "lkShield": true, "lkFollow": true, "lkSlow": true, "lkEmote": false, "lkSub": false,
-            "look": "app", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
+            "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         "activity" => json!({ "hidden": ["firstwords"], "newest": true, "compact": false, "platform": true, "msg": true, "cmds": false, "size": "13", "from": "all", "look": "app", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         _ => json!({ "from": "all", "cmds": false, "bot": true, "badges": true, "marks": true, "style": "plain", "size": 20, "bg": "0", "shadow": true, "dir": "bottom", "align": "left", "flow": "stack", "out": "fade", "speed": "normal", "rcol": "sunset", "ricon": "chat", "rdots": true, "rglow": false, "rshine": false, "fade": 0, "max": 30, "bttv": true, "ffz": true, "stv": true, "name": "beside", "anim": "rise", "events": false, "pronouns": false, "first": true }),
     };
@@ -112,6 +112,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             tog("time", "Times", "When each message was sent."),
             sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large"), (json!("17"), "Larger")]),
         ].into_iter().chain(look(true)).chain([
+            sel("style", "Design", "How the dock is drawn, in the colours above. Each one keeps every message on a band of its own so chat is easy to read, and dresses the Moderation panel to match.", &[(json!("plain"), "Plain"), (json!("glass"), "Glass"), (json!("bubbles"), "Bubbles"), (json!("neon"), "Neon"), (json!("ribbon"), "Ribbon")]),
             note("Emotes"),
             tog("stv", "7TV Emotes", "Your channel's and 7TV's global ones, on Twitch and Kick."),
             tog("bttv", "BetterTTV Emotes", "Your channel's and BetterTTV's global ones."),
