@@ -12108,6 +12108,20 @@ fn jam_mod(shared: &Shared, cmd: &serde_json::Value) {
             LISTEN_QUIET.with(|q| q.set(false));
         }
         "leave" => { listen_leave(shared, true); omnipulse_core::modsuite::jam_set(None); }
+        // (where you hear the music: on the stream (nothing played here), or here (the page mutes the stream)
+        "listen" if listening().as_deref() == Some("jam") => {
+            let here = cmd["here"].as_bool() == Some(true);
+            let st = LISTEN.with(|l| l.borrow_mut().as_mut().map(|l| { l.quiet = !here; l.synced = None; l.state.clone() })).flatten();
+            {
+                let mut a = shared.borrow_mut();
+                if !here { a.engine.pause(); a.loaded = false; }
+                // (here: the queue let go, so the host's song is started afresh, at their place)
+                else { a.queue.items.clear(); a.queue.qi = None; }
+            }
+            if !here { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_playing(false); } }
+            if let Some(st) = st { listen_follow(shared, st); }
+            mod_jam_paint();
+        }
         _ if listening().as_deref() != Some("jam") => say("Join the streamer's Jam first (Music, on the left)."),
         "skip" => listen_send(serde_json::json!({ "type": "skip", "d": if cmd["d"].as_i64() == Some(-1) { -1 } else { 1 } })),
         "move" => if let Some(id) = cmd["id"].as_str() { listen_send(serde_json::json!({ "type": "move", "id": id, "to": cmd["to"].as_u64().unwrap_or(1).max(1) })) },
@@ -14426,7 +14440,7 @@ fn apply_look(shared: &Shared) {
     let c1 = c1.unwrap_or(look::Rgb(0x8e, 0x9b, 0xff));
     // (the docks in OBS follow it: its colours, font and corners; the theme's accent or yours, never the album art's)
     omnipulse_core::docks::app_theme_set(serde_json::json!({ "bg": p.bg.hex(), "panel": p.panel.hex(), "line": p.line.hex(), "text": p.text.hex(), "muted": p.muted.hex(),
-        "accent": theme_rgb(prefs).0.hex(), "light": p.light, "font": font, "rounded": rounded }));
+        "accent": theme_rgb(prefs).0.hex(), "accent2": theme_rgb(prefs).1.hex(), "light": p.light, "font": font, "rounded": rounded }));
     accent_fade(&ui, c1.slint(), c2.unwrap_or(c1).slint(), look::on_accent(c1).slint(), motion);
     // (the Suite page's tiles: each its own colour, from the theme's)
     let tints: Vec<slint::Color> = look::tints(c1, p.light).into_iter().map(|c| c.slint()).collect();
@@ -15101,7 +15115,10 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_set_more(move |key| {
         // (from a Settings page itself, not the Suite's Widgets and Docks: its crumbs as usual)
         BOT_WIDGETS.with(|w| w.borrow_mut().clear());
-        if key == format!("plugRun_{MOD}") || key == format!("plugOn_{MOD}") { return go(&s, Place::Page("mod".into())); }
+        if key == format!("plugRun_{MOD}") || key == format!("plugOn_{MOD}") {
+            if !plugin_runs(&s.borrow().web.prefs, MOD) { set_toggle(&s, &format!("plugRun_{MOD}")); }
+            return go(&s, Place::Page("mod".into()));
+        }
         if let Some(id) = key.strip_prefix("plugOn_").or_else(|| key.strip_prefix("plugRun_")) {
             // (its page where it lives: Settings > Streaming for the chatbot, so Back goes there)
             if let Some(sec) = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.section).filter(|x| !x.is_empty()) {
@@ -16073,7 +16090,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panelpv") { vec![(6, "size:1500:2300"), (7, "bot:sheet:panels"), (10, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=modpage: the Mod Suite switched on (for this run only), made-up channels and chat
             // given to its page, and the page opened; it stays up a while for a look at http://localhost:7979/mod)
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("modpage") { vec![(6, "size:1500:950"), (7, "modon"), (10, "modfake"), (11, "nav:mod"), (60, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("modpage") { vec![(6, "size:1500:950"), (7, "modon"), (8, "nav:settings"), (9, "cat:Streaming"), (30, "modfake"), (31, "nav:mod"), (70, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dockspage") { vec![(6, "size:1500:950"), (7, "bot:docks"), (10, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("pointspage") { vec![(6, "size:1500:950"), (7, "bot:sheet:points"), (8, "botset:pointsOn=true"), (9, "botset:pointsCurrency=channel"), (11, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("hudshape") { vec![(6, "size:1500:950"), (7, "bot:sheet:hud"), (8, "hudsample"), (10, "bot:hud:add:0.238,0.896,0.288,0.956"), (11, "bot:hud:add:0.29,0.896,0.339,0.956"), (12, "bot:hud:add:0.463,0.837,0.537,0.953"), (13, "bot:hud:add:0.673,0.896,0.723,0.956"), (14, "bot:hud:add:0.781,0.88,0.976,0.956"), (16, "bot:hud:none"), (17, "end")] }

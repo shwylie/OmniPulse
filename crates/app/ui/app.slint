@@ -307,6 +307,7 @@ global Icons {
     out property <string> lastfm: "M10.584 17.21l-.88-2.392s-1.43 1.594-3.573 1.594c-1.897 0-3.244-1.649-3.244-4.288 0-3.382 1.704-4.591 3.381-4.591 2.42 0 3.189 1.567 3.849 3.574l.88 2.749c.88 2.666 2.529 4.81 7.285 4.81 3.409 0 5.718-1.044 5.718-3.793 0-2.227-1.265-3.381-3.63-3.931l-1.758-.385c-1.21-.275-1.567-.77-1.567-1.595 0-.934.742-1.484 1.952-1.484 1.32 0 2.034.495 2.144 1.677l2.749-.33c-.22-2.474-1.924-3.492-4.729-3.492-2.474 0-4.893.935-4.893 3.932 0 1.87.907 3.051 3.189 3.601l1.869.44c1.402.33 1.869.907 1.869 1.704 0 1.017-.99 1.43-2.86 1.43-2.776 0-3.93-1.457-4.59-3.464l-.907-2.75c-1.155-3.573-2.997-4.893-6.653-4.893C2.144 5.333 0 7.89 0 12.233c0 4.18 2.144 6.434 5.993 6.434 3.106 0 4.591-1.457 4.591-1.457z";
     out property <string> download: "M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z";
     out property <string> folder-add: "M20 6h-8l-2-2H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-1 8h-3v3h-2v-3h-3v-2h3V9h2v3h3v2z";
+    out property <string> sword: "M19.5 2l2.4.1.1 2.4-11.4 11.4 2.1 2.1-1.4 1.4-2.4-2.4-2.5 2.5.6.6-1.4 1.4-3.1-3.1 1.4-1.4.6.6 2.5-2.5-2.4-2.4 1.4-1.4 2.1 2.1z";
     out property <string> shield: "M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z";
     out property <string> chat: "M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z";
     out property <string> robot: "M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zM7.5 11.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5S9.83 13 9 13s-1.5-.67-1.5-1.5zM16 17H8v-2h8v2zm-1-4c-.83 0-1.5-.67-1.5-1.5S14.17 10 15 10s1.5.67 1.5 1.5S15.83 13 15 13z";
@@ -2394,9 +2395,18 @@ component SectionHead inherits Text {
     font-weight: 700;
 }
 
-/// The Stream Suite, in Settings > Streaming while it's on: a card of its own, in the accents, glowing
+/// The Stream Suite, in Settings > Streaming while it's on: a card of its own, in the accents, glowing. The Mod
+/// Suite's is the same card, its gradient the other way round (flip), with its own words and icon
 component SuiteHero inherits Rectangle {
     in property <SetRow> r;
+    in property <bool> flip;
+    in property <string> name: "Stream Suite";
+    in property <string> blurb: "Your chatbot, alerts, goals, timers, widgets and OBS docks, all in one place.";
+    in property <[string]> tags: ["Chatbot", "Song Requests", "Alerts", "Goals and Timers", "Widgets", "Docks"];
+    in property <string> d: Icons.robot;
+    in property <string> open-label: "Open the Suite";
+    property <color> c-left: root.flip ? Theme.accent-2.mix(Theme.bg, 0.5) : Theme.accent.mix(Theme.bg, 0.42);
+    property <color> c-right: root.flip ? Theme.accent.mix(Theme.bg, 0.42) : Theme.accent-2.mix(Theme.bg, 0.5);
     // (the page's colour behind it: its corners rounded over the gradient, which some renderers draw square)
     in property <color> outside: Theme.panel;
     callback toggle(string);
@@ -2404,7 +2414,7 @@ component SuiteHero inherits Rectangle {
     height: 196px;
     border-radius: Theme.card-radius;
     clip: true;
-    background: @linear-gradient(120deg, Theme.accent.mix(Theme.bg, 0.42) 0%, Theme.accent-2.mix(Theme.bg, 0.5) 100%);
+    background: @linear-gradient(120deg, root.c-left 0%, root.c-right 100%);
     // (light drifting across it, slowly, while it runs: a step 10 times a second, from a timer;
     // the frame clock (animation-tick) kept the app working every frame, even with the page hidden under another,
     // a quarter of a core for this alone)
@@ -2412,7 +2422,7 @@ component SuiteHero inherits Rectangle {
     Timer { interval: 100ms; running: root.r.on && Theme.motion; triggered => { root.step = mod(root.step + 1, 200); } }
     property <float> ph: root.r.on && Theme.motion ? root.step / 200 : 0.3;
     Rectangle { x: root.width * (0.1 + 0.7 * root.ph) - 160px; y: -120px; width: 380px; height: 380px; background: @radial-gradient(circle, #ffffff30 0%, transparent 65%); }
-    Rectangle { x: root.width - 230px; y: 40px; width: 300px; height: 300px; background: @radial-gradient(circle, Theme.accent-2.with-alpha(0.45) 0%, transparent 70%); }
+    Rectangle { x: root.width - 230px; y: 40px; width: 300px; height: 300px; background: @radial-gradient(circle, (root.flip ? Theme.accent : Theme.accent-2).with-alpha(0.45) 0%, transparent 70%); }
     // (rings behind its icon)
     // (centred on the icon: its middle is the padding (26) and half its width (38) in)
     for k in 3: Rectangle { x: 64px - self.width / 2; y: (root.height - self.height) / 2; width: 76px + (k + 1) * 44px; height: self.width; border-radius: self.width / 2; border-width: 1px; border-color: #ffffff18; }
@@ -2424,7 +2434,7 @@ component SuiteHero inherits Rectangle {
             // (solid, not a gradient: the software renderer draws a gradient square, a square behind the circle)
             background: #ffffff26;
             border-width: 1px; border-color: #ffffff50;
-            Glyph { d: Icons.robot; width: 40px; height: 40px; x: 18px; y: 18px; fill: #ffffff; }
+            Glyph { d: root.d; width: 40px; height: 40px; x: 18px; y: 18px; fill: #ffffff; }
         } }
         VerticalLayout {
             horizontal-stretch: 1;
@@ -2433,18 +2443,18 @@ component SuiteHero inherits Rectangle {
             HorizontalLayout {
                 spacing: 10px;
                 alignment: start;
-                Text { text: "Stream Suite"; color: #ffffff; font-size: 30px; font-weight: 800; font-family: Theme.head-font; }
+                Text { text: root.name; color: #ffffff; font-size: 30px; font-weight: 800; font-family: Theme.head-font; }
                 VerticalLayout { alignment: center; Rectangle {
                     height: 22px; width: st.preferred-width + 18px; border-radius: 11px;
                     background: root.r.on ? #3ddc8440 : #ffffff20;
                     st := Text { x: 9px; height: parent.height; vertical-alignment: center; text: root.r.on ? "Running" : "Off"; color: #ffffff; font-size: 11px; font-weight: 700; }
                 } }
             }
-            Text { text: "Your chatbot, alerts, goals, timers, widgets and OBS docks, all in one place."; color: #ffffffd8; font-size: 13px; wrap: word-wrap; }
+            Text { text: root.blurb; color: #ffffffd8; font-size: 13px; wrap: word-wrap; }
             HorizontalLayout {
                 spacing: 6px;
                 alignment: start;
-                for t in ["Chatbot", "Song Requests", "Alerts", "Goals and Timers", "Widgets", "Docks"]: Rectangle {
+                for t in root.tags: Rectangle {
                     height: 24px; width: tt.preferred-width + 20px; border-radius: 12px;
                     background: #00000030; border-width: 1px; border-color: #ffffff30;
                     tt := Text { x: 10px; height: parent.height; vertical-alignment: center; text: t; color: #ffffff; font-size: 11px; font-weight: 600; }
@@ -2462,13 +2472,13 @@ component SuiteHero inherits Rectangle {
                 HorizontalLayout {
                     alignment: center;
                     spacing: 8px;
-                    VerticalLayout { alignment: center; Text { text: "Open the Suite"; color: Theme.accent.mix(#000000, 0.45); font-size: 14px; font-weight: 800; } }
+                    VerticalLayout { alignment: center; Text { text: root.open-label; color: (root.flip ? Theme.accent-2 : Theme.accent).mix(#000000, 0.45); font-size: 14px; font-weight: 800; } }
                 }
                 oa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.open(root.r.key); } }
             }
         }
     }
-    Caps { r: Theme.card-radius; outside: root.outside; tl: Theme.accent.mix(Theme.bg, 0.42); bl: Theme.accent.mix(Theme.bg, 0.42); tr: Theme.accent-2.mix(Theme.bg, 0.5); br: Theme.accent-2.mix(Theme.bg, 0.5); bottom: true; }
+    Caps { r: Theme.card-radius; outside: root.outside; tl: root.c-left; bl: root.c-left; tr: root.c-right; br: root.c-right; bottom: true; }
 }
 
 /// A theme, as a little app to pick: its sidebar, its text, its accents
@@ -6897,7 +6907,7 @@ export component AppWindow inherits Window {
         return id == "navMod" ? "Mod Suite" : id == "navDiscover" ? (root.stream-safe ? "Streamer Mode" : "Discover") : id == "navRediscover" ? "Rediscover" : id == "navLikes" ? "Library" : id == "navFavourites" ? "Favourites" : id == "navSets" ? "Sets & Podcasts" : id == "navArtists" ? "Artists" : "Stats";
     }
     pure function nav-icon(id: string) -> string {
-        return id == "navMod" ? Icons.shield : id == "navDiscover" ? Icons.discover : id == "navRediscover" ? Icons.rediscover : id == "navLikes" ? Icons.library : id == "navFavourites" ? Icons.star : id == "navSets" ? Icons.sets : id == "navArtists" ? Icons.person : Icons.stats;
+        return id == "navMod" ? Icons.sword : id == "navDiscover" ? Icons.discover : id == "navRediscover" ? Icons.rediscover : id == "navLikes" ? Icons.library : id == "navFavourites" ? Icons.star : id == "navSets" ? Icons.sets : id == "navArtists" ? Icons.person : Icons.stats;
     }
     pure function nav-active(id: string) -> bool {
         return root.page == root.nav-page(id) || (id == "navDiscover" && root.page == "streamer") || (id == "navArtists" && root.page == "artist");
@@ -9058,6 +9068,19 @@ export component AppWindow inherits Window {
                                         if r.key == "plugRun_chatbot": SuiteHero { r: r; outside: root.settings-look ? root.settings-panel : Theme.panel; toggle(k) => { root.set-toggle(k); } open(k) => { root.set-more(k); } }
                                     }
                                 }
+                                // ---- the Mod Suite: the same card, under it, its gradient the other way ----
+                                VerticalLayout { for r in root.set-rows-streaming: VerticalLayout {
+                                    if r.key == "plugRun_modsuite": VerticalLayout {
+                                        padding-top: 2px;
+                                        SuiteHero {
+                                            r: r; flip: true; name: "Mod Suite"; d: Icons.sword; open-label: "Open the Mod Suite";
+                                            blurb: "For moderating someone's stream: their stream, their chat and your mod tools, side by side.";
+                                            tags: ["Twitch and Kick", "Stream", "Chat", "Mod Tools", "AutoMod", "Music by Jam"];
+                                            outside: root.settings-look ? root.settings-panel : Theme.panel;
+                                            toggle(k) => { root.set-toggle(k); } open(k) => { root.set-more(k); }
+                                        }
+                                    }
+                                } }
                                 // ---- on stream: tiles (in the Suite while it's on, so nothing here then) ----
                                 if !root.bot-on: SectionHead { text: "On Stream"; }
                                 if !root.bot-on: HorizontalLayout {
@@ -9094,7 +9117,7 @@ export component AppWindow inherits Window {
                                 if !root.bot-on: SectionHead { text: "Your Chat"; }
                                 VerticalLayout {
                                     for r in root.set-rows-streaming: VerticalLayout {
-                                        if (r.key == "req" && !root.bot-on) || (r.key != "req" && r.key != "streamerMode" && r.key != "streamSafe" && r.key != "widget" && r.key != "lyricsWidget" && r.key != "socials" && r.key != "out2On" && r.key != "remoteOn" && !(root.bot-on && r.key == "plugRun_chatbot")): VerticalLayout { padding-bottom: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
+                                        if (r.key == "req" && !root.bot-on) || (r.key != "req" && r.key != "streamerMode" && r.key != "streamSafe" && r.key != "widget" && r.key != "lyricsWidget" && r.key != "socials" && r.key != "out2On" && r.key != "remoteOn" && r.key != "plugRun_modsuite" && !(root.bot-on && r.key == "plugRun_chatbot")): VerticalLayout { padding-bottom: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
                                     }
                                 }
                                 // ---- your setup ----
@@ -9117,6 +9140,9 @@ export component AppWindow inherits Window {
                         background: Theme.bg;
                         Text { text: "The Mod Suite is opening..."; color: Theme.muted; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
                     }
+                    // (clear of the player's tab, laid over the page's foot: a web view draws over everything, so the
+                    // Mod Suite's stops above it)
+                    if root.page-kind == "mod" && root.over-foot: Rectangle { height: 64px; }
                     // Now Playing: the cover, and the lyrics as they're sung
                     if root.page-kind == "now": npl := HorizontalLayout {
                         vertical-stretch: 1;
@@ -10659,7 +10685,7 @@ export component AppWindow inherits Window {
                                 alignment: start;
                                 spacing: 10px;
                                 Text { text: "Here to moderate someone's stream?"; color: Theme.muted; font-size: 13px; vertical-alignment: center; }
-                                Pill { label: "Set Up for Moderating"; d: Icons.shield; clicked => { root.setup-go("stream-mod"); } }
+                                Pill { label: "Set Up for Moderating"; d: Icons.sword; clicked => { root.setup-go("stream-mod"); } }
                             }
                             Text { text: "Your Name"; color: Theme.text; font-weight: 700; }
                             Text { text: "Friends see it when you listen along or Jam. Leave it empty to use your account's name."; color: Theme.muted; font-size: 12px; }
@@ -10843,7 +10869,7 @@ export component AppWindow inherits Window {
                             HorizontalLayout {
                                 spacing: 14px;
                                 alignment: start;
-                                for c in [{ id: "yes", n: "Yes, I stream", t: "Turns on the Stream Suite, and sets up its chatbot next. Coming from Streamer.bot or Mix It Up? You can bring your commands with you.", d: Icons.broadcast }, { id: "no", n: "No, just listening", t: "Nothing to set up. Streaming stays in Settings if you ever want it.", d: Icons.library }, { id: "mod", n: "I moderate", t: "Opens the Mod Suite: a channel you moderate, with its stream, chat and your mod tools side by side. Your music stays here too.", d: Icons.shield }]: Rectangle {
+                                for c in [{ id: "yes", n: "Yes, I stream", t: "Turns on the Stream Suite, and sets up its chatbot next. Coming from Streamer.bot or Mix It Up? You can bring your commands with you.", d: Icons.broadcast }, { id: "no", n: "No, just listening", t: "Nothing to set up. Streaming stays in Settings if you ever want it.", d: Icons.library }, { id: "mod", n: "I moderate", t: "Opens the Mod Suite: a channel you moderate, with its stream, chat and your mod tools side by side. Your music stays here too.", d: Icons.sword }]: Rectangle {
                                     // (wide enough for its words, which fit in five lines)
                                     width: 250px;
                                     height: 200px;
