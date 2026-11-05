@@ -3370,6 +3370,8 @@ fn save_session_now(a: &App) {
 
 // ---------- playing ----------
 fn start(shared: &Shared) {
+    // (anything started: a wait for YouTube's pause to end is over)
+    BOT_RESUME.with(|c| c.set(c.get() + 1));
     if std::env::var_os("OMNIPULSE_STEP_DEBUG").is_some() {
         let a = shared.borrow();
         println!("start debug: \"{}\" (qi {:?} of {}), engine at {} of {} ms, xfade {:?}", a.queue.current().map(|t| t.title.clone()).unwrap_or_default(), a.queue.qi, a.queue.items.len(), a.engine.position_ms(), a.engine.duration_ms(), XFADE.with(|x| x.borrow().map(|v| v.0)));
@@ -3594,7 +3596,16 @@ fn start(shared: &Shared) {
                         // stops here, saying when YouTube's back, instead of going through them)
                         if let Some(wait) = omnipulse_core::yt_stream::bot_wait() {
                             START_FAILS.with(|f| f.set(0));
-                            ui.set_status(format!("Couldn't play \"{}\": YouTube asked OmniPulse to prove it isn't a bot, so it's paused for {} min. Press play to try again after that.", t.title, wait.div_ceil(60).max(1)).into());
+                            ui.set_status(format!("Couldn't play \"{}\": YouTube asked OmniPulse to prove it isn't a bot, so it's paused for {} min. It carries on by itself after that.", t.title, wait.div_ceil(60).max(1)).into());
+                            // (carried on with once the pause is over: this song again, if it's still the one and
+                            // nothing's been played since)
+                            let n = BOT_RESUME.with(|c| { c.set(c.get() + 1); c.get() });
+                            let (s2, key) = (shared.clone(), t.key.clone());
+                            slint::Timer::single_shot(std::time::Duration::from_secs(wait + 3), move || {
+                                if BOT_RESUME.with(|c| c.get()) != n { return; }
+                                let still = { let a = s2.borrow(); !a.loaded && a.queue.current().is_some_and(|c| c.key == key) };
+                                if still && omnipulse_core::yt_stream::bot_wait().is_none() { start(&s2); }
+                            });
                             return;
                         }
                         if run >= START_FAILS_MAX {
@@ -4574,6 +4585,11 @@ thread_local! {
 
 /// Songs in a row that don't play before it stops trying (offline, say)
 const START_FAILS_MAX: u32 = 3;
+
+thread_local! {
+    /// waiting out YouTube's pause to carry on: which wait it is (a newer one, or anything started since, ends it)
+    static BOT_RESUME: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
 
 fn preload_next(shared: &Shared) {
     let next = {

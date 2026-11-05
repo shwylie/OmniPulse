@@ -595,7 +595,11 @@ async fn stream_url_now(video_id: &str, fresh: bool) -> Result<String, String> {
     let url = match crate::yt_stream::resolve_video(video_id).await {
         Ok(u) => u,
         Err(e) => {
-            if let Ok(mut f) = STREAM_FAILED.lock() { f.retain(|(id, _, _)| id != video_id); f.push((video_id.to_string(), e.clone(), now + STREAM_FAILED_SECS)); }
+            // (YouTube paused: not kept as this video's failure, which would outlast the pause and turn down the
+            // try made when it's over; the pause itself turns lookups down meanwhile)
+            if crate::yt_stream::bot_wait().is_none() {
+                if let Ok(mut f) = STREAM_FAILED.lock() { f.retain(|(id, _, _)| id != video_id); f.push((video_id.to_string(), e.clone(), now + STREAM_FAILED_SECS)); }
+            }
             return Err(e);
         }
     };

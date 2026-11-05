@@ -54,10 +54,53 @@ const TOKENS_SECS: u64 = 6 * 3600;
 // (until when it's left alone, how long next time, and until when tokens are used; each test's own, as
 // they run side by side)
 type Bot = (u64, u64, u64);
+// Kept through a restart (<data>/state/youtube-pause.json): YouTube goes on asking for hours once it's started,
+// and a restart that forgot would ask it again at once, each ask making it longer.
 #[cfg(not(test))]
-static BOT: std::sync::Mutex<Bot> = std::sync::Mutex::new((0, BOT_FIRST_SECS, 0));
+static BOT: std::sync::LazyLock<std::sync::Mutex<Bot>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(bot_kept(bot_file().and_then(|p| std::fs::read_to_string(p).ok()).as_deref(), crate::now_secs())));
 #[cfg(not(test))]
-fn bot_state<T>(f: impl FnOnce(&mut Bot) -> T) -> T { f(&mut BOT.lock().unwrap_or_else(|e| e.into_inner())) }
+fn bot_state<T>(f: impl FnOnce(&mut Bot) -> T) -> T {
+    let mut g = BOT.lock().unwrap_or_else(|e| e.into_inner());
+    let was = *g;
+    let r = f(&mut g);
+    if *g != was {
+        if let Some(p) = bot_file() {
+            if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); }
+            let _ = std::fs::write(p, serde_json::json!({ "until": g.0, "step": g.1, "tokens": g.2, "at": crate::now_secs() }).to_string());
+        }
+    }
+    r
+}
+
+#[cfg(not(test))]
+fn bot_file() -> Option<std::path::PathBuf> {
+    crate::data_dir().ok().map(|d| d.join("state").join("youtube-pause.json"))
+}
+
+/// The pause as it was kept, read at `now`: what's still to come of it; how long the next one is, back to the
+/// first's once YouTube's been left alone for six hours since
+#[cfg_attr(test, allow(dead_code))]
+fn bot_kept(text: Option<&str>, now: u64) -> Bot {
+    let v: serde_json::Value = text.and_then(|t| serde_json::from_str(t).ok()).unwrap_or(serde_json::Value::Null);
+    let n = |k: &str| v[k].as_u64().unwrap_or(0);
+    let fresh = now.saturating_sub(n("at")) < 6 * 3600;
+    (n("until").min(now + BOT_MOST_SECS), if fresh { n("step").clamp(BOT_FIRST_SECS, BOT_MOST_SECS) } else { BOT_FIRST_SECS }, n("tokens").min(now + TOKENS_SECS))
+}
+
+// How many lookups there have been lately (each one's time, the last hour's kept): said in the log when YouTube
+// asks for its bot check, to see what led to it
+static LOOKUPS: std::sync::Mutex<Vec<u64>> = std::sync::Mutex::new(Vec::new());
+
+fn lookup_noted() {
+    let now = crate::now_secs();
+    if let Ok(mut l) = LOOKUPS.lock() { l.retain(|t| now.saturating_sub(*t) < 3600); l.push(now); }
+}
+
+/// (in the last ten minutes, in the last hour)
+fn lookups_lately() -> (usize, usize) {
+    let now = crate::now_secs();
+    LOOKUPS.lock().map(|l| (l.iter().filter(|t| now.saturating_sub(**t) < 600).count(), l.iter().filter(|t| now.saturating_sub(**t) < 3600).count())).unwrap_or((0, 0))
+}
 #[cfg(test)]
 thread_local! {
     static BOT: std::cell::RefCell<Bot> = const { std::cell::RefCell::new((0, BOT_FIRST_SECS, 0)) };
@@ -112,7 +155,8 @@ fn bot_check(why: &str) -> bool {
 /// YouTube's bot check met: left alone from now, for longer each time
 fn bot_hold() -> u64 {
     let step = bot_state(|b| { let step = b.1; b.0 = crate::now_secs() + step; b.1 = (step * 2).min(BOT_MOST_SECS); step });
-    crate::diag::note(&format!("youtube: its bot check; leaving it alone for {} s", step));
+    let (ten, hour) = lookups_lately();
+    crate::diag::note(&format!("youtube: its bot check; leaving it alone for {step} s ({ten} lookups in the last 10 min, {hour} in the last hour)"));
     step
 }
 
@@ -156,11 +200,13 @@ async fn run(program: impl AsRef<OsStr>, target: String, label: &str, format: &s
 
 async fn run_once(program: &OsStr, target: &str, label: &str, format: &str, tokens: bool) -> Result<String, Fail> {
     let query = label;
+    if target.contains("youtube.com/") { lookup_noted(); }
     let mut cmd = tokio::process::Command::new(program);
     cmd.arg(target)
         // (its address, and when YouTube lets it be used: an address used before then is refused, 403)
         .args(["--print", "%(available_at|0)s %(url)s", "-f", format, "--no-playlist", "--no-warnings"])
-        .args(if tokens { tokens_args() } else { Vec::new() })
+        // (not the video's streaming playlist: a request to YouTube each lookup for formats that are never played)
+        .args(if tokens { tokens_args() } else { vec!["--extractor-args".into(), "youtube:skip=hls".into()] })
         .args(js_runtime_args())
         .args(crate::tools::cache_args())
         .envs(crate::tools::cache_env())
@@ -310,6 +356,23 @@ mod tests {
         let e = resolve_with(&p, "x").await.unwrap_err();
         assert!(e.contains("exit 1") && e.contains("Video unavailable"), "{e}");
         assert!(bot_wait().is_none());
+    }
+
+    #[test]
+    fn the_pause_is_kept_through_a_restart() {
+        let now = 1_000_000;
+        // (a pause still running, its next one twice as long, tokens still on: all as they were)
+        let kept = serde_json::json!({ "until": now + 200, "step": 600, "tokens": now + 3600, "at": now - 100 }).to_string();
+        assert_eq!(bot_kept(Some(&kept), now), (now + 200, 600, now + 3600));
+        // (long over: nothing left of it, and the next one the first's length again)
+        assert_eq!(bot_kept(Some(&kept), now + 7 * 3600), (now + 200, BOT_FIRST_SECS, now + 3600));
+        assert!(now + 200 < now + 7 * 3600);
+        // (nothing kept, or a file that isn't what it should be: as new; a time far ahead (the clock changed): no
+        // longer than the longest pause)
+        assert_eq!(bot_kept(None, now), (0, BOT_FIRST_SECS, 0));
+        assert_eq!(bot_kept(Some("not json"), now), (0, BOT_FIRST_SECS, 0));
+        let far = serde_json::json!({ "until": now + 999_999, "step": 5, "tokens": 0, "at": now }).to_string();
+        assert_eq!(bot_kept(Some(&far), now), (now + BOT_MOST_SECS, BOT_FIRST_SECS, 0));
     }
 
     #[tokio::test]
