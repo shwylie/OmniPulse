@@ -92,7 +92,7 @@ fn version_by(title: &str) -> Vec<String> {
     let tail = low.rsplit(['(', '[', '-', '\u{2013}', '\u{2014}']).next().unwrap_or("");
     let words = match_words(tail);
     let Some(at) = words.iter().position(|w| BY_WORDS.contains(&w.as_str())) else { return Vec::new() };
-    words[..at].iter().filter(|w| !matches!(w.as_str(), "the" | "a" | "s" | "official" | "extended" | "radio" | "club" | "original")).cloned().collect()
+    words[..at].iter().filter(|w| !matches!(w.as_str(), "the" | "a" | "s" | "official" | "extended" | "radio" | "club" | "original" | "dj")).cloned().collect()
 }
 
 /// Who remixed a remix album's track ("TRON: Legacy Reconfigured", "... (Remixes)"): its credited artists after
@@ -167,10 +167,11 @@ pub fn score(t: &Track, c: &YtTrack) -> f32 {
     // a version that credits them is the one (one that doesn't is likely another)
     let (mut feat, bare) = omnipulse_core::ranking::featured(&match_title(t));
     feat.extend(t.artist.split(',').skip(1).map(|a| a.trim().to_string()).filter(|a| !a.is_empty()));
-    let feat: Vec<Vec<String>> = feat.iter().map(|f| match_words(f)).filter(|w| !w.is_empty()).collect();
-    let want: HashSet<String> = match_words(&bare).into_iter().collect();
+    // ("DJ" before a name is said or left out, "DJ Chuckie" or "Chuckie": never what a match turns on)
+    let feat: Vec<Vec<String>> = feat.iter().map(|f| match_words(f).into_iter().filter(|w| w != "dj").collect::<Vec<_>>()).filter(|w| !w.is_empty()).collect();
+    let want: HashSet<String> = match_words(&bare).into_iter().filter(|w| w != "dj").collect();
     let got: HashSet<String> = match_words(&omnipulse_core::ranking::featured(&upload_title(&c.title)).1).into_iter()
-        .filter(|w| !(artist.contains(w) && !want.contains(w)) && !feat.iter().any(|f| f.contains(w) && !want.contains(w))).collect();
+        .filter(|w| w != "dj" && !(artist.contains(w) && !want.contains(w)) && !feat.iter().any(|f| f.contains(w) && !want.contains(w))).collect();
     if want.is_empty() || got.is_empty() {
         return 0.0;
     }
@@ -217,6 +218,8 @@ pub fn score(t: &Track, c: &YtTrack) -> f32 {
     for v in VERSION_WORDS {
         // (a remix album's: its remix said so or not)
         if !remixed.is_empty() && (v == "mix" || BY_WORDS.contains(&v)) { continue; }
+        // (a remix's edit, "Chuckie Remix Edit": the remix, said to be an edit or not)
+        if v == "edit" && want.contains("remix") && got.contains("remix") { continue; }
         if want.contains(v) != got.contains(v) {
             s -= 0.6;
         }
@@ -305,7 +308,9 @@ pub async fn find(t: &Track) -> Option<Version> {
 /// What it's looked for by first: its artist and title (a remix album's, with who remixed it)
 fn first_query(t: &Track) -> String {
     let (ga, gt) = guess_names(t);
-    let by = if remixers(t).is_empty() { String::new() } else { t.artist.split(',').skip(1).map(str::trim).collect::<Vec<_>>().join(" ") };
+    let named = version_by(&match_title(t));
+    // (someone's remix: asked for by their name, so it's among what comes back, not only the original)
+    let by = if !named.is_empty() { format!("{} remix", named.join(" ")) } else if remixers(t).is_empty() { String::new() } else { t.artist.split(',').skip(1).map(str::trim).collect::<Vec<_>>().join(" ") };
     format!("{} {} {}", if ga.is_empty() { &t.artist } else { &ga }, gt, by).trim().to_string()
 }
 
@@ -418,7 +423,7 @@ mod tests {
     #[ignore]
     fn live_scores() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        for (title, artist, ms, album) in [("I Will Not Break", "Disturbed", 292_058u64, ""), ("We Don't Need You", "Tom Morello, VIC MENSA", 183_881, ""), ("You Can Get It", "Arkells, K.Flay", 176_445, ""), ("Don't Let Me Down - Illenium Remix", "The Chainsmokers, Daya, ILLENIUM", 218_933, ""), ("Derezzed", "Daft Punk, The Glitch Mob", 262_240, "TRON Legacy: Reconfigured")] {
+        for (title, artist, ms, album) in [("I Will Not Break", "Disturbed", 292_058u64, ""), ("We Don't Need You", "Tom Morello, VIC MENSA", 183_881, ""), ("You Can Get It", "Arkells, K.Flay", 176_445, ""), ("Don't Let Me Down - Illenium Remix", "The Chainsmokers, Daya, ILLENIUM", 218_933, ""), ("Derezzed", "Daft Punk, The Glitch Mob", 262_240, "TRON Legacy: Reconfigured"), ("Sexy Bitch - DJ Chuckie & Lil Jon Remix Edit", "David Guetta, Akon, DJ Chuckie, Lil Jon", 212_160, "One More Love")] {
             let t = Track { src: Src::Spotify("x".into()), key: "sp:x".into(), title: title.into(), artist: artist.into(), ms, album: album.into(), ..Default::default() };
             let q = first_query(&t);
             let found = rt.block_on(omnipulse_core::youtube::search(&q)).unwrap();
