@@ -509,16 +509,40 @@
 </div>
 <script>
   // How see-through the panels are, if set (else as the theme has them): each panel's own colours (its colour and
-  // its gradient's), as they look over a dark scene, at that much. Done again when the look or colours change.
-  let bgDone = "";
+  // its gradient's), as they look over a dark scene, at that much, the alert's too. Done again when the look or
+  // colours change, and all the way through the colours' fade, so they don't stop partway.
+  let bgDone = "", bgWant = "theme", bgUntil = 0, bgRunning = false;
   function panelBg(v) {
     v = String(v || "theme");
+    bgWant = v;
     const cs = document.documentElement.style;
     const key = v + "|" + document.body.className + "|" + ["--bg1", "--bg2", "--hi"].map((k) => cs.getPropertyValue(k)).join(",");
     if (key === bgDone) return;
     bgDone = key;
+    bgFollow();
+  }
+  // (every 33 ms until the colours' fade is over)
+  function bgFollow() {
+    const cf = parseFloat(document.documentElement.style.getPropertyValue("--cf")) || 1.2;
+    bgUntil = Math.max(bgUntil, Date.now() + cf * 1000 + 150);
+    bgPaint();
+    if (bgRunning) return;
+    bgRunning = true;
+    const step = () => {
+      bgPaint();
+      if (Date.now() < bgUntil) setTimeout(step, 33); else bgRunning = false;
+    };
+    setTimeout(step, 33);
+  }
+  function bgPaint() {
     const els = [document.getElementById("card")];
     if (document.body.classList.contains("wave")) els.push(document.getElementById("info"), document.getElementById("track"));
+    const al = document.getElementById("alert");
+    if (al.classList.contains("on")) els.push(al);
+    seeThrough(els, bgWant);
+  }
+  // Those panels' colours at the chosen see-through amount (none: as their theme has them)
+  function seeThrough(els, v) {
     const want = Math.max(0, Math.min(100, Number(v))) / 100;
     const base = [16, 16, 24];
     const redo = (c) => c.replace(/rgba?\(([^)]+)\)/g, (all, inner) => {
@@ -1072,6 +1096,8 @@
         root.setProperty("--hi", c1);
       }
       box.className = "on" + (dir === "glow" ? " glow" : "") + (mode === "seam" ? " seam" : "");
+      // (as see-through as the card: Settings > the widget > Transparency)
+      bgFollow();
       void box.offsetWidth;
       box.classList.add("in");
       body.classList.add("alerting");
