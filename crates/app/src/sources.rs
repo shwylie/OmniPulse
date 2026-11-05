@@ -154,7 +154,7 @@ async fn sp_likes_read(known: Option<&std::collections::HashSet<String>>) -> (Ve
 async fn sp_likes_library(kept: &[Track]) -> Option<Vec<Track>> {
     if !core::spotify_engine::spe_signed_in() { return None; }
     let known: Vec<String> = kept.iter().filter_map(|t| t.key.strip_prefix("sp:").map(String::from)).collect();
-    let v = match core::spotify_library::spe_liked(known).await {
+    let v = match again_if_busy(|| core::spotify_library::spe_liked(known.clone())).await {
         Ok(v) => v,
         Err(e) => { core::diag::note(&format!("likes: Spotify's library failed: {e}: the Web API instead")); return None; }
     };
@@ -227,6 +227,50 @@ pub fn local_files() -> Vec<Track> {
         .unwrap_or_default()
 }
 
+/// Spotify's servers busy for a moment (503 and the like): asked again twice, after 2 s and 5 s
+async fn again_if_busy<T, F, Fut>(mut ask: F) -> Result<T, String>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    let mut waits = [2u64, 5].into_iter();
+    loop {
+        match ask().await {
+            Err(e) if busy(&e) => match waits.next() {
+                Some(s) => { core::diag::note(&format!("spotify: busy ({e}): again in {s} s")); tokio::time::sleep(std::time::Duration::from_secs(s)).await; }
+                None => return Err(e),
+            },
+            r => return r,
+        }
+    }
+}
+
+fn busy(e: &str) -> bool {
+    let e = e.to_lowercase();
+    ["503", "502", "504", "500 internal", "service unavailable", "bad gateway", "gateway timeout", "timed out", "timeout"].iter().any(|k| e.contains(k))
+}
+
+// ---------- your Spotify playlists, kept on this PC ----------
+// The list as last read (state/native-spotify-playlists.json), shown when Spotify can't be asked this run
+// (its servers busy, the Web API rate-limited), so they don't go missing until the next start
+fn sp_lists_file() -> Option<std::path::PathBuf> {
+    core::data_dir().ok().map(|d| d.join("state").join("native-spotify-playlists.json"))
+}
+
+fn sp_lists_save(list: &[Playlist]) {
+    let Some(p) = sp_lists_file() else { return };
+    if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); }
+    let v: Vec<Value> = list.iter().filter(|x| x.plat == "spotify").map(|x| serde_json::json!({ "id": x.id, "title": x.title, "own": x.own })).collect();
+    let _ = std::fs::write(p, Value::Array(v).to_string());
+}
+
+fn sp_lists_load() -> Vec<Playlist> {
+    let v: Value = sp_lists_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    v.as_array().cloned().unwrap_or_default().iter().filter_map(|x| Some(Playlist {
+        plat: "spotify", id: x["id"].as_str()?.to_string(), title: x["title"].as_str()?.to_string(), tracks: None, own: x["own"].as_bool().unwrap_or(false),
+    })).collect()
+}
+
 /// Your playlists on SoundCloud and Spotify (the web app's own come from its saved data)
 pub async fn playlists() -> Vec<Playlist> {
     let mut out = Vec::new();
@@ -252,11 +296,15 @@ pub async fn playlists() -> Vec<Playlist> {
     // (Spotify's own playlist service first, when signed in that way: the Web API's allowance untouched)
     let mut sp_done = false;
     if core::spotify::spotify_signed_in() && core::spotify_engine::spe_signed_in() {
-        match core::spotify_library::spe_playlists().await {
+        match again_if_busy(core::spotify_library::spe_playlists).await {
             Ok(v) => {
+                let kept = sp_lists_load();
                 for p in v.as_array().cloned().unwrap_or_default() {
                     if let (Some(id), Some(title)) = (p["id"].as_str(), p["name"].as_str()) {
                         out.push(Playlist { plat: "spotify", id: id.to_string(), title: title.to_string(), tracks: None, own: p["own"].as_bool().unwrap_or(false) });
+                    } else if let Some(k) = p["id"].as_str().and_then(|id| kept.iter().find(|k| k.id == id)) {
+                        // (one Spotify couldn't read just now: as it was last time)
+                        out.push(k.clone());
                     }
                 }
                 sp_done = true;
@@ -271,6 +319,20 @@ pub async fn playlists() -> Vec<Playlist> {
                 if let (Some(id), Some(title)) = (p["id"].as_str(), p["name"].as_str()) {
                     out.push(Playlist { plat: "spotify", id: id.to_string(), title: title.to_string(), tracks: None, own: !me.is_empty() && p["owner"]["id"].as_str() == Some(me.as_str()) });
                 }
+            }
+            // (the Web API gives the first 50 only: the kept list isn't cut down to them)
+            if v["next"].is_null() { sp_done = true; }
+        }
+    }
+    if core::spotify::spotify_signed_in() {
+        if sp_done {
+            sp_lists_save(&out);
+        } else {
+            // (Spotify couldn't be asked this run: the list as last read, past the ones that did come back)
+            let kept = sp_lists_load();
+            core::diag::note(&format!("playlists: Spotify couldn't be read: {} kept from last time", kept.len()));
+            for k in kept {
+                if !out.iter().any(|o| o.plat == "spotify" && o.id == k.id) { out.push(k); }
             }
         }
     }
@@ -1143,5 +1205,21 @@ mod spotify_likes_tests {
         assert_eq!(list.iter().map(|t| t.key.clone()).collect::<Vec<_>>(), vec!["sp:s3".to_string(), "sp:s2".into()]);
         assert!(complete);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod busy_tests {
+    /// Spotify's "busy" answers are asked again; the rest (signed out, not allowed) aren't
+    #[test]
+    fn spotify_busy_is_asked_again() {
+        assert!(super::busy("Spotify's playlists: Service unavailable { Response status code: 503 Service Unavailable }"));
+        assert!(super::busy("request timed out"));
+        assert!(!super::busy("Spotify said 403 for /me: Active premium subscription required"));
+        assert!(!super::busy("Spotify is off for this run"));
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        let n = std::cell::Cell::new(0);
+        let r: Result<u32, String> = rt.block_on(super::again_if_busy(|| { n.set(n.get() + 1); let k = n.get(); async move { if k < 3 { Err("503 Service Unavailable".to_string()) } else { Ok(k) } } }));
+        assert_eq!(r, Ok(3));
     }
 }

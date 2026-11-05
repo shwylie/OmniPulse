@@ -187,7 +187,8 @@ pub async fn spe_liked(known: Vec<String>) -> Result<serde_json::Value, String> 
 }
 
 /// Your playlists (the ones in your library, in its order: folders left out), from Spotify's own
-/// playlist service: each one's id, name, owner's username, whether it's yours, its length
+/// playlist service: each one's id, name, owner's username, whether it's yours, its length (one that
+/// couldn't be read: its id, "failed", and no name)
 pub async fn spe_playlists() -> Result<serde_json::Value, String> {
     use futures::stream::{self, StreamExt};
     use librespot_metadata::{Metadata, Playlist};
@@ -203,7 +204,18 @@ pub async fn spe_playlists() -> Result<serde_json::Value, String> {
             let me = me.clone();
             async move {
                 let id = librespot_core::SpotifyUri::from_uri(&uri).ok()?;
-                let p = Playlist::get(&session, &id).await.ok()?;
+                // (asked again once, a moment later; still not: only its id, with no name, for the app to
+                // fill from the copy it kept)
+                let p = match Playlist::get(&session, &id).await {
+                    Ok(p) => p,
+                    Err(_) => {
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        match Playlist::get(&session, &id).await {
+                            Ok(p) => p,
+                            Err(_) => return Some(serde_json::json!({ "id": uri.trim_start_matches("spotify:playlist:"), "name": null, "failed": true })),
+                        }
+                    }
+                };
                 let owner = match &p.id { librespot_core::SpotifyUri::Playlist { user: Some(u), .. } => u.clone(), _ => String::new() };
                 Some(serde_json::json!({
                     "id": uri.trim_start_matches("spotify:playlist:"),
