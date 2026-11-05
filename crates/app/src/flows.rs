@@ -603,6 +603,12 @@ pub fn templates() -> Vec<(&'static str, Value)> {
         ("Points (!points)", act("Points", trig("command", json!({ "command": "!points" })), vec![step("say", json!({ "text": "%user%, you have %points% %pointsname%." }))])),
         ("A Giveaway (!enter)", act("Enter", trig("command", json!({ "command": "!enter", "cooldown": 0, "usercooldown": 5 })), vec![step("giveenter", json!({}))])),
         ("Pick a Giveaway Winner (!winner)", act("Winner", trig("command", json!({ "command": "!winner", "who": "you" })), vec![step("givepick", json!({})), step("say", json!({ "text": "And the winner, of %entries%, is... %winner%!", "reply": false }))])),
+        // (a game opened on this PC: your category changed to it on Twitch and Kick, and chat told. One for each game:
+        // duplicate it, and change the program's name and the category)
+        ("Automatic Category Switching", { let mut a = act("Category > Your Game", trig("process", json!({ "name": "yourgame" })), vec![
+            step("game", json!({ "text": "Your Game", "where": "both" })),
+            step("say", json!({ "text": "Game Changed > Your Game", "reply": false, "where": "both" })),
+        ]); a["group"] = json!("Automatic Category Switching"); a }),
         ("Slots", act("Slots", trig("command", json!({ "command": "!slots", "cooldown": 0 })), vec![defaults(STEPS, "slots")])),
         ("Gamble", act("Gamble", trig("command", json!({ "command": "!gamble", "cooldown": 0 })), vec![defaults(STEPS, "gamble")])),
         ("Duel", act("Duel", trig("command", json!({ "command": "!duel", "cooldown": 0 })), vec![defaults(STEPS, "duel")])),

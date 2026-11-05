@@ -5322,6 +5322,15 @@ fn flow_clip_paste(shared: &Shared) {
 fn flows_wire(ui: &AppWindow, shared: &Shared) {
     let s = shared.clone();
     ui.on_flow_act(move |act| {
+        // (from an action's right-click menu, "copy-at:3": that action picked first, then as its key does)
+        let mut act = act.to_string();
+        for (from, to) in [("copy-at:", "clip-copy"), ("cut-at:", "clip-cut"), ("dup-at:", "copy"), ("paste-at:", "clip-paste")] {
+            if let Some(i) = act.strip_prefix(from).and_then(|n| n.parse::<i32>().ok()) {
+                FLOW.with(|f| { let mut f = f.borrow_mut(); if i >= 0 && (i as usize) < f.0.len() { f.1 = i; } });
+                act = to.to_string();
+                break;
+            }
+        }
         match act.as_str() {
             "close" => { flows_save(&s); FLOW_REMOTE.with(|r| r.borrow_mut().take()); if let Some(ui) = s.borrow().ui.upgrade() { ui.set_flow_open(false); } }
             "undo" => flow_undo(&s, true),
@@ -9349,6 +9358,16 @@ fn mod_view(shared: &Shared) {
         if show != last.4 { let _ = view.set_visible(show); if !show { repaint_all(&ui); } }
         *last = at;
     });
+}
+
+/// Moving between pages (another page, a settings screen, the Actions editor opened or closed): the whole window
+/// drawn again. The software renderer redraws only what it thinks changed, and what a web view (a widget's
+/// preview) had covered on the page before can be left behind on the next
+fn page_repaint(shared: &Shared) {
+    thread_local! { static WAS: RefCell<String> = const { RefCell::new(String::new()) }; }
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let now = format!("{}|{}|{}|{}|{}|{}", ui.get_page(), ui.get_page_kind(), ui.get_set_cat(), ui.get_pf_open(), ui.get_flow_open(), ui.get_page_title());
+    if WAS.with(|w| { let mut w = w.borrow_mut(); if *w == now { false } else { *w = now; true } }) { repaint_all(&ui); }
 }
 
 /// The whole window drawn again, now and a moment later (once a web view that was over it has gone): the
@@ -16004,7 +16023,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // (the songs' measurements: the one big file of before moved into a small file each, once, in the background)
     rt.spawn_blocking(omnipulse_core::rhythm::migrate);
     // (the Stream Widget's page: the real widget over its preview, kept in place as the page scrolls)
-    let _live = { let t = slint::Timer::default(); let s = shared.clone(); t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(40), move || { live_widget(&s); words_view(&s); mod_view(&s); }); t };
+    let _live = { let t = slint::Timer::default(); let s = shared.clone(); t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(40), move || { live_widget(&s); words_view(&s); mod_view(&s); page_repaint(&s); }); t };
 
     // OMNIPULSE_SELFTEST=<folder>: visits each page, plays the first track silently, saves a picture of
     // each page and quits (for checking the app without anyone at the screen)

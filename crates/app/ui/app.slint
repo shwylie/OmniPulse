@@ -9841,6 +9841,11 @@ export component AppWindow inherits Window {
                                     border-color: Theme.line;
                                     VerticalLayout {
                                         padding: 6px;
+                                                        MenuRow { label: "Copy"; clicked => { root.flow-act("copy-at:" + i); } }
+                                                        MenuRow { label: "Cut"; clicked => { root.flow-act("cut-at:" + i); } }
+                                                        MenuRow { label: "Paste After It"; clicked => { root.flow-act("paste-at:" + i); } }
+                                                        MenuRow { label: "Duplicate"; clicked => { root.flow-act("dup-at:" + i); } }
+                                                        Rectangle { height: 1px; background: Theme.line; }
                                                         MenuRow { label: it.marked && root.flow-marked > 1 ? "Group the " + root.flow-marked + " Picked..." : "Put It in a Group..."; clicked => { root.flow-act("group-marked:" + i); } }
                                                         MenuRow { label: "New Group..."; clicked => { root.flow-act("group-new"); } }
                                                         if it.group != "": MenuRow { label: it.marked && root.flow-marked > 1 ? "Take Them Out of Their Groups" : "Take It Out of the Group"; clicked => { root.flow-act("ungroup:" + i); } }
