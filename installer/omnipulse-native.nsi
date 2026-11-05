@@ -79,6 +79,8 @@ Section "OmniPulse"
   File /r "..\plugins\internet-archive\*.*"
   SetOutPath "$INSTDIR\plugins\chatbot"
   File /r "..\plugins\chatbot\*.*"
+  SetOutPath "$INSTDIR\plugins\modsuite"
+  File /r "..\plugins\modsuite\*.*"
   SetOutPath "$INSTDIR"
   ; the web app's files this one doesn't need (it has its icons built in, and no separate input program)
   Delete "$INSTDIR\omnipulse-input.exe"

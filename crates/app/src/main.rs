@@ -565,6 +565,16 @@ fn open_page_now(shared: &Shared, page: &str) {
             ui.set_page_kind("now".into());
             ui.set_chips(ModelRc::default());
         }
+        // (the Mod Suite: its page, a web view the 40 ms timer puts on its spot: see mod_view)
+        "mod" => {
+            let mut a = shared.borrow_mut();
+            a.page = "mod".into();
+            ui.set_page("mod".into());
+            ui.set_page_kind("mod".into());
+            ui.set_page_title("Mod Suite".into());
+            ui.set_page_sub("".into());
+            ui.set_chips(ModelRc::default());
+        }
         _ => {}
     }
 }
@@ -4705,6 +4715,11 @@ thread_local! {
 }
 
 const BOT: &str = "chatbot";
+/// The Mod Suite (plugins/modsuite): for moderators, its page in the sidebar while it's switched on
+const MOD: &str = "modsuite";
+/// One sign-in for both suites: these are kept with the Stream Suite's settings, whichever signed in, and each
+/// suite is told when the other changes them
+const ACCOUNT_KEYS: [&str; 13] = ["twitchClientId", "twitchRelay", "token", "refresh", "login", "userId", "kickClientId", "kickClientSecret", "kickRelay", "kickToken", "kickRefreshToken", "kickLogin", "kickUserId"];
 
 /// The chatbot's actions, as kept; none yet: its old way's commands, as actions
 fn flows_load(shared: &Shared) -> Vec<serde_json::Value> {
@@ -4718,6 +4733,7 @@ fn flows_load(shared: &Shared) -> Vec<serde_json::Value> {
 }
 
 fn flows_open(shared: &Shared) {
+    FLOW_REMOTE.with(|r| r.borrow_mut().take());
     let list = flows_load(shared);
     let sel = if list.is_empty() { -1 } else { 0 };
     FLOW.with(|f| *f.borrow_mut() = (list, sel));
@@ -4947,6 +4963,12 @@ fn flows_save_soon(shared: &Shared) {
 /// The actions kept with the chatbot's settings, and given to it as it runs
 fn flows_save(shared: &Shared) {
     let list = FLOW.with(|f| f.borrow().0.clone());
+    // (a Jam host's actions, as their Jam moderator: sent to them, nothing kept here)
+    if FLOW_REMOTE.with(|r| r.borrow().is_some()) {
+        if listening().as_deref() == Some("jam") { listen_send(serde_json::json!({ "type": "actionsSet", "actions": list })); }
+        else if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("You've left the Jam, so these changes weren't sent.".into()); }
+        return;
+    }
     let all = {
         let mut a = shared.borrow_mut();
         let mut all = a.web.prefs["pluginSettings"].as_object().cloned().unwrap_or_default();
@@ -5285,7 +5307,7 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
     let s = shared.clone();
     ui.on_flow_act(move |act| {
         match act.as_str() {
-            "close" => { flows_save(&s); if let Some(ui) = s.borrow().ui.upgrade() { ui.set_flow_open(false); } }
+            "close" => { flows_save(&s); FLOW_REMOTE.with(|r| r.borrow_mut().take()); if let Some(ui) = s.borrow().ui.upgrade() { ui.set_flow_open(false); } }
             "undo" => flow_undo(&s, true),
             "redo" => flow_undo(&s, false),
             "clip-copy" => flow_clip(&s, false),
@@ -6469,6 +6491,15 @@ fn setup_go(shared: &Shared, how: &str) {
             pf_open(shared, botpage::BOT);
         }
         "stream-no" => setup_show(shared, 6),
+        // (moderating: the Mod Suite switched on, first in the sidebar and where the app opens, and opened now)
+        "stream-mod" => {
+            setup_done(shared);
+            pref_put(shared, "modOnly", serde_json::json!(true));
+            if !plugin_on(&shared.borrow().web.prefs, MOD) { set_toggle(shared, &format!("plugOn_{MOD}")); }
+            if !plugin_runs(&shared.borrow().web.prefs, MOD) { set_toggle(shared, &format!("plugRun_{MOD}")); }
+            nav_paint(shared);
+            go(shared, Place::Page("mod".into()));
+        }
         _ => {}
     }
 }
@@ -9218,6 +9249,92 @@ fn live_widget(shared: &Shared) {
     });
 }
 
+// ---------- the Mod Suite (plugins/modsuite, its page /mod) ----------
+/// One sign-in for both suites: the other suite told of what changed. The chatbot signed in or out from the Mod
+/// Suite is started again (as its own sign-in does); a renewal is only handed to it
+fn accounts_shared(shared: &Shared, from: &str, acct: serde_json::Map<String, serde_json::Value>) {
+    let changed_who = acct.contains_key("login") || acct.contains_key("kickLogin");
+    let rt = shared.borrow().rt.clone();
+    if from == MOD {
+        if plugrun::get(BOT).is_none() { return; }
+        if changed_who { plugrun::stop(BOT); plugins_start(shared); return; }
+        let p = plugrun::get(BOT);
+        rt.spawn(async move { if let Some(p) = p { let _ = p.call("applySettings", vec![serde_json::Value::Object(acct)]).await; } });
+    } else if let Some(p) = plugrun::get(MOD) {
+        rt.spawn(async move { let _ = p.call("account", vec![serde_json::Value::Object(acct)]).await; });
+    }
+}
+
+/// What the Mod Suite's page asks: the Jam's here (the music), the rest the Mod Suite plugin's; its answer said
+/// in the page's chat
+fn mod_do(shared: &Shared, mut cmd: serde_json::Value) {
+    if cmd["do"] == "jam" { return jam_mod(shared, &cmd); }
+    // (a sign-in: OmniPulse's apps, finished by the relay, as the Stream Suite's)
+    if cmd["do"] == "signin" {
+        let mut vals = serde_json::Map::new();
+        botpage::sign_in_extras(&mut vals, share::RELAY_URL);
+        cmd["values"] = serde_json::Value::Object(vals);
+    }
+    let Some(p) = plugrun::get(MOD) else { return omnipulse_core::modsuite::notice("The Mod Suite isn't running. Switch it on in Settings > Streaming.") };
+    let rt = shared.borrow().rt.clone();
+    rt.spawn(async move {
+        match p.call("do", vec![cmd]).await {
+            Ok(v) => if let Some(m) = v.as_str().filter(|m| !m.is_empty()) { omnipulse_core::modsuite::notice(m) },
+            Err(e) => omnipulse_core::modsuite::notice(&format!("Couldn't: {}", e.trim_start_matches("Error: "))),
+        }
+    });
+}
+
+thread_local! {
+    /// the Mod Suite page's web view, and where it was last put (and whether it was showing)
+    static MODV: RefCell<Option<(wry::WebView, (f32, f32, f32, f32, bool))>> = const { RefCell::new(None) };
+    static MOD_BEAT: std::cell::Cell<(i32, Option<std::time::Instant>)> = const { std::cell::Cell::new((0, None)) };
+}
+
+/// The Mod Suite's page, in a web view on its spot (from the window's 40 ms timer): made when you open the page,
+/// stepping aside while a menu or dialog is over it, and let go when you leave (its stream stops with it). It's
+/// the widgets' server's page, at localhost (Twitch's player plays only on a site it's told: this one)
+fn mod_view(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    if ui.get_page_kind() != "mod" {
+        if MODV.with(|m| m.borrow_mut().take().is_some()) { repaint_all(&ui); }
+        return;
+    }
+    let g = ui.global::<ModView>();
+    let beat = ui.global::<WLive>().get_beat();
+    let menu = MOD_BEAT.with(|b| {
+        let (last, at) = b.get();
+        if beat != last { b.set((beat, Some(std::time::Instant::now()))); return true; }
+        at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(400))
+    });
+    let show = !menu && !ui.get_mod_covered() && g.get_w() > 1.0 && g.get_h() > 1.0 && !ui.window().is_minimized();
+    let at = (g.get_x(), g.get_y(), g.get_w(), g.get_h(), show);
+    let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(at.0 as f64, at.1 as f64).into(), size: wry::dpi::LogicalSize::new(at.2 as f64, at.3 as f64).into() };
+    if MODV.with(|m| m.borrow().is_none()) {
+        if !show { return; }
+        let prefs = shared.borrow().web.prefs.clone();
+        let port = prefs["widgetPort"].as_u64().unwrap_or(7878);
+        // (the widgets' server, if it isn't on yet: for this page)
+        let mut on = prefs.clone();
+        if let Some(o) = on.as_object_mut() { o.insert("widget".into(), serde_json::json!(true)); }
+        if integrations::widget_start(&prefs).is_none() { let _ = integrations::widget_start(&on); }
+        if let Ok(d) = omnipulse_core::data_dir() { unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", d.join("webview")); } }
+        let url = format!("http://localhost:{port}/mod");
+        use slint::winit_030::WinitWindowAccessor;
+        let view = ui.window().with_winit_window(|w| wry::WebViewBuilder::new().with_url(&url).with_autoplay(true).with_bounds(rect).build_as_child(w).ok()).flatten();
+        if let Some(v) = view { MODV.with(|m| *m.borrow_mut() = Some((v, at))); }
+        return;
+    }
+    MODV.with(|m| {
+        let mut m = m.borrow_mut();
+        let Some((view, last)) = m.as_mut() else { return };
+        if *last == at { return; }
+        if show { let _ = view.set_bounds(rect); }
+        if show != last.4 { let _ = view.set_visible(show); if !show { repaint_all(&ui); } }
+        *last = at;
+    });
+}
+
 /// The whole window drawn again, now and a moment later (once a web view that was over it has gone): the
 /// software renderer otherwise leaves the spot it covered as it was
 fn repaint_all(ui: &AppWindow) {
@@ -9609,6 +9726,8 @@ fn plugin_on(prefs: &serde_json::Value, id: &str) -> bool {
 /// A plugin running: on (its master switch), and, for one whose settings live in a category of their own
 /// (the chatbot's in Streaming), switched on there too (prefs.plugRun_<id>). Off there, its settings stay
 fn plugin_runs(prefs: &serde_json::Value, id: &str) -> bool {
+    // (the Mod Suite: off until you switch it on, or pick "I moderate" when setting up)
+    if id == MOD { return plugin_on(prefs, id) && prefs[format!("plugRun_{id}")].as_bool() == Some(true); }
     plugin_on(prefs, id) && prefs[format!("plugRun_{id}")].as_bool() != Some(false)
 }
 
@@ -9639,11 +9758,17 @@ fn plugins_start(shared: &Shared) {
     panels::SUITE_ON.store(plugin_runs(&prefs, botpage::BOT), std::sync::atomic::Ordering::Relaxed);
     for p in omnipulse_core::plugins::list() {
         let id = p.manifest.id.clone();
-        if !plugin_runs(&prefs, &id) { plugrun::stop(&id); continue; }
+        if !plugin_runs(&prefs, &id) { plugrun::stop(&id); if id == MOD { omnipulse_core::modsuite::stopped(); } continue; }
         if plugrun::get(&id).is_some() { continue; }
         // (a self-test's: never your accounts: their sign-ins left out and every connection off, so a test never
         // reaches Twitch, Kick, OBS or the tip services as you)
         let mut set = plugrun::settings_of(&p.manifest, &prefs);
+        // (the Mod Suite: the Stream Suite's sign-in, as one)
+        if id == MOD {
+            if let Some(o) = set.as_object_mut() {
+                for k in ACCOUNT_KEYS { if let Some(v) = prefs["pluginSettings"][BOT].get(k) { o.insert(k.into(), v.clone()); } }
+            }
+        }
         if std::env::var_os("OMNIPULSE_SELFTEST").is_some() {
             if let Some(o) = set.as_object_mut() {
                 let secret = |k: &str| { let k = k.to_lowercase(); ["token", "secret", "password", "refresh", "verification", "jwt", "userid", "login", "channel", "url", "address"].iter().any(|w| k.contains(w)) };
@@ -9672,6 +9797,7 @@ fn nav_ids(prefs: &serde_json::Value) -> Vec<String> {
     // (Stream-Safe Music on: the Streamer Mode page stands in for Discover, Rediscover, the Library,
     // Favourites, Sets & Podcasts and Artists, which are hidden meanwhile, as the web app's)
     if streamsafe::on(prefs) { ids.retain(|id| id == "navDiscover" || id == "navStats"); }
+    if plugin_runs(prefs, MOD) { if prefs["modOnly"].as_bool() == Some(true) { ids.insert(0, "navMod".into()); } else { ids.push("navMod".into()); } }
     ids
 }
 
@@ -9707,6 +9833,11 @@ fn set_toggle(shared: &Shared, key: &str) {
         plugins_start(shared);
         paint_settings(&shared.borrow());
         paint_plats(&shared.borrow());
+        if id == MOD {
+            nav_paint(shared);
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if on { "The Mod Suite is on. Open it from the sidebar." } else { "The Mod Suite is off." }.into()); }
+            if !on && shared.borrow().page == "mod" { go(shared, Place::Page("library".into())); }
+        }
         return;
     }
     if let Some(id) = key.strip_prefix("plugOn_") {
@@ -9848,10 +9979,12 @@ fn library_load(shared: &Shared) {
                     // (where you left off last time, once: unless you've gone somewhere since it started)
                     let last = LAST_PLACE_DONE.with(|d| !d.replace(true)).then(|| webstate::native_pref("lastPlace")).flatten();
                     let untouched = shared.borrow().page == "library" && shared.borrow().history.is_empty();
-                    let back_to = last.filter(|_| untouched).and_then(|v| {
+                    // (set up for moderating: the Mod Suite, every time)
+                    let mod_first = { let p = &shared.borrow().web.prefs; p["modOnly"].as_bool() == Some(true) && plugin_runs(p, MOD) };
+                    let back_to = if mod_first && untouched { Some(Place::Page("mod".into())) } else { last.filter(|_| untouched).and_then(|v| {
                         if let Some(id) = v["playlist"].as_str() { return shared.borrow().playlists.iter().any(|p| p.id == id).then(|| Place::Playlist(id.to_string())); }
                         v["page"].as_str().filter(|p| *p != "library").map(|p| Place::Page(p.to_string()))
-                    });
+                    }) };
                     if let Some(place) = back_to {
                         go(&shared, place);
                     } else if shared.borrow().page == "library" {
@@ -11728,6 +11861,11 @@ fn room_message(shared: &Shared, m: serde_json::Value) {
         Some("open") => host_push(&shared.borrow()),
         Some("members") => {
             MEMBERS.with(|x| *x.borrow_mut() = m["list"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(String::from)).collect());
+            // (each one by their app id (the relay tells only the host): each told whether they're a Jam moderator)
+            let people: Vec<(String, String)> = m["people"].as_array().into_iter().flatten().filter_map(|p| Some((p["name"].as_str()?.to_string(), p["cid"].as_str()?.to_string()))).filter(|p| !p.1.is_empty()).collect();
+            let mods = jam_mods(&shared.borrow().web.prefs);
+            for (_, cid) in &people { room_to(cid, serde_json::json!({ "type": "role", "mod": mods.contains(cid) })); }
+            JAM_PEOPLE.with(|x| *x.borrow_mut() = people);
             host_members(MEMBERS.with(|x| x.borrow().len()));
             jam_paint(shared);
         }
@@ -11777,6 +11915,39 @@ fn room_message(shared: &Shared, m: serde_json::Value) {
                 if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{who} moved \"{title}\" in the Jam.").into()); }
                 host_push(&shared.borrow());
             }
+        }
+        // a Jam moderator taking a song out of what's coming up
+        Some("remove") if room_kind().as_deref() == Some("jam") => {
+            let who = m["by"].as_str().unwrap_or("Someone").to_string();
+            let cid = m["cid"].as_str().unwrap_or("");
+            if !jam_mods(&shared.borrow().web.prefs).iter().any(|c| c == cid) { return room_to(cid, serde_json::json!({ "type": "said", "text": "Only the streamer's Jam moderators can take songs out." })); }
+            let Some(id) = m["id"].as_str() else { return };
+            let gone = {
+                let mut a = shared.borrow_mut();
+                let qi = a.queue.qi.unwrap_or(0);
+                let at = a.queue.items.iter().enumerate().skip(qi + 1).find(|(_, q)| q.t.key == id).map(|(i, _)| i);
+                let gone = at.map(|i| a.queue.items.remove(i).t.title);
+                if gone.is_some() { paint_queue(&mut a); save_session(&a); }
+                gone
+            };
+            if let Some(title) = gone {
+                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{who} took \"{title}\" out of the queue.").into()); }
+                host_push(&shared.borrow());
+            }
+        }
+        // a Jam moderator asking for your chatbot's actions (to edit them), or sending them back changed
+        Some("actionsGet") if room_kind().as_deref() == Some("jam") => {
+            let cid = m["cid"].as_str().unwrap_or("").to_string();
+            if !jam_mods(&shared.borrow().web.prefs).contains(&cid) { return room_to(&cid, serde_json::json!({ "type": "said", "text": "Only the streamer's Jam moderators can edit their actions." })); }
+            room_to(&cid, serde_json::json!({ "type": "actions", "actions": flows_load(shared) }));
+        }
+        Some("actionsSet") if room_kind().as_deref() == Some("jam") => {
+            let cid = m["cid"].as_str().unwrap_or("").to_string();
+            let who = m["by"].as_str().unwrap_or("Someone").to_string();
+            if !jam_mods(&shared.borrow().web.prefs).contains(&cid) { return room_to(&cid, serde_json::json!({ "type": "said", "text": "Only the streamer's Jam moderators can edit their actions." })); }
+            let Some(list) = m["actions"].as_array().cloned() else { return };
+            if list.len() > 2000 || !list.iter().all(|a| a.is_object()) { return; }
+            jam_actions_take(shared, list, &who);
         }
         // a Jam member skipping (on, or back): for everyone
         Some("skip") if room_kind().as_deref() == Some("jam") => {
@@ -11840,6 +12011,96 @@ fn jams_on(a: &App) -> bool {
 }
 
 
+thread_local! {
+    /// who's in your Jam: each one's name and app id (from the relay, to the host only)
+    static JAM_PEOPLE: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
+    /// editing a Jam host's chatbot actions (their name): the Actions editor's changes go to them, not saved here
+    static FLOW_REMOTE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Your Jam moderators: their app ids (kept: the same people are moderators in your next Jam)
+fn jam_mods(prefs: &serde_json::Value) -> Vec<String> {
+    prefs["jamMods"].as_array().into_iter().flatten().filter_map(|x| x["cid"].as_str().map(String::from)).collect()
+}
+
+/// To one member of your Jam (by their app id)
+fn room_to(cid: &str, msg: serde_json::Value) {
+    ROOM.with(|r| { if let Some(room) = r.borrow().as_ref() { let _ = room.tx.send(serde_json::json!({ "type": "to", "cid": cid, "msg": msg }).to_string()); } });
+}
+
+/// One of your Jam's members made a Jam moderator, or not (the Jam window's Moderator button)
+fn jam_mod_flip(shared: &Shared, i: usize) {
+    let Some((name, cid)) = JAM_PEOPLE.with(|p| p.borrow().get(i).cloned()) else { return };
+    let mut list: Vec<serde_json::Value> = shared.borrow().web.prefs["jamMods"].as_array().cloned().unwrap_or_default();
+    let on = !list.iter().any(|x| x["cid"] == cid.as_str());
+    if on { list.push(serde_json::json!({ "cid": cid, "name": name })); } else { list.retain(|x| x["cid"] != cid.as_str()); }
+    pref_put(shared, "jamMods", serde_json::json!(list));
+    room_to(&cid, serde_json::json!({ "type": "role", "mod": on }));
+    jam_paint(shared);
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if on { format!("{name} is a Jam moderator now: they can take songs out and edit your chatbot's actions.") } else { format!("{name} isn't a Jam moderator any more.") }.into()); }
+}
+
+/// Your chatbot's actions, as a Jam moderator changed them: the ones before kept (state/jam-actions-before.json),
+/// then saved and given to the chatbot, as your own changes are
+fn jam_actions_take(shared: &Shared, list: Vec<serde_json::Value>, who: &str) {
+    let before = flows_load(shared);
+    if let Some(f) = omnipulse_core::data_dir().ok().map(|d| d.join("state").join("jam-actions-before.json")) {
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { let _ = std::fs::write(f, serde_json::json!({ "by": who, "at": omnipulse_core::now_secs(), "actions": before }).to_string()); }
+    }
+    let open = shared.borrow().ui.upgrade().is_some_and(|ui| ui.get_flow_open()) && FLOW_REMOTE.with(|r| r.borrow().is_none());
+    FLOW.with(|f| { let mut f = f.borrow_mut(); f.0 = list; if f.1 >= f.0.len() as i32 { f.1 = f.0.len() as i32 - 1; } });
+    flows_save(shared);
+    if open { flows_paint(shared); }
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{who} changed your chatbot's actions from your Jam.").into()); }
+}
+
+/// The Actions editor on a Jam host's actions (you're one of their Jam moderators): what you change goes to them
+fn flows_open_remote(shared: &Shared, list: Vec<serde_json::Value>, host: &str) {
+    flows_open(shared);
+    FLOW_REMOTE.with(|r| *r.borrow_mut() = Some(host.to_string()));
+    let sel = if list.is_empty() { -1 } else { 0 };
+    FLOW.with(|f| *f.borrow_mut() = (list, sel));
+    flows_paint(shared);
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("You're editing {host}'s chatbot actions. Your changes go to them as you make them.").into()); }
+}
+
+/// The Mod Suite's Music tab: the Jam you're in, as it is now
+fn mod_jam_paint() {
+    let v = LISTEN.with(|l| l.borrow().as_ref().filter(|l| l.kind == "jam").map(|l| {
+        let st = l.state.clone().unwrap_or(serde_json::Value::Null);
+        let song = |t: &serde_json::Value| serde_json::json!({ "id": t["id"], "title": t["title"], "artist": t["displayArtist"], "by": t["addedBy"] });
+        serde_json::json!({
+            "in": true, "host": l.host, "mod": l.is_mod, "quiet": l.quiet, "playing": st["playing"],
+            "now": if st["track"].is_object() { song(&st["track"]) } else { serde_json::Value::Null },
+            "next": st["next"].as_array().into_iter().flatten().map(song).collect::<Vec<_>>(),
+        })
+    }));
+    omnipulse_core::modsuite::jam_set(v);
+}
+
+/// The Mod Suite's Music tab: joining (control only), leaving, and the queue
+fn jam_mod(shared: &Shared, cmd: &serde_json::Value) {
+    let say = |t: &str| omnipulse_core::modsuite::notice(t);
+    match cmd["op"].as_str().unwrap_or("") {
+        "join" => {
+            let link = cmd["link"].as_str().unwrap_or("").trim().to_string();
+            let relay = relay_of(&shared.borrow());
+            let link = if link.starts_with("omnipulse://") { link } else { app_link(&link, &relay) };
+            if together::parse_link(&link, &relay).is_none_or(|x| x.0 != "jam") { return say("That isn't a Jam's invite link. Ask the streamer for the one from their Jam button."); }
+            LISTEN_QUIET.with(|q| q.set(true));
+            listen_join(shared, &link);
+            LISTEN_QUIET.with(|q| q.set(false));
+        }
+        "leave" => { listen_leave(shared, true); omnipulse_core::modsuite::jam_set(None); }
+        _ if listening().as_deref() != Some("jam") => say("Join the streamer's Jam first (Music, on the left)."),
+        "skip" => listen_send(serde_json::json!({ "type": "skip", "d": if cmd["d"].as_i64() == Some(-1) { -1 } else { 1 } })),
+        "move" => if let Some(id) = cmd["id"].as_str() { listen_send(serde_json::json!({ "type": "move", "id": id, "to": cmd["to"].as_u64().unwrap_or(1).max(1) })) },
+        "remove" => if let Some(id) = cmd["id"].as_str() { listen_send(serde_json::json!({ "type": "remove", "id": id })) },
+        "actions" => { listen_send(serde_json::json!({ "type": "actionsGet" })); say("Opening the streamer's actions..."); }
+        _ => {}
+    }
+}
+
 /// The title bar: Start a Jam / Jam · n, or someone's ask (its ring emptying; declined when it runs out)
 fn jam_paint(shared: &Shared) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
@@ -11877,6 +12138,9 @@ fn jam_paint(shared: &Shared) {
     ui.set_jam_waiting(ModelRc::from(Rc::new(VecModel::from(waiting))));
     ui.set_jam_link(ROOM.with(|r| r.borrow().as_ref().filter(|r| r.kind == "jam").map(|r| r.join_url.clone())).unwrap_or_default().into());
     ui.set_jam_members(if members.is_empty() { "Nobody has joined yet.".to_string() } else { format!("In the Jam: {}", members.join(", ")) }.into());
+    let mods = jam_mods(&shared.borrow().web.prefs);
+    let people: Vec<JamPerson> = JAM_PEOPLE.with(|p| p.borrow().iter().map(|(n, c)| JamPerson { name: n.as_str().into(), is_mod: mods.contains(c) }).collect());
+    ui.set_jam_people(ModelRc::from(Rc::new(VecModel::from(people))));
 }
 
 fn jam_start(shared: &Shared) {
@@ -11938,10 +12202,16 @@ struct Listening {
     /// the track lined up with the host's already (left alone after), and whether something moved since
     synced: Option<String>,
     resync: bool,
+    /// joined from the Mod Suite: nothing plays here (you hear it on stream), the queue only followed
+    quiet: bool,
+    /// the host made you one of their Jam moderators (songs taken out, their chatbot's actions edited)
+    is_mod: bool,
 }
 
 thread_local! {
     static LISTEN: RefCell<Option<Listening>> = const { RefCell::new(None) };
+    /// the next join's from the Mod Suite (control only)
+    static LISTEN_QUIET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// "jam" or "listen" while listening along
@@ -12331,7 +12601,9 @@ fn listen_join(shared: &Shared, link: &str) {
     });
     let saved = std::mem::take(&mut shared.borrow_mut().queue);
     shared.borrow().engine.pause();
-    LISTEN.with(|l| *l.borrow_mut() = Some(Listening { kind: kind.clone(), host: "the host".into(), tx, saved, state: None, at: std::time::Instant::now(), synced: None, resync: false }));
+    let quiet = LISTEN_QUIET.with(|q| q.replace(false));
+    LISTEN.with(|l| *l.borrow_mut() = Some(Listening { kind: kind.clone(), host: "the host".into(), tx, saved, state: None, at: std::time::Instant::now(), synced: None, resync: false, quiet, is_mod: false }));
+    mod_jam_paint();
     if let Some(ui) = weak.upgrade() { ui.set_status(if kind == "jam" { "Joining the Jam..." } else { "Joining..." }.into()); }
     jam_paint(shared);
 }
@@ -12423,7 +12695,26 @@ fn listen_message(shared: &Shared, m: serde_json::Value) {
             };
             if let Some(ui) = shared.borrow().ui.upgrade() { if back { ui.set_status(note.into()); } else { say_with(&ui, &note, vec![("Leave", StatusAct::Leave)]); } }
         }
-        Some("state") => { listening_keep(true); listen_follow(shared, m["state"].clone()) }
+        Some("state") => { listening_keep(true); listen_follow(shared, m["state"].clone()); mod_jam_paint(); }
+        // (made one of the host's Jam moderators, or not)
+        Some("role") => {
+            let on = m["mod"].as_bool() == Some(true);
+            let was = LISTEN.with(|l| l.borrow_mut().as_mut().map(|l| std::mem::replace(&mut l.is_mod, on))).unwrap_or(false);
+            mod_jam_paint();
+            if on != was {
+                let host = LISTEN.with(|l| l.borrow().as_ref().map(|l| l.host.clone())).unwrap_or_default();
+                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if on { format!("{host} made you a Jam moderator. You can take songs out of their queue and edit their chatbot's actions.") } else { format!("{host} took away your Jam moderator role.") }.into()); }
+            }
+        }
+        // (the host's chatbot actions, asked for: opened in your Actions editor, your changes sent back)
+        Some("actions") => {
+            let list = m["actions"].as_array().cloned().unwrap_or_default();
+            let host = LISTEN.with(|l| l.borrow().as_ref().map(|l| l.host.clone())).unwrap_or_default();
+            flows_open_remote(shared, list, &host);
+        }
+        Some("said") => {
+            if let (Some(t), Some(ui)) = (m["text"].as_str(), shared.borrow().ui.upgrade()) { ui.set_status(t.chars().take(200).collect::<String>().into()); }
+        }
         // the host's app closed (an update, say): waited for; back, or gone for good (the relay says)
         Some("hostAway") => {
             let host = LISTEN.with(|l| l.borrow().as_ref().map(|l| l.host.clone())).unwrap_or_default();
@@ -12474,6 +12765,15 @@ fn listen_follow(shared: &Shared, st: serde_json::Value) {
         l.state = Some(st.clone());
         l.at = std::time::Instant::now();
     });
+    let quiet = LISTEN.with(|l| l.borrow().as_ref().is_some_and(|l| l.quiet));
+    if quiet {
+        // (from the Mod Suite: the queue as the host has it, shown; nothing played here)
+        let mut a = shared.borrow_mut();
+        a.queue.items = Track::from_snapshot(&st["track"]).into_iter().chain(st["next"].as_array().into_iter().flatten().filter_map(Track::from_snapshot)).map(queue::QItem::mine).collect();
+        a.queue.qi = if a.queue.items.is_empty() { None } else { Some(0) };
+        paint_queue(&mut a);
+        return;
+    }
     let Some(target) = Track::from_snapshot(&st["track"]) else {
         if shared.borrow().loaded && !shared.borrow().engine.is_paused() { shared.borrow().engine.pause(); }
         return;
@@ -12553,6 +12853,8 @@ fn stand_in(shared: &Shared, host: &Track) {
 /// Leaving (or the room's gone): your own queue back, paused where it was
 fn listen_leave(shared: &Shared, quiet: bool) {
     let Some(l) = LISTEN.with(|l| l.borrow_mut().take()) else { return };
+    omnipulse_core::modsuite::jam_set(None);
+    FLOW_REMOTE.with(|r| r.borrow_mut().take());
     // (left: not joined again next time)
     listening_keep(false);
     REJOINING.with(|r| r.set(false));
@@ -13290,7 +13592,7 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
         // (a sign-in coming back to this PC: the chatbot's Kick sign-in, its address http://localhost:<port><path>;
         // one visit, within five minutes, its query handed back)
         "awaitRedirect" => {
-            if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
+            if plugin != "chatbot" && plugin != MOD { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
             let port = args.first().and_then(|v| v.as_u64()).unwrap_or(0) as u16;
             let path = arg(1);
             std::thread::spawn(move || send(match await_redirect(port, &path) { Ok(q) => serde_json::json!({ "ok": true, "query": q }), Err(e) => serde_json::json!({ "error": e }) }));
@@ -13371,6 +13673,20 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             omnipulse_core::emotes::own_set(list);
             send(serde_json::json!({ "ok": true }));
         }
+        // (the Mod Suite's page: its chat, messages taken down, the chat let go for another channel, and its state)
+        "modChat" | "modGone" | "modClear" | "modState" => {
+            if plugin != MOD { return send(serde_json::json!({ "error": "only OmniPulse's Mod Suite can" })); }
+            let v = args.first().cloned().unwrap_or(serde_json::Value::Null);
+            let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
+            match ask["op"].as_str().unwrap_or("") {
+                "modChat" if v.is_object() => omnipulse_core::modsuite::chat_push(v.clone()),
+                "modGone" => omnipulse_core::modsuite::chat_gone(&s("platform"), &s("id"), &s("login")),
+                "modClear" => omnipulse_core::modsuite::chat_clear(),
+                "modState" if v.is_object() => omnipulse_core::modsuite::state_set(v.clone()),
+                _ => return send(serde_json::json!({ "error": "give it an object" })),
+            }
+            send(serde_json::json!({ "ok": true }));
+        }
         // (OBS's docks: the chat as the chatbot hears it, messages taken down, what happened for the activity feed)
         // (the Viewer List dock's: who's watching, as the chatbot has it)
         "dockViewers" => {
@@ -13438,11 +13754,21 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
         }
         // (its own settings, kept: a sign-in's tokens; merged into what's kept, never running it again)
         "saveSettings" => {
-            let values = args.first().and_then(|v| v.as_object()).cloned().unwrap_or_default();
+            let mut values = args.first().and_then(|v| v.as_object()).cloned().unwrap_or_default();
             let had_actions = values.contains_key("actions");
+            // (either suite's sign-in: kept as the Stream Suite's, for both)
+            let mut acct = serde_json::Map::new();
+            if plugin == BOT || plugin == MOD { for k in ACCOUNT_KEYS { if let Some(v) = values.remove(k) { acct.insert(k.into(), v); } } }
             let all = {
                 let mut a = shared.borrow_mut();
                 let mut all = a.web.prefs["pluginSettings"].as_object().cloned().unwrap_or_default();
+                if !acct.is_empty() {
+                    let mut bot = all.get(BOT).and_then(|v| v.as_object()).cloned().unwrap_or_default();
+                    for (k, v) in &acct { bot.insert(k.clone(), v.clone()); }
+                    all.insert(BOT.to_string(), serde_json::Value::Object(bot));
+                    // (the chatbot's page open: shown as saved)
+                    if plugin == BOT { for (k, v) in &acct { values.insert(k.clone(), v.clone()); } }
+                }
                 let mut mine = all.get(plugin).and_then(|v| v.as_object()).cloned().unwrap_or_default();
                 // (its page open: what it kept shown there at once, as saved, not as a change to save)
                 PF_EDIT.with(|e| if let Some((id, v)) = e.borrow_mut().as_mut() {
@@ -13456,6 +13782,7 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             };
             if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("pluginSettings", all); }
             send(serde_json::json!({ "ok": true }));
+            if !acct.is_empty() { accounts_shared(shared, plugin, acct); }
             if plugin == botpage::BOT { BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default()); bot_paint(shared); }
             if plugin == botpage::BOT { emotes_refresh(shared, false); }
             if plugin == botpage::BOT && had_actions {
@@ -13511,6 +13838,9 @@ fn outside_start(shared: &Shared) {
                 None => omnipulse_core::docks::notice("The chatbot isn't on. Turn it on in Settings > Streaming."),
             }
         }));
+    }));
+    omnipulse_core::modsuite::set_handler(std::sync::Arc::new(|cmd: serde_json::Value| {
+        let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { mod_do(&sh, cmd); } }));
     }));
     integrations::widget_start(&prefs);
     if integrations::set(&prefs, "remoteOn") {
@@ -14755,6 +15085,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_set_more(move |key| {
         // (from a Settings page itself, not the Suite's Widgets and Docks: its crumbs as usual)
         BOT_WIDGETS.with(|w| w.borrow_mut().clear());
+        if key == format!("plugRun_{MOD}") || key == format!("plugOn_{MOD}") { return go(&s, Place::Page("mod".into())); }
         if let Some(id) = key.strip_prefix("plugOn_").or_else(|| key.strip_prefix("plugRun_")) {
             // (its page where it lives: Settings > Streaming for the chatbot, so Back goes there)
             if let Some(sec) = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.section).filter(|x| !x.is_empty()) {
@@ -15109,6 +15440,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     } });
     ui.on_jam_admit({ let s = shared.clone(); move |i, ok| join_answer(&s, i.max(0) as usize, ok) });
+    ui.on_jam_mod({ let s = shared.clone(); move |i| jam_mod_flip(&s, i.max(0) as usize) });
     ui.on_ask_answer({ let s = shared.clone(); move |ok| ask_answer_ui(&s, ok) });
     ui.on_now_act({ let s = shared.clone(); move |act| { let t = s.borrow().queue.current().cloned(); if let Some(t) = t { track_act(&s, &t, &act); } } });
     ui.on_title_rename({ let s = shared.clone(); move || name_ask(&s, Naming::AppName) });
@@ -15639,7 +15971,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // (the songs' measurements: the one big file of before moved into a small file each, once, in the background)
     rt.spawn_blocking(omnipulse_core::rhythm::migrate);
     // (the Stream Widget's page: the real widget over its preview, kept in place as the page scrolls)
-    let _live = { let t = slint::Timer::default(); let s = shared.clone(); t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(40), move || { live_widget(&s); words_view(&s); }); t };
+    let _live = { let t = slint::Timer::default(); let s = shared.clone(); t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(40), move || { live_widget(&s); words_view(&s); mod_view(&s); }); t };
 
     // OMNIPULSE_SELFTEST=<folder>: visits each page, plays the first track silently, saves a picture of
     // each page and quits (for checking the app without anyone at the screen)
@@ -15723,6 +16055,9 @@ fn main() -> Result<(), slint::PlatformError> {
             // Overlay, Game HUD Frames)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("previews") { vec![(6, "size:1500:950"), (8, "openpanel:widget"), (12, "scroll:500"), (14, "openpanel:multichat"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panelpv") { vec![(6, "size:1500:2300"), (7, "bot:sheet:panels"), (10, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=modpage: the Mod Suite switched on (for this run only), made-up channels and chat
+            // given to its page, and the page opened; it stays up a while for a look at http://localhost:7979/mod)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("modpage") { vec![(6, "size:1500:950"), (7, "modon"), (10, "modfake"), (11, "nav:mod"), (60, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dockspage") { vec![(6, "size:1500:950"), (7, "bot:docks"), (10, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("pointspage") { vec![(6, "size:1500:950"), (7, "bot:sheet:points"), (8, "botset:pointsOn=true"), (9, "botset:pointsCurrency=channel"), (11, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("hudshape") { vec![(6, "size:1500:950"), (7, "bot:sheet:hud"), (8, "hudsample"), (10, "bot:hud:add:0.238,0.896,0.288,0.956"), (11, "bot:hud:add:0.29,0.896,0.339,0.956"), (12, "bot:hud:add:0.463,0.837,0.537,0.953"), (13, "bot:hud:add:0.673,0.896,0.723,0.956"), (14, "bot:hud:add:0.781,0.88,0.976,0.956"), (16, "bot:hud:none"), (17, "end")] }
@@ -16329,6 +16664,28 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 // Track Preferences' Beat 1: a beat earlier, then saved
                 // the widget and its alerts on (for the test), its server started
+                "modon" => {
+                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert(format!("plugRun_{MOD}"), serde_json::json!(true)); }
+                    plugins_start(&s);
+                    nav_paint(&s);
+                }
+                // (made-up: never anyone's real channel; offline names, so no stream plays)
+                "modfake" => {
+                    let ch = "zzomnipulsetestzz";
+                    omnipulse_core::modsuite::state_set(serde_json::json!({
+                        "twitch": { "login": "testmod" }, "kick": { "login": "testmod" },
+                        "channels": [{ "platform": "twitch", "login": "testmod", "name": "testmod", "own": true }, { "platform": "twitch", "login": ch, "name": "TestStreamer" }],
+                        "recent": [{ "name": "TestStreamer", "twitch": ch, "kick": ch }],
+                        "watching": { "name": "TestStreamer", "twitch": { "login": ch, "name": "TestStreamer", "live": true, "up": true, "title": "Testing the Mod Suite", "viewers": 12, "mod": false }, "kick": { "login": ch, "name": "TestStreamer", "live": true, "up": true, "mod": true } },
+                        "up": true, "modes": { "chat": { "slow": true, "slowSecs": 10 }, "shield": false, "twitch": false }, "can": { "twitch": false, "kick": true },
+                        "automod": [{ "id": "a1", "user": "Spammer", "login": "spammer", "userId": "3", "text": "buy cheap followers here", "reason": "AutoMod: aggression (level 2)" }],
+                    }));
+                    for (pl, user, text) in [("twitch", "Viewer", "hi from Twitch"), ("kick", "KickFan", "hello from Kick"), ("twitch", "Another", "great stream"), ("kick", "Spam", "follow me pls")] {
+                        omnipulse_core::modsuite::chat_push(serde_json::json!({ "platform": pl, "id": format!("{pl}{user}"), "user": user, "login": user.to_lowercase(), "userId": "9", "text": text, "badges": [] }));
+                    }
+                    omnipulse_core::modsuite::notice("You're not a moderator in TestStreamer's Twitch chat, so the mod buttons on Twitch messages are off. You can still read and chat there.");
+                    omnipulse_core::modsuite::jam_set(Some(serde_json::json!({ "in": true, "host": "TestStreamer", "mod": true, "quiet": true, "now": { "id": "s1", "title": "A Song", "artist": "An Artist" }, "next": [{ "id": "s2", "title": "Next Song", "artist": "Someone", "by": "Viewer" }, { "id": "s3", "title": "Another One", "artist": "Band" }] })));
+                }
                 "widgeton" => {
                     if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() {
                         o.insert("widget".into(), serde_json::json!(true)); o.insert("alertsOn".into(), serde_json::json!(true));

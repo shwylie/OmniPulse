@@ -5,6 +5,7 @@
 pub mod apple;
 pub mod diag;
 pub mod docks;
+pub mod modsuite;
 pub mod emotes;
 pub mod badges;
 #[cfg(feature = "desktop")]

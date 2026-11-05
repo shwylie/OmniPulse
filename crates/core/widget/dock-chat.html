@@ -122,6 +122,12 @@
   #modBtn.on { color: var(--danger); }
   #modBtn .lbl { font-size: 11px; margin-left: 3px; vertical-align: 1px; }
   #modHide { float: right; margin: -2px 0 0 8px; }
+  /* the Mod Suite's: no Auto-Ban (the streamer's chatbot has that); the platform filters and where it goes only while
+     watching both (multi-streaming); a platform you're not a moderator on: its messages' mod buttons greyed out */
+  .suite #mAb, .suite .mod .ab, .suite #oModAb { display: none !important; }
+  .suite:not(.multi) #fTwitch, .suite:not(.multi) #fKick, .suite:not(.multi) #to { display: none !important; }
+  .nomod-twitch .msg.twitch .mod .ib, .nomod-kick .msg.kick .mod .ib { opacity: .3; cursor: not-allowed; }
+  .suite label:has(#oModAb) { display: none !important; }
   /* the Moderation dock (/dock/mod): only the panel and Pile-Up's cards, the panel filling it */
   body.modonly #log, body.modonly #more, body.modonly #send, body.modonly #modBtn, body.modonly #modHide { display: none !important; }
   body.modonly #mod { display: block; flex: 1; max-height: none; border-bottom: 0; }
@@ -237,6 +243,11 @@
   "use strict";
   const $ = (id) => document.getElementById(id);
   const log = $("log");
+  // (the Mod Suite's (?suite=mod): the channel you're moderating, its chat and its state from the Mod Suite, not the
+  // chatbot's; one channel, so no platform filters, and no Auto-Ban (the streamer's chatbot has that))
+  const SUITE = /[?&]suite=mod\b/.test(location.search);
+  const BASE = SUITE ? "/mod" : "/dock";
+  if (SUITE) document.documentElement.classList.add("suite");
   // (this dock's own choices: kept in OBS's browser, never needed)
   const store = {
     get(k, d) { try { const v = localStorage.getItem("omnipulse.chat." + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -293,6 +304,7 @@
   // (its settings kept by OmniPulse, on its Suite page: these follow them, and a change made here goes back)
   let setN = -1;
   function sendSettings() {
+    if (SUITE) return;
     fetch("/dock/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ do: "settings", page: PAGE, opt: SENT() }) }).catch(() => {});
   }
   async function pullSettings() {
@@ -483,7 +495,14 @@
     const box = document.createElement("span");
     box.className = "mod";
     const base = { platform: m.platform, id: m.id, user: m.user, login: m.login, userId: m.userId };
-    const ask = (what, extra) => act(Object.assign({ do: what }, base, extra || {}));
+    const ask = (what, extra) => {
+      // (the Mod Suite: not a moderator on this message's platform, so nothing's asked: said, by platform)
+      if (SUITE && document.documentElement.classList.contains("nomod-" + (m.platform === "kick" ? "kick" : "twitch"))) {
+        addNotice("You're not a moderator in this " + (m.platform === "kick" ? "Kick" : "Twitch") + " chat, so you can't do that to " + (m.user || "them") + " there.", true);
+        return;
+      }
+      act(Object.assign({ do: what }, base, extra || {}));
+    };
     const secs = () => Number(opt.secs) || 600;
     const short = () => { const s = secs(); return s >= 86400 ? s / 86400 + "d" : s >= 3600 ? s / 3600 + "h" : s / 60 + "m"; };
     if (m.id) box.append(iconButton("trash", "Delete this message", "", "del", () => ask("delete")));
@@ -501,6 +520,8 @@
       ask("ban");
     }));
     box.append(iconButton("undo", "Let " + m.user + " back in (after a ban or time-out)", "", "unban", () => ask("unban")));
+    // (the Mod Suite: greyed out where you're not a moderator, and saying so)
+    if (SUITE) box.title = "Your mod buttons for " + (m.platform === "kick" ? "Kick" : "Twitch") + " messages";
     box.append(iconButton("shield", "Auto-Ban this message's words", "", "ab", () => { modOpen(true); $("abTerm").value = String(m.text || "").replace(/\[emote:\d+:[^\]]*\]/g, "").trim().slice(0, 100); $("abTerm").focus(); $("abTerm").select(); }));
     return box;
   }
@@ -557,7 +578,7 @@
 
   async function act(cmd) {
     try {
-      const r = await fetch("/dock/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cmd) });
+      const r = await fetch(BASE + "/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cmd) });
       const j = await r.json();
       if (!j.ok) addNotice("Couldn't: " + (j.error || "no answer"), true);
     } catch (e) { addNotice("OmniPulse isn't answering (is it open, with the Stream Widget on?)", true); }
@@ -685,7 +706,7 @@
   let failing = false;
   async function poll() {
     try {
-      const r = await fetch("/dock/chat.json?after=" + last, { cache: "no-store" });
+      const r = await fetch(BASE + "/chat.json?after=" + last, { cache: "no-store" });
       const j = await r.json();
       // (OmniPulse restarted: its numbering began again)
       if (j.last < last) last = 0;
@@ -740,7 +761,7 @@
         if (opt.confirm && !b.classList.contains("sure")) { b.classList.add("sure"); b.textContent = "Click again to ban " + users().length; setTimeout(() => { b.classList.remove("sure"); b.textContent = "Ban them all"; }, 3000); return; }
         banAll();
       });
-      btn("Auto-Ban the words, and ban them", "red", (b) => {
+      if (!SUITE) btn("Auto-Ban the words, and ban them", "red", (b) => {
         if (opt.confirm && !b.classList.contains("sure")) { b.classList.add("sure"); b.textContent = "Click again: Auto-Ban and ban " + users().length; setTimeout(() => { b.classList.remove("sure"); b.textContent = "Auto-Ban the words, and ban them"; }, 3000); return; }
         const term = String(p.text || "").replace(/\[emote:\d+:[^\]]*\]/g, "").trim().slice(0, 100);
         if (term) { edited = Date.now(); if (!mod.autoban.terms.includes(term)) mod.autoban.terms.push(term); mod.autoban.on = true; modDraw(); act({ do: "autoban", op: "add", term }); }
@@ -791,7 +812,7 @@
     $("lockSays").textContent = mod.lock ? "on" : "";
     $("modBtn").classList.toggle("on", !!(ab.on || mod.shield || mod.lock));
     ["mModes", "mShield", "mLock"].forEach((s) => $(s).querySelectorAll("button, select").forEach((b) => (b.disabled = !mod.twitch)));
-    if (!mod.twitch) $("lockSays").textContent = "sign in to Twitch first";
+    if (!mod.twitch) $("lockSays").textContent = SUITE ? "Twitch channels only" : "sign in to Twitch first";
     const list = $("abTerms");
     list.innerHTML = "";
     if (!ab.terms.length) { const n = document.createElement("span"); n.className = "none"; n.textContent = "None of your own yet."; list.append(n); }
@@ -807,6 +828,10 @@
   $("modBtn").onclick = () => modOpen(!$("mod").classList.contains("open"));
   $("modHide").onclick = () => modOpen(false);
   // (the Moderation dock: the panel only, its heading its own)
+  if (SUITE) {
+    $("empty").textContent = "Chat shows here once you're watching a channel (Channel, on the left).";
+    opt.twitch = true; opt.kick = true; opt.to = "all";
+  }
   if (location.pathname.startsWith("/dock/mod")) { document.body.classList.add("modonly"); document.querySelector("header h1").textContent = "Moderation"; document.title = "OmniPulse Moderation"; }
   $("abOn").onclick = () => change({ do: "autoban", op: mod.autoban.on ? "off" : "on" }, () => (mod.autoban.on = !mod.autoban.on));
   $("abAdd").onsubmit = (e) => {
@@ -834,8 +859,13 @@
   $("lockBtn").onclick = () => change({ do: "lockdown", on: !mod.lock, shield: opt.lkShield, follow: opt.lkFollow, slow: opt.lkSlow, emote: opt.lkEmote, sub: opt.lkSub, secs: Number($("cmSlowSecs").value), mins: Number($("cmFollowMins").value) }, () => (mod.lock = !mod.lock));
   async function modPoll() {
     try {
-      const s = await (await fetch("/now.json", { cache: "no-store" })).json();
-      const m = s.suite && s.suite.mod;
+      const s = await (await fetch(SUITE ? "/mod/state.json" : "/now.json", { cache: "no-store" })).json();
+      if (SUITE) {
+        const st = s.state || {}, w = st.watching || {}, can = st.can || {}, root = document.documentElement.classList;
+        root.toggle("multi", !!(w.twitch && w.kick));
+        for (const p of ["twitch", "kick"]) root.toggle("nomod-" + p, can[p] === false);
+      }
+      const m = SUITE ? s.state && s.state.modes : s.suite && s.suite.mod;
       if (m && Date.now() - edited > 5000) { mod = Object.assign({ autoban: { on: false, terms: [] }, chat: {} }, m); modDraw(); }
     } catch (e) {}
     setTimeout(modPoll, 3000);

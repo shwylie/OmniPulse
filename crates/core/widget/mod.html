@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmniPulse Mod Suite</title>
+<!--
+  The Mod Suite, in quarters: the channel's stream top left, your controls bottom left (the channel, its
+  moderation, AutoMod's held messages, and the music through the streamer's Jam), and its chat the whole right
+  half (the Chat Dock, in the Mod Suite's own chat). What it shows comes from /mod/state.json; what you ask goes
+  to /mod/do.
+-->
+<style>
+  :root { --bg: #1b1d24; --panel: #23262f; --line: #2e323d; --text: #e6e8ee; --dim: #8b91a1; --accent: #7aa2ff; --red: #ff5c6c; --ok: #4fd18b; --r: 10px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+  body.sq { --r: 0px; }
+  #grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; height: 100vh; gap: 6px; padding: 6px; }
+  .q { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; min-width: 0; min-height: 0; position: relative; }
+  #stream { grid-column: 1; grid-row: 1; background: #000; }
+  #controls { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; }
+  #chat { grid-column: 2; grid-row: 1 / span 2; }
+  iframe { border: 0; width: 100%; height: 100%; display: block; background: transparent; }
+  #stream .none { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; color: var(--dim); background: var(--panel); }
+  #stream .none[hidden] { display: none; }
+  #stream .bar { position: absolute; left: 0; right: 0; top: 0; display: flex; gap: 8px; align-items: center; padding: 6px 10px; background: linear-gradient(#000c, #0000); color: #fff; font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #stream:hover .bar { opacity: 1; }
+  #sTabs { position: absolute; right: 8px; top: 8px; z-index: 2; display: flex; gap: 4px; background: #000d; padding: 3px; border-radius: calc(var(--r) + 3px); }
+  #sTabs[hidden] { display: none; }
+  #sTabs button { display: flex; align-items: center; gap: 6px; background: none; border: 0; color: #ddd; font: inherit; font-weight: 600; padding: 4px 10px; border-radius: var(--r); cursor: pointer; }
+  #sTabs button.on { background: #fff2; color: #fff; }
+  #sTabs .pl { width: 14px; height: 14px; }
+  .warn { border: 1px solid var(--red); color: var(--text); background: color-mix(in srgb, var(--red) 12%, transparent); border-radius: var(--r); padding: 8px 10px; margin-bottom: 8px; }
+  .live { background: var(--red); color: #fff; border-radius: 4px; padding: 0 6px; font-weight: 700; font-size: 11px; }
+  /* the controls' tabs */
+  #tabs { display: flex; gap: 2px; padding: 6px 6px 0; border-bottom: 1px solid var(--line); flex: none; }
+  #tabs button { background: none; border: 0; color: var(--dim); font: inherit; font-weight: 600; padding: 7px 12px; border-radius: var(--r) var(--r) 0 0; cursor: pointer; position: relative; }
+  #tabs button:hover { color: var(--text); }
+  #tabs button.on { color: var(--text); background: var(--bg); }
+  #tabs button .n { background: var(--red); color: #fff; border-radius: 9px; padding: 0 6px; margin-left: 6px; font-size: 11px; }
+  .pane { flex: 1; min-height: 0; overflow: auto; padding: 12px; display: none; }
+  .pane.on { display: block; }
+  #pMod { padding: 0; }
+  #pMod.on { display: flex; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 14px 0 8px; }
+  h2:first-child { margin-top: 0; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .say { color: var(--dim); }
+  .bad { color: var(--red); }
+  button.b { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 12px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.b:hover { border-color: var(--accent); }
+  button.b.main { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.b.red { color: var(--red); }
+  button.b.ok { color: var(--ok); }
+  button.b:disabled { opacity: .45; cursor: default; }
+  input.t { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 10px; font: inherit; min-width: 0; flex: 1; }
+  input.t:focus { outline: none; border-color: var(--accent); }
+  .acct { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r); margin-bottom: 8px; background: var(--bg); }
+  .acct .who { flex: 1; min-width: 0; }
+  .acct .who b { display: block; }
+  .pl { width: 18px; height: 18px; flex: none; }
+  .pl.twitch { fill: #a970ff; } .pl.kick { fill: #53fc18; }
+  .list { display: flex; flex-direction: column; gap: 4px; }
+  .ch { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--r); background: var(--bg); border: 1px solid transparent; cursor: pointer; text-align: left; color: var(--text); font: inherit; width: 100%; }
+  .ch:hover { border-color: var(--line); }
+  .ch.on { border-color: var(--accent); }
+  .ch .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .held { border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; margin-bottom: 8px; background: var(--bg); }
+  .held .top { display: flex; gap: 8px; align-items: baseline; }
+  .held .top b { flex: 1; }
+  .held .why { color: var(--dim); font-size: 12px; }
+  .held .txt { margin: 4px 0 8px; word-break: break-word; }
+  .song { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--r); background: var(--bg); margin-bottom: 4px; }
+  .song .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .song .by { color: var(--dim); font-size: 12px; }
+  .song button { background: none; border: 0; color: var(--dim); cursor: pointer; font: inherit; padding: 2px 6px; border-radius: 6px; }
+  .song button:hover { color: var(--text); background: var(--panel); }
+  .song button.x:hover { color: var(--red); }
+  .now { padding: 10px; border-radius: var(--r); background: var(--bg); border: 1px solid var(--line); margin-bottom: 10px; }
+  .now .t { font-weight: 700; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="grid">
+  <div class="q" id="stream"><div class="none" id="noStream">Pick a channel in Channel, below, to watch its stream here.</div><div class="bar" id="sBar"></div><div id="sTabs" hidden></div></div>
+  <div class="q" id="controls">
+    <div id="tabs" role="tablist">
+      <button data-tab="pChannel" class="on" role="tab">Channel</button>
+      <button data-tab="pMod" role="tab">Moderation</button>
+      <button data-tab="pAuto" role="tab">AutoMod<span class="n" id="autoN" hidden></span></button>
+      <button data-tab="pMusic" role="tab">Music</button>
+    </div>
+    <div class="pane on" id="pChannel"></div>
+    <div class="pane" id="pMod"><iframe id="modFrame" title="Moderation"></iframe></div>
+    <div class="pane" id="pAuto"></div>
+    <div class="pane" id="pMusic"></div>
+  </div>
+  <div class="q" id="chat"><iframe src="/dock/chat?suite=mod" title="Chat"></iframe></div>
+</div>
+<script>
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const MARKS = {
+    twitch: "M4.3 3 3 6.4v13.1h4.5V22h2.5l2.4-2.5h3.7l4.9-4.9V3H4.3zm1.6 1.6h13.4v9.1l-2.9 2.9h-4.5l-2.4 2.4v-2.4H5.9V4.6zM10 7.4v5h1.6v-5H10zm4.5 0v5h1.6v-5h-1.6z",
+    kick: "M3 3h6v4h2V5h2V3h8v6h-2v2h-2v2h2v2h2v6h-8v-2h-2v-2H9v4H3V3z",
+  };
+  const mark = (p) => { const s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("viewBox", "0 0 24 24"); s.classList.add("pl", p); const d = document.createElementNS("http://www.w3.org/2000/svg", "path"); d.setAttribute("d", MARKS[p] || MARKS.twitch); s.append(d); return s; };
+  const PNAME = { twitch: "Twitch", kick: "Kick" };
+
+  // (the tabs: the one you were on kept)
+  const store = { get(k, d) { try { const v = localStorage.getItem("omnipulse.mod." + k); return v == null ? d : v; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem("omnipulse.mod." + k, v); } catch (e) {} } };
+  function tab(id) {
+    document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === id));
+    document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("on", p.id === id));
+    if (id === "pMod" && !$("modFrame").src) $("modFrame").src = "/dock/mod?suite=mod";
+    store.set("tab", id);
+  }
+  document.querySelectorAll("#tabs button").forEach((b) => (b.onclick = () => tab(b.dataset.tab)));
+  tab(new URLSearchParams(location.search).get("tab") || store.get("tab", "pChannel"));
+
+  async function ask(cmd) {
+    try {
+      const r = await fetch("/mod/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cmd) });
+      const j = await r.json();
+      if (!j.ok) say(j.error || "No answer.", true);
+    } catch (e) { say("OmniPulse isn't answering. Is it still open?", true); }
+    setTimeout(poll, 400);
+  }
+  let said = { text: "", bad: false, at: 0 };
+  function say(text, bad) { said = { text, bad: !!bad, at: Date.now() }; draw(); }
+
+  // (the app theme's colours, as the docks have them)
+  async function theme() {
+    try {
+      const t = (await (await fetch("/dock/settings.json?page=modsuite", { cache: "no-store" })).json()).theme;
+      if (t && t.bg) {
+        const r = document.documentElement.style;
+        r.setProperty("--bg", t.bg); r.setProperty("--panel", t.panel); r.setProperty("--line", t.line); r.setProperty("--text", t.text); r.setProperty("--dim", t.muted); r.setProperty("--accent", t.accent);
+        document.body.classList.toggle("sq", t.rounded === false);
+      }
+    } catch (e) {}
+  }
+  theme();
+  setInterval(theme, 10000);
+
+  let S = { running: false, state: null, jam: null }, lastN = -1;
+  async function poll() {
+    try {
+      const j = await (await fetch("/mod/state.json", { cache: "no-store" })).json();
+      if (j.n === lastN) return;
+      lastN = j.n;
+      S = j;
+      draw();
+    } catch (e) {}
+  }
+  setInterval(poll, 1500);
+
+  // ---------- the stream: the platform's own player; multi-streaming, a tab for each platform ----------
+  let playing = "", shownPl = store.get("stream", "twitch");
+  const PLATS = (w) => (w ? ["twitch", "kick"].filter((p) => w[p]) : []);
+  function drawStream(w) {
+    const plats = PLATS(w);
+    if (!plats.includes(shownPl)) shownPl = plats[0] || "twitch";
+    const c = w && w[shownPl];
+    const key = c ? shownPl + "|" + c.login : "";
+    if (key !== playing) {
+      playing = key;
+      const old = $("stream").querySelector("iframe");
+      if (old) old.remove();
+      $("noStream").hidden = !!c;
+      if (c) {
+        const f = el("iframe");
+        f.allow = "autoplay; fullscreen; picture-in-picture";
+        f.allowFullscreen = true;
+        // (Twitch's player only plays on the site it's told it's on: this page's, localhost)
+        f.src = shownPl === "kick" ? "https://player.kick.com/" + encodeURIComponent(c.login) + "?autoplay=true"
+          : "https://player.twitch.tv/?channel=" + encodeURIComponent(c.login) + "&parent=" + encodeURIComponent(location.hostname) + "&autoplay=true";
+        $("stream").prepend(f);
+      }
+    }
+    const tabs = $("sTabs");
+    tabs.textContent = "";
+    tabs.hidden = plats.length < 2;
+    for (const p of plats) {
+      const b = el("button", p === shownPl ? "on" : "");
+      b.append(mark(p), document.createTextNode(PNAME[p] + (w[p].live ? "" : " (offline)")));
+      b.title = "Watch the stream on " + PNAME[p];
+      b.onclick = () => { shownPl = p; store.set("stream", p); drawStream(w); };
+      tabs.append(b);
+    }
+    const bar = $("sBar");
+    bar.textContent = "";
+    if (c) {
+      if (c.live) bar.append(el("span", "live", "LIVE"));
+      bar.append(el("b", "", c.name || c.login));
+      if (c.title) bar.append(el("span", "", c.title));
+      if (c.viewers != null && c.live) bar.append(el("span", "", c.viewers + " watching"));
+    }
+  }
+
+  // ---------- Channel: your sign-ins, and the channels you moderate ----------
+  function drawChannel(st) {
+    const p = $("pChannel");
+    // (not while you're typing a channel's name)
+    if (p.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;
+    p.textContent = "";
+    if (!S.running) {
+      p.append(el("p", "say", "The Mod Suite is starting. If this stays, switch the Mod Suite on in Settings > Streaming."));
+      return;
+    }
+    if (said.text && Date.now() - said.at < 15000) p.append(el("p", said.bad ? "bad" : "say", said.text));
+    if (st.note) p.append(el("p", "bad", st.note));
+    p.append(el("h2", "", "Your Accounts"));
+    for (const pl of ["twitch", "kick"]) {
+      const a = st[pl] || {};
+      const row = el("div", "acct");
+      row.append(mark(pl));
+      const who = el("div", "who");
+      who.append(el("b", "", PNAME[pl]));
+      who.append(el("span", "say", a.login ? "Signed in as " + (a.name || a.login) + "." : "Sign in with your own " + PNAME[pl] + " account, the one that moderates."));
+      row.append(who);
+      const b = el("button", "b" + (a.login ? "" : " main"), a.login ? "Sign Out" : "Sign In");
+      b.onclick = () => ask({ do: a.login ? "signout" : "signin", platform: pl });
+      row.append(b);
+      p.append(row);
+    }
+    const w = st.watching;
+    const can = st.can || {};
+    if (w) {
+      p.append(el("h2", "", "Watching " + (w.name || "")));
+      for (const pl of ["twitch", "kick"]) {
+        const c = w[pl];
+        if (!c) continue;
+        const row = el("div", "acct");
+        row.append(mark(pl));
+        const who = el("div", "who");
+        who.append(el("b", "", PNAME[pl] + ": " + (c.name || c.login)));
+        who.append(el("span", "say", (c.up ? "Chat connected" : "Connecting to chat...") + (c.live ? ", live now." : ", offline.")));
+        row.append(who);
+        const stop = el("button", "b", "Stop");
+        stop.title = "Stop watching " + PNAME[pl] + " (the other stays)";
+        stop.onclick = () => ask({ do: "unwatch", platform: pl });
+        row.append(stop);
+        p.append(row);
+        // (not a moderator there: said, naming the platform; its messages' buttons are greyed out in the chat)
+        if (can[pl] === false) p.append(el("div", "warn", "You're not a moderator in " + (c.name || c.login) + "'s " + PNAME[pl] + " chat. You can read and chat there, but the mod buttons on " + PNAME[pl] + " messages are off."));
+      }
+      // (multi-streaming: the other platform added, as one chat)
+      const other = !w.twitch ? "twitch" : !w.kick ? "kick" : "";
+      if (other && (st[other] || {}).login) {
+        const f = el("form", "row");
+        const name = el("input", "t");
+        name.placeholder = "Their " + PNAME[other] + " channel's name";
+        name.value = w.name ? String(w.name).toLowerCase() : "";
+        name.maxLength = 40;
+        const go = el("button", "b", "Also Watch on " + PNAME[other]);
+        go.type = "submit";
+        f.append(mark(other), name, go);
+        f.onsubmit = (e) => { e.preventDefault(); const n = name.value.trim(); if (n) ask({ do: "watch", platform: other, channel: n, also: true }); };
+        p.append(el("p", "say", "Multi-streaming? Add their " + PNAME[other] + " channel: both chats show as one, with a tab for each stream."), f);
+      }
+      const all = el("div", "row");
+      const stop = el("button", "b", "Stop Watching");
+      stop.onclick = () => ask({ do: "stop" });
+      all.append(stop);
+      p.append(all);
+    }
+    const on = (pl, login) => !!(w && w[pl] && w[pl].login === login);
+    const list = (st.channels || []).slice();
+    p.append(el("h2", "", "Channels You Moderate"));
+    if (!list.length) p.append(el("p", "say", (st.twitch || {}).login ? "Twitch says you don't moderate any channels yet." : "Sign in to Twitch to see the channels you moderate there."));
+    const box = el("div", "list");
+    for (const c of list) {
+      const b = el("button", "ch" + (on(c.platform, c.login) ? " on" : ""));
+      b.append(mark(c.platform), el("span", "nm", c.name || c.login));
+      if (c.own) b.append(el("span", "say", "Your channel"));
+      b.onclick = () => ask({ do: "watch", platform: c.platform, channel: c.login });
+      box.append(b);
+    }
+    p.append(box);
+    // (Kick lists no one's moderated channels: typed, and kept as you watch them)
+    p.append(el("h2", "", "Another Channel"));
+    const f = el("form", "row");
+    const pick = el("select", "t");
+    for (const pl of ["kick", "twitch"]) { const o = el("option", "", PNAME[pl]); o.value = pl; pick.append(o); }
+    pick.style.flex = "none";
+    const name = el("input", "t");
+    name.placeholder = "Its name, as in its address (kick.com/name)";
+    name.maxLength = 40;
+    const go = el("button", "b", "Watch");
+    go.type = "submit";
+    f.append(pick, name, go);
+    f.onsubmit = (e) => { e.preventDefault(); const n = name.value.trim().replace(/^.*\//, "").replace(/^@/, ""); if (n) ask({ do: "watch", platform: pick.value, channel: n }); };
+    p.append(f);
+    // (watched lately: each as it was, one platform or both)
+    const recent = (st.recent || []).filter((r) => r && (r.twitch || r.kick));
+    if (recent.length) {
+      const rbox = el("div", "list");
+      for (const c of recent) {
+        const b = el("button", "ch" + ((!c.twitch || on("twitch", c.twitch)) && (!c.kick || on("kick", c.kick)) ? " on" : ""));
+        if (c.twitch) b.append(mark("twitch"));
+        if (c.kick) b.append(mark("kick"));
+        b.append(el("span", "nm", c.name || c.twitch || c.kick));
+        if (c.twitch && c.kick) b.append(el("span", "say", "Both"));
+        b.onclick = () => ask({ do: "watchboth", twitch: c.twitch || "", kick: c.kick || "" });
+        rbox.append(b);
+      }
+      p.append(el("p", "say", "Watched lately:"), rbox);
+    }
+  }
+
+  // ---------- AutoMod: Twitch's held messages, allowed or denied ----------
+  function drawAuto(st) {
+    const p = $("pAuto");
+    p.textContent = "";
+    const held = st.automod || [];
+    const n = $("autoN");
+    n.hidden = !held.length;
+    n.textContent = held.length;
+    const w = st.watching;
+    if (!w) { p.append(el("p", "say", "Watch a channel first. Messages Twitch's AutoMod holds back show here for you to allow or deny.")); return; }
+    if (!w.twitch) { p.append(el("p", "say", "Kick doesn't share its held messages with apps, so this is for Twitch channels only.")); return; }
+    if (w.kick) p.append(el("p", "say", "These are Twitch's. Kick doesn't share its held messages with apps."));
+    if (st.automodNote) p.append(el("p", "bad", st.automodNote));
+    if (!held.length) { p.append(el("p", "say", "Nothing held right now. When AutoMod holds a message back, it shows here.")); return; }
+    for (const h of held) {
+      const c = el("div", "held");
+      const top = el("div", "top");
+      top.append(el("b", "", h.user), el("span", "why", h.reason || "Held by AutoMod"));
+      c.append(top, el("div", "txt", h.text));
+      const row = el("div", "row");
+      const yes = el("button", "b ok", "Allow");
+      yes.onclick = () => ask({ do: "automod", id: h.id, userId: h.userId, allow: true });
+      const no = el("button", "b red", "Deny");
+      no.onclick = () => ask({ do: "automod", id: h.id, userId: h.userId, allow: false });
+      row.append(yes, no);
+      c.append(row);
+      p.append(c);
+    }
+  }
+
+  // ---------- Music: through the streamer's Jam ----------
+  function drawMusic(jam) {
+    const p = $("pMusic");
+    if (p.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;
+    p.textContent = "";
+    if (!jam || !jam.in) {
+      p.append(el("h2", "", "Join the Streamer's Jam"));
+      p.append(el("p", "say", "Ask the streamer for their Jam's invite link (the Jam button in their OmniPulse), and paste it here. Nothing plays on your end: you hear the music on stream."));
+      const f = el("form", "row");
+      const link = el("input", "t");
+      link.placeholder = "The Jam's invite link";
+      const go = el("button", "b main", "Join");
+      go.type = "submit";
+      f.append(link, go);
+      f.onsubmit = (e) => { e.preventDefault(); if (link.value.trim()) ask({ do: "jam", op: "join", link: link.value.trim() }); };
+      p.append(f);
+      if (jam && jam.note) p.append(el("p", "say", jam.note));
+      return;
+    }
+    const row = el("div", "row");
+    row.append(el("span", "say", "In " + (jam.host || "the streamer") + "'s Jam" + (jam.mod ? ", as a moderator." : ".")));
+    const leave = el("button", "b", "Leave");
+    leave.onclick = () => ask({ do: "jam", op: "leave" });
+    row.append(leave);
+    p.append(row);
+    const now = el("div", "now");
+    now.append(el("div", "t", jam.now ? jam.now.title : "Nothing playing"));
+    if (jam.now) now.append(el("div", "say", jam.now.artist || ""));
+    const ctl = el("div", "row");
+    ctl.style.marginTop = "8px";
+    const back = el("button", "b", "Back");
+    back.onclick = () => ask({ do: "jam", op: "skip", d: -1 });
+    const skip = el("button", "b", "Skip");
+    skip.onclick = () => ask({ do: "jam", op: "skip", d: 1 });
+    ctl.append(back, skip);
+    now.append(ctl);
+    p.append(now);
+    p.append(el("h2", "", "Up Next"));
+    const next = jam.next || [];
+    if (!next.length) p.append(el("p", "say", "Nothing queued."));
+    next.forEach((s, i) => {
+      const r = el("div", "song");
+      const nm = el("div", "nm");
+      nm.append(el("div", "", s.title), el("div", "by", (s.artist || "") + (s.by ? " · asked by " + s.by : "")));
+      r.append(nm);
+      // (anyone in the Jam moves songs; Jam moderators also take them out)
+      const up = el("button", "", "↑"); up.title = "Up one"; up.disabled = i === 0;
+      up.onclick = () => ask({ do: "jam", op: "move", id: s.id, to: i });
+      const dn = el("button", "", "↓"); dn.title = "Down one"; dn.disabled = i === next.length - 1;
+      dn.onclick = () => ask({ do: "jam", op: "move", id: s.id, to: i + 2 });
+      r.append(up, dn);
+      if (jam.mod) {
+        const x = el("button", "x", "×"); x.title = "Take it out of the queue";
+        x.onclick = () => ask({ do: "jam", op: "remove", id: s.id });
+        r.append(x);
+      }
+      p.append(r);
+    });
+    p.append(el("p", "say", "To add songs, search in OmniPulse and pick Add to Queue: in a Jam, they go to the streamer's queue."));
+    if (jam.mod) {
+      p.append(el("h2", "", "The Streamer's Chatbot"));
+      const row2 = el("div", "row");
+      const ed = el("button", "b", "Edit Commands and Actions");
+      ed.onclick = () => ask({ do: "jam", op: "actions" });
+      row2.append(ed);
+      p.append(row2);
+    } else {
+      p.append(el("p", "say", "The streamer can make you a Jam moderator (from their Jam button) so you can reorder and remove songs, and edit their commands and actions."));
+    }
+  }
+
+  function draw() {
+    const st = S.state || {};
+    drawStream(st.watching || null);
+    drawChannel(st);
+    drawAuto(st);
+    drawMusic(S.jam);
+  }
+  draw();
+  poll();
+</script>
+</body>
+</html>

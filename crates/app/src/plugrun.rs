@@ -627,6 +627,129 @@ mod tests {
         stop("chatbot");
     }
 
+    /// The Mod Suite watching a multi-streamer on Twitch and Kick at once, as one chat: both platforms' messages
+    /// come in; you're a moderator on Kick but not on Twitch, so Twitch's moderation is refused, by name, and
+    /// Kick's goes through
+    #[test]
+    fn mod_suite_watches_both_platforms_and_names_where_youre_not_a_mod() {
+        let _one = one_at_a_time();
+        use futures_util::{SinkExt, StreamExt};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let web = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
+        let sock = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
+        let (wp, sp) = (web.local_addr().unwrap().port(), sock.local_addr().unwrap().port());
+        let called: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let c2 = called.clone();
+        // (the web side: Twitch's API (bans refused: not a moderator there), Kick's channel, your badges in it, its chat's address)
+        rt.spawn(async move {
+            while let Ok((mut tcp, _)) = web.accept().await {
+                let called = c2.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    loop {
+                        let n = tcp.read(&mut chunk).await.unwrap_or(0);
+                        if n == 0 { break; }
+                        buf.extend_from_slice(&chunk[..n]);
+                        let text = String::from_utf8_lossy(&buf).to_string();
+                        if let Some(at) = text.find("\r\n\r\n") {
+                            let len = text.lines().find_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0))).unwrap_or(0);
+                            if buf.len() >= at + 4 + len { break; }
+                        }
+                    }
+                    let text = String::from_utf8_lossy(&buf).to_string();
+                    let line = text.lines().next().unwrap_or("").to_string();
+                    called.lock().unwrap().push(line.split(' ').take(2).collect::<Vec<_>>().join(" "));
+                    let (status, answer) = if line.contains("/helix/moderation/bans") { ("403 Forbidden", json!({ "message": "The user is not a moderator" })) }
+                        else if line.contains("/helix/users") { ("200 OK", json!({ "data": [{ "id": "55", "display_name": "Chan" }] })) }
+                        else if line.contains("/helix/") { ("200 OK", json!({ "data": [] })) }
+                        else if line.contains("/v2/channels/chan/users/") { ("200 OK", json!({ "username": "me2", "badges": [{ "type": "moderator", "text": "Moderator" }] })) }
+                        else if line.contains("/v2/channels/") { ("200 OK", json!({ "id": 5, "user_id": 7, "chatroom": { "id": 9 }, "user": { "username": "Chan" }, "livestream": { "viewer_count": 12, "session_title": "Live" } })) }
+                        else if line.contains("/realtime/connection") { ("200 OK", json!({ "data": { "connections": [{ "credentials": { "url": format!("ws://127.0.0.1:{sp}/kick") }, "provider": "centrifugo" }] } })) }
+                        else if line.contains("/realtime/auth/connection") { ("200 OK", json!({ "data": { "token": "guest" } })) }
+                        else { ("200 OK", json!({})) };
+                    let b = answer.to_string();
+                    let _ = tcp.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}", b.len()).as_bytes()).await;
+                });
+            }
+        });
+        // (the sockets: Twitch's chat (you're not a moderator: USERSTATE mod=0), EventSub's welcome, Kick's chat)
+        rt.spawn(async move {
+            while let Ok((tcp, _)) = sock.accept().await {
+                tokio::spawn(async move {
+                    let path = Arc::new(Mutex::new(String::new()));
+                    let p2 = path.clone();
+                    let ws = tokio_tungstenite::accept_hdr_async(tcp, move |req: &tokio_tungstenite::tungstenite::handshake::server::Request, res| { *p2.lock().unwrap() = req.uri().path().to_string(); Ok(res) }).await.unwrap();
+                    let (mut w, mut r) = ws.split();
+                    let path = path.lock().unwrap().clone();
+                    if path == "/events" { let _ = w.send(Message::Text(r#"{"metadata":{"message_type":"session_welcome"},"payload":{"session":{"id":"s1"}}}"#.into())).await; while r.next().await.is_some() {} return; }
+                    while let Some(Ok(Message::Text(t))) = r.next().await {
+                        for line in t.split(|c| c == '\n' || c == '\r').filter(|l| !l.is_empty()) {
+                            if path == "/irc" && line.starts_with("JOIN #chan") {
+                                for l in [":me!me@me.tmi.twitch.tv JOIN #chan", "@badges=;mod=0 :tmi.twitch.tv USERSTATE #chan", "@id=m1;user-id=9;display-name=Viewer;badges= :viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #chan :hello from twitch"] {
+                                    let _ = w.send(Message::Text(format!("{l}\r\n").into())).await;
+                                }
+                            }
+                            if path == "/kick" {
+                                let m: Value = serde_json::from_str(line).unwrap_or(Value::Null);
+                                if m["connect"].is_object() { let _ = w.send(Message::Text(r#"{"id":1,"connect":{"client":"c","ttl":2700,"ping":25}}"#.into())).await; }
+                                if m["subscribe"].is_object() {
+                                    let d = json!({ "id": "k1", "content": "hello from kick", "sender": { "id": 42, "username": "KickFan", "slug": "kickfan", "identity": { "badges": [] } } });
+                                    let msg = json!({ "push": { "channel": "chatrooms.9.v2", "pub": { "data": { "event": "App\\Events\\ChatMessageEvent", "data": d.to_string() } } } });
+                                    let _ = w.send(Message::Text(msg.to_string().into())).await;
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        let asked: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let a2 = asked.clone();
+        set_app_handler(Arc::new(move |_p: &str, ask: Value, answer: Box<dyn FnOnce(Value) + Send>| { a2.lock().unwrap().push(ask.clone()); answer(json!({ "ok": true })); }));
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/modsuite");
+        let code = std::fs::read_to_string(root.join("main.js")).unwrap()
+            .replace("wss://irc-ws.chat.twitch.tv:443", &format!("ws://127.0.0.1:{sp}/irc"))
+            .replace("wss://eventsub.wss.twitch.tv/ws", &format!("ws://127.0.0.1:{sp}/events"))
+            .replace("https://api.twitch.tv/helix/", &format!("http://127.0.0.1:{wp}/helix/"))
+            .replace("https://kick.com/api/v2/", &format!("http://127.0.0.1:{wp}/v2/"))
+            .replace("https://web.kick.com/api/v1/realtime/", &format!("http://127.0.0.1:{wp}/realtime/"))
+            .replace("https://api.kick.com/public/v1/", &format!("http://127.0.0.1:{wp}/v1/"))
+            .replace("(await validate(S().token))", "true");
+        let mut m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        m.hosts.push("127.0.0.1".into());
+        let pkg = core::plugins::Package { manifest: m, code, digest: String::new(), bundled: true };
+        let p = start(&pkg, &json!({ "token": "t", "login": "me", "userId": "1", "twitchClientId": "c", "kickToken": "kt", "kickLogin": "me2", "kickUserId": "8", "watched": { "twitch": "chan", "kick": "chan" } }), rt.handle().clone()).unwrap();
+        let chat = |a: &[Value], plat: &str, text: &str| a.iter().any(|x| x["op"] == "modChat" && x["args"][0]["platform"] == plat && x["args"][0]["text"] == text);
+        let can = |a: &[Value]| a.iter().rev().find(|x| x["op"] == "modState").map(|x| x["args"][0]["can"].clone()).unwrap_or(Value::Null);
+        let until = Instant::now() + Duration::from_secs(12);
+        loop {
+            let a = asked.lock().unwrap().clone();
+            if (chat(&a, "twitch", "hello from twitch") && chat(&a, "kick", "hello from kick") && can(&a) == json!({ "twitch": false, "kick": true })) || Instant::now() > until { break; }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let a = asked.lock().unwrap().clone();
+        // (both chats, as one; whose moderator you are, each platform's own)
+        assert!(chat(&a, "twitch", "hello from twitch") && chat(&a, "kick", "hello from kick"), "{a:#?}");
+        assert_eq!(can(&a), json!({ "twitch": false, "kick": true }), "{a:#?}");
+        let w = a.iter().rev().find(|x| x["op"] == "modState").map(|x| x["args"][0]["watching"].clone()).unwrap();
+        assert_eq!((w["twitch"]["login"].as_str(), w["kick"]["login"].as_str(), w["kick"]["live"].as_bool()), (Some("chan"), Some("chan"), Some(true)), "{w:#?}");
+        // (you were told, naming the platform)
+        assert!(a.iter().any(|x| x["op"] == "modChat" && x["args"][0]["notice"].as_str().is_some_and(|n| n.contains("not a moderator") && n.contains("Twitch chat"))), "{a:#?}");
+        // (a ban on Twitch: refused here, by name, without asking Twitch; on Kick: done)
+        let twitch = rt.block_on(p.call("do", vec![json!({ "do": "ban", "platform": "twitch", "userId": "9", "user": "Viewer" })]));
+        let e = twitch.expect_err("not a moderator on Twitch");
+        assert!(e.contains("not a moderator") && e.contains("Twitch"), "{e}");
+        assert!(!called.lock().unwrap().iter().any(|c| c.contains("/helix/moderation/bans")), "{:?}", called.lock().unwrap());
+        let kick = rt.block_on(p.call("do", vec![json!({ "do": "ban", "platform": "kick", "userId": "42", "user": "KickFan" })])).unwrap();
+        assert_eq!(kick, json!("Banned KickFan on Kick."));
+        assert!(called.lock().unwrap().iter().any(|c| c == "POST /v1/moderation/bans"), "{:?}", called.lock().unwrap());
+        drop(p);
+        stop("modsuite");
+    }
+
     /// Twitch shows as connected as soon as its chat welcomes the chatbot (001), with no message in chat yet;
     /// and with a bot account too, which has its own connection
     #[test]

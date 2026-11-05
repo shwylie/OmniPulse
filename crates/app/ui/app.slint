@@ -144,6 +144,24 @@ export global WEdit {
     callback done(bool);
 }
 
+/// The Mod Suite's page (its web view, as the app places it on this spot): where it is
+export global ModView {
+    in-out property <length> x;
+    in-out property <length> y;
+    in-out property <length> w;
+    in-out property <length> h;
+}
+
+component ModSpot inherits Rectangle {
+    property <length> lx: self.absolute-position.x;
+    property <length> ly: self.absolute-position.y;
+    changed lx => { ModView.x = self.lx; }
+    changed ly => { ModView.y = self.ly; }
+    changed width => { ModView.w = self.width; }
+    changed height => { ModView.h = self.height; }
+    init => { ModView.x = self.lx; ModView.y = self.ly; ModView.w = self.width; ModView.h = self.height; }
+}
+
 /// Where the words' editor goes: told to WEdit as it moves
 component EditSpot inherits Rectangle {
     property <length> lx: self.absolute-position.x;
@@ -218,6 +236,9 @@ export global CamLook {
     in-out property <color> c1;
     in-out property <color> c2;
 }
+/// Someone in your Jam: their name, and whether they're one of your Jam moderators
+export struct JamPerson { name: string, is-mod: bool }
+
 export struct AlertLook { theme: string, c1: color, c2: color, glow: bool, icon: float, transition: string, anim: string, in-widget: bool }
 
 /// The Multichat Overlay's preview: its look as it's set
@@ -6870,13 +6891,13 @@ export component AppWindow inherits Window {
     in property <[string]> nav-ids: ["navDiscover", "navRediscover", "navLikes", "navFavourites", "navSets", "navArtists", "navStats"];
     callback nav-hide(string);
     pure function nav-page(id: string) -> string {
-        return id == "navDiscover" ? "discover" : id == "navRediscover" ? "rediscover" : id == "navLikes" ? "library" : id == "navFavourites" ? "favourites" : id == "navSets" ? "sets" : id == "navArtists" ? "artists" : "stats";
+        return id == "navMod" ? "mod" : id == "navDiscover" ? "discover" : id == "navRediscover" ? "rediscover" : id == "navLikes" ? "library" : id == "navFavourites" ? "favourites" : id == "navSets" ? "sets" : id == "navArtists" ? "artists" : "stats";
     }
     pure function nav-label(id: string) -> string {
-        return id == "navDiscover" ? (root.stream-safe ? "Streamer Mode" : "Discover") : id == "navRediscover" ? "Rediscover" : id == "navLikes" ? "Library" : id == "navFavourites" ? "Favourites" : id == "navSets" ? "Sets & Podcasts" : id == "navArtists" ? "Artists" : "Stats";
+        return id == "navMod" ? "Mod Suite" : id == "navDiscover" ? (root.stream-safe ? "Streamer Mode" : "Discover") : id == "navRediscover" ? "Rediscover" : id == "navLikes" ? "Library" : id == "navFavourites" ? "Favourites" : id == "navSets" ? "Sets & Podcasts" : id == "navArtists" ? "Artists" : "Stats";
     }
     pure function nav-icon(id: string) -> string {
-        return id == "navDiscover" ? Icons.discover : id == "navRediscover" ? Icons.rediscover : id == "navLikes" ? Icons.library : id == "navFavourites" ? Icons.star : id == "navSets" ? Icons.sets : id == "navArtists" ? Icons.person : Icons.stats;
+        return id == "navMod" ? Icons.shield : id == "navDiscover" ? Icons.discover : id == "navRediscover" ? Icons.rediscover : id == "navLikes" ? Icons.library : id == "navFavourites" ? Icons.star : id == "navSets" ? Icons.sets : id == "navArtists" ? Icons.person : Icons.stats;
     }
     pure function nav-active(id: string) -> bool {
         return root.page == root.nav-page(id) || (id == "navDiscover" && root.page == "streamer") || (id == "navArtists" && root.page == "artist");
@@ -6901,6 +6922,9 @@ export component AppWindow inherits Window {
     /// asking to join your Jam, waiting: each let in or declined
     in property <[string]> jam-waiting;
     callback jam-admit(int, bool);
+    // (who's in your Jam, each a Jam moderator or not: they can take songs out and edit your chatbot's actions)
+    in property <[JamPerson]> jam-people;
+    callback jam-mod(int);
     callback jam-clicked();
     callback jam-accept();
     callback jam-decline();
@@ -6922,6 +6946,8 @@ export component AppWindow inherits Window {
     // the first-run setup: shown once, the first time OmniPulse opens (Settings > App & Look > Run Setup Again)
     in-out property <bool> setup-open;
     // (something over the page: the real Stream Widget's web view, which would draw over it, steps aside)
+    // (the Mod Suite's page: covered by the same, the queue aside (it sits beside the page, not over it))
+    out property <bool> mod-covered: root.flow-open || root.setup-open || root.taste-open || root.ks-open || root.tp-open || root.la-open || root.name-open || root.ask-open || root.jam-open || root.viz-full || WEdit.open;
     out property <bool> covered: root.setup-open || root.taste-open || root.ks-open || root.tp-open || root.la-open || root.name-open || root.ask-open || root.jam-open || root.viz-full || root.queue-open || WEdit.open;
     in property <int> setup-at;
     in property <bool> setup-web;
@@ -7568,7 +7594,7 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                    if root.page-kind != "now" && !root.album-head: HorizontalLayout {
+                    if root.page-kind != "now" && root.page-kind != "mod" && !root.album-head: HorizontalLayout {
                         spacing: 14px;
                         // (an artist's picture, as the web app's)
                         if root.page == "artist" && root.page-art-on: VerticalLayout { alignment: center; Rectangle {
@@ -7603,7 +7629,7 @@ export component AppWindow inherits Window {
                         } }
                         Rectangle { horizontal-stretch: 1; }
                     }
-                    if root.page-kind != "now" && !root.album-head && root.page-sub != "": Text { text: root.page-sub; color: Theme.muted; font-size: 14px; wrap: word-wrap; overflow: elide; max-height: 60px; }
+                    if root.page-kind != "now" && root.page-kind != "mod" && !root.album-head && root.page-sub != "": Text { text: root.page-sub; color: Theme.muted; font-size: 14px; wrap: word-wrap; overflow: elide; max-height: 60px; }
                     // an artist's page: where they are, with how many follow them there
                     if root.page == "artist" && root.artist-on.length > 0: HorizontalLayout {
                         alignment: start;
@@ -9083,6 +9109,13 @@ export component AppWindow inherits Window {
                             // (clear of the player's tab, laid over the page's foot: the last of it scrolls up past it)
                             Rectangle { height: 76px; }
                         }
+                    }
+                    // The Mod Suite: its page (a web view the app puts on this spot), and what shows till it's there
+                    if root.page-kind == "mod": ModSpot {
+                        vertical-stretch: 1;
+                        min-height: 300px;
+                        background: Theme.bg;
+                        Text { text: "The Mod Suite is opening..."; color: Theme.muted; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     // Now Playing: the cover, and the lyrics as they're sung
                     if root.page-kind == "now": npl := HorizontalLayout {
@@ -10621,6 +10654,13 @@ export component AppWindow inherits Window {
                             alignment: start;
                             Text { text: "Welcome to OmniPulse"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
                             Text { text: "All your music in one place: SoundCloud, Spotify, YouTube Music and the files on this PC. First, make it yours."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
+                            // (here to moderate: straight to the Mod Suite)
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: 10px;
+                                Text { text: "Here to moderate someone's stream?"; color: Theme.muted; font-size: 13px; vertical-alignment: center; }
+                                Pill { label: "Set Up for Moderating"; d: Icons.shield; clicked => { root.setup-go("stream-mod"); } }
+                            }
                             Text { text: "Your Name"; color: Theme.text; font-weight: 700; }
                             Text { text: "Friends see it when you listen along or Jam. Leave it empty to use your account's name."; color: Theme.muted; font-size: 12px; }
                             Rectangle {
@@ -10803,10 +10843,10 @@ export component AppWindow inherits Window {
                             HorizontalLayout {
                                 spacing: 14px;
                                 alignment: start;
-                                for c in [{ id: "yes", n: "Yes, I stream", t: "Turns on the Stream Suite, and sets up its chatbot next. Coming from Streamer.bot or Mix It Up? You can bring your commands with you.", d: Icons.broadcast }, { id: "no", n: "No, just listening", t: "Nothing to set up. Streaming stays in Settings if you ever want it.", d: Icons.library }]: Rectangle {
-                                    // (wide enough for its words, which fit in four lines)
-                                    width: 300px;
-                                    height: 180px;
+                                for c in [{ id: "yes", n: "Yes, I stream", t: "Turns on the Stream Suite, and sets up its chatbot next. Coming from Streamer.bot or Mix It Up? You can bring your commands with you.", d: Icons.broadcast }, { id: "no", n: "No, just listening", t: "Nothing to set up. Streaming stays in Settings if you ever want it.", d: Icons.library }, { id: "mod", n: "I moderate", t: "Opens the Mod Suite: a channel you moderate, with its stream, chat and your mod tools side by side. Your music stays here too.", d: Icons.shield }]: Rectangle {
+                                    // (wide enough for its words, which fit in five lines)
+                                    width: 250px;
+                                    height: 200px;
                                     border-radius: 16px;
                                     background: sca.has-hover ? Theme.elevated : Theme.panel;
                                     border-width: 1px;
@@ -11397,7 +11437,14 @@ export component AppWindow inherits Window {
                     Pill { label: "Let In"; on: true; clicked => { root.jam-admit(i, true); } }
                     Pill { label: "Decline"; clicked => { root.jam-admit(i, false); } }
                 }
-                Text { text: root.jam-members; color: Theme.text; font-size: 13px; wrap: word-wrap; }
+                if root.jam-people.length == 0: Text { text: root.jam-members; color: Theme.text; font-size: 13px; wrap: word-wrap; }
+                if root.jam-people.length > 0: Text { text: "In the Jam"; color: Theme.text; font-size: 14px; font-weight: 700; }
+                for p[i] in root.jam-people: HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: p.name; color: Theme.text; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                    Pill { label: "Moderator"; on: p.is-mod; tip: p.is-mod ? "A Jam moderator: they can take songs out of your queue and edit your chatbot's actions. Click to take that away." : "Make them a Jam moderator: they can take songs out of your queue and edit your chatbot's actions"; clicked => { root.jam-mod(i); } }
+                }
+                if root.jam-people.length > 0: Text { text: "Everyone in your Jam can add, move and skip songs. Jam moderators can also take songs out and edit your chatbot's actions."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                 HorizontalLayout {
                     alignment: end;
                     spacing: 8px;

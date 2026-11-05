@@ -1,0 +1,29 @@
+{
+  "id": "modsuite",
+  "name": "OmniPulse Mod Suite",
+  "version": "0.1.0",
+  "author": "OmniPulse",
+  "description": "For moderators: watch a channel you moderate, with its stream, its chat and your mod tools side by side. Uses the same Twitch and Kick sign-in as the Stream Suite.",
+  "main": "main.js",
+  "hosts": [
+    "id.twitch.tv",
+    "api.twitch.tv",
+    "irc-ws.chat.twitch.tv",
+    "eventsub.wss.twitch.tv",
+    "*.eventsub.wss.twitch.tv",
+    "kick.com",
+    "web.kick.com",
+    "api.kick.com",
+    "id.kick.com",
+    "*.platform.kick.com",
+    "omnipulse-jam.shwylie101.workers.dev"
+  ],
+  "capabilities": [
+    "sockets",
+    "app"
+  ],
+  "section": "Streaming",
+  "wip": true,
+  "icon": "M12 2 4 5v6c0 5.5 3.4 10.3 8 11.6 4.6-1.3 8-6.1 8-11.6V5l-8-3zm0 4a3 3 0 1 1 0 6 3 3 0 0 1 0-6zm0 14c-2.3-.8-4.2-2.6-5.2-4.9.1-1.7 3.5-2.6 5.2-2.6s5.1.9 5.2 2.6c-1 2.3-2.9 4.1-5.2 4.9z",
+  "settings": []
+}

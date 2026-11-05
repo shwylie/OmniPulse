@@ -13,6 +13,8 @@ const TWITCH_SCOPES_CHANNEL = [
   "channel:manage:polls", "channel:manage:predictions", "channel:manage:redemptions", "channel:edit:commercial",
   "channel:manage:raids", "moderator:manage:chat_settings", "channel:manage:vips", "channel:manage:moderators",
   "moderator:manage:shield_mode", "moderator:read:shield_mode", "user:read:emotes", "moderator:read:chatters",
+  // (the Mod Suite's too, as it shares this sign-in: the channels you moderate, and AutoMod's held messages)
+  "user:read:moderated_channels", "moderator:manage:automod",
 ].join(" ");
 const TWITCH_SCOPES_BOT = "chat:read chat:edit";
 

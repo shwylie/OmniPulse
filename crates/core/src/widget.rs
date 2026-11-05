@@ -381,6 +381,21 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                         let (status, v) = match answer { Ok(m) => ("200 OK", json!({ "ok": true, "message": m })), Err(e) => ("400 Bad Request", json!({ "ok": false, "error": e })) };
                         reply_own(&mut stream, status, "application/json", v.to_string().as_bytes());
                     }
+                    // (the Mod Suite: its page, its state, its chat, and what it asks)
+                    "/mod" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::modsuite::MOD_HTML.as_bytes()),
+                    "/mod/state.json" => reply_own(&mut stream, "200 OK", "application/json", crate::modsuite::state_json().to_string().as_bytes()),
+                    "/mod/chat.json" => {
+                        let after = query_map(query).get("after").and_then(|v| v.as_str().and_then(|a| a.parse().ok())).unwrap_or(0);
+                        reply_own(&mut stream, "200 OK", "application/json", crate::modsuite::chat_json(after).to_string().as_bytes());
+                    }
+                    "/mod/do" => {
+                        let body = req.split_once("\r\n\r\n").map(|x| x.1).unwrap_or("");
+                        let answer = if method != "POST" || !crate::docks::trusted(&req, port) { Err("only OmniPulse's own pages can".to_string()) } else {
+                            serde_json::from_str::<Value>(body).map_err(|_| "that isn't JSON".to_string()).and_then(crate::modsuite::mod_do)
+                        };
+                        let (status, v) = match answer { Ok(m) => ("200 OK", json!({ "ok": true, "message": m })), Err(e) => ("400 Bad Request", json!({ "ok": false, "error": e })) };
+                        reply_own(&mut stream, status, "application/json", v.to_string().as_bytes());
+                    }
                     "/hud" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", HUD_HTML.as_bytes()),
                     "/panels" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", PANELS_HTML.as_bytes()),
                     p if p == "/cam" || p.starts_with("/cam/") => reply(&mut stream, "200 OK", "text/html; charset=utf-8", CAM_HTML.as_bytes()),

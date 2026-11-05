@@ -56,6 +56,10 @@ method it calls with the page's values) runs one of its methods, a sign-in say; 
 docks), made this way. A few calls are kept for it alone and aren't open to other plugins: OBS's docks,
 the Suite's widgets, Show on Stream, speech, web requests outside its manifest, and writing files.
 
+`modsuite/` is the **Mod Suite**, for moderators: a channel you moderate (on Twitch, Kick, or both when the
+streamer multi-streams), its stream, chat and mod tools on one page. It shares the Stream Suite's sign-in,
+and its page's calls (its chat and state) are kept for it alone.
+
 ## manifest.json
 
 ```json

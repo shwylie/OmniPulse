@@ -36,7 +36,8 @@
 const ROOM_IDLE_MS = 12 * 3600 * 1000;   // a room nobody has used for this long goes away
 const HOST_GRACE_MS = 90 * 1000;          // the host gone (their app closed: an update, say) this long: it's over for everyone
 const MAX_LISTENERS = 50;
-const MAX_MESSAGE = 64 * 1024;
+// (a Jam moderator's copy of the streamer's chatbot actions can be big)
+const MAX_MESSAGE = 512 * 1024;
 // asking to join: each app (by its id) has one request waiting at a time, a network at most two,
 // a room at most ten; someone declined can't ask again in that room
 const MAX_WAITING = 10;
@@ -528,9 +529,16 @@ export class Room {
 
   // (gone: a socket that's closing is still listed while its close is handled, so it's left out)
   sendMembers(gone) {
-    const list = this.listeners().filter((w) => w !== gone).map((w) => (w.deserializeAttachment() || {}).name || "A listener");
+    const here = this.listeners().filter((w) => w !== gone).map((w) => w.deserializeAttachment() || {});
+    const list = here.map((x) => x.name || "A listener");
     const msg = JSON.stringify({ type: "members", list });
-    this.ctx.getWebSockets().forEach((w) => { if (w !== gone) { try { w.send(msg); } catch (e) {} } });
+    // (the host also gets each one's app id, to tell them apart (their Jam moderators): never the listeners)
+    const forHost = JSON.stringify({ type: "members", list, people: here.map((x) => ({ name: x.name || "A listener", cid: x.cid || "" })) });
+    this.ctx.getWebSockets().forEach((w) => {
+      if (w === gone) return;
+      const role = (w.deserializeAttachment() || {}).role;
+      try { w.send(role === "host" ? forHost : msg); } catch (e) {}
+    });
   }
 
   async touch() {
@@ -569,6 +577,10 @@ export class Room {
           try { w.send(JSON.stringify(msg)); w.close(1000, "answered"); } catch (e) {}
         });
         await this.ctx.storage.put("meta", meta);
+      } else if (m.type === "to" && typeof m.cid === "string" && m.msg && typeof m.msg === "object" && ["role", "actions", "said"].includes(m.msg.type)) {
+        // (the host to one member: whether they're a Jam moderator, the chatbot's actions they asked for, or a word)
+        const msg = JSON.stringify(m.msg);
+        this.listeners().forEach((w) => { if ((w.deserializeAttachment() || {}).cid === m.cid) { try { w.send(msg); } catch (e) {} } });
       } else if (m.type === "end") {
         const msg = JSON.stringify({ type: "ended" });
         this.listeners().forEach((w) => { try { w.send(msg); w.close(1000, "ended"); } catch (e) {} });
@@ -579,17 +591,26 @@ export class Room {
     // a Jam member adding a song: passed to the host, who adds it
     const meta = await this.meta();
     if (m.type === "add" && meta && meta.kind === "jam" && m.track && typeof m.track === "object") {
-      const msg = JSON.stringify({ type: "add", track: m.track, next: !!m.next, by: who.name || "A listener" });
+      const msg = JSON.stringify({ type: "add", track: m.track, next: !!m.next, by: who.name || "A listener", cid: who.cid || "" });
       this.ctx.getWebSockets("host").forEach((w) => { try { w.send(msg); } catch (e) {} });
     }
     // ...or moving one in the queue (its id, to its new place after what's playing)
     if (m.type === "move" && meta && meta.kind === "jam" && typeof m.id === "string") {
-      const msg = JSON.stringify({ type: "move", id: m.id.slice(0, 200), to: Math.max(1, Math.min(200, Number(m.to) || 1)), by: who.name || "A listener" });
+      const msg = JSON.stringify({ type: "move", id: m.id.slice(0, 200), to: Math.max(1, Math.min(200, Number(m.to) || 1)), by: who.name || "A listener", cid: who.cid || "" });
       this.ctx.getWebSockets("host").forEach((w) => { try { w.send(msg); } catch (e) {} });
     }
     // ...or skipping (back or on): the host's player does it, for everyone
     if (m.type === "skip" && meta && meta.kind === "jam") {
-      const msg = JSON.stringify({ type: "skip", d: m.d === -1 ? -1 : 1, by: who.name || "A listener" });
+      const msg = JSON.stringify({ type: "skip", d: m.d === -1 ? -1 : 1, by: who.name || "A listener", cid: who.cid || "" });
+      this.ctx.getWebSockets("host").forEach((w) => { try { w.send(msg); } catch (e) {} });
+    }
+    // ...or, a Jam moderator's: a song taken out, the chatbot's actions asked for, or changed (the host's app checks
+    // they're one of its Jam moderators, by their app id)
+    if (meta && meta.kind === "jam" && (m.type === "remove" || m.type === "actionsGet" || m.type === "actionsSet")) {
+      const out = { type: m.type, by: who.name || "A listener", cid: who.cid || "" };
+      if (m.type === "remove" && typeof m.id === "string") out.id = m.id.slice(0, 200);
+      if (m.type === "actionsSet" && Array.isArray(m.actions)) out.actions = m.actions;
+      const msg = JSON.stringify(out);
       this.ctx.getWebSockets("host").forEach((w) => { try { w.send(msg); } catch (e) {} });
     }
   }
