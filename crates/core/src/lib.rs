@@ -136,6 +136,13 @@ pub fn open_browser(url: &str) -> Result<(), String> {
     if let Some(f) = OPENER.lock().unwrap().as_ref() {
         return f(url);
     }
+    // (Windows: the link handed to whatever opens web links, by its protocol. Not Explorer, nor anything that goes
+    // through it: given a long address (a sign-in's, with all its permissions) it opens a folder instead)
+    #[cfg(all(feature = "desktop", windows))]
+    if url.starts_with("https://") || url.starts_with("http://") {
+        use std::os::windows::process::CommandExt;
+        return std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).creation_flags(0x0800_0000).spawn().map(|_| ()).map_err(|e| e.to_string());
+    }
     #[cfg(feature = "desktop")]
     return opener::open(url).map_err(|e| e.to_string());
     #[cfg(not(feature = "desktop"))]

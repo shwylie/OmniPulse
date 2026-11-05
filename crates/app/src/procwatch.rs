@@ -161,6 +161,8 @@ pub fn open(target: &str, args: &str) -> Result<(), String> {
     let web = t.starts_with("http://") || t.starts_with("https://");
     if !web && !std::path::Path::new(t).exists() { return Err(format!("there's no {t} on this PC")); }
     let program = !web && t.to_lowercase().ends_with(".exe");
+    // (a web address: by the browser's own way in, never Explorer, which opens a folder for a long one)
+    if web { return omnipulse_core::open_browser(t); }
     let r = if program {
         let mut c = std::process::Command::new(t);
         c.args(args.split_whitespace());
