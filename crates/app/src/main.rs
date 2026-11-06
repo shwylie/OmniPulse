@@ -4782,6 +4782,7 @@ fn flow_req_paint(shared: &Shared) {
 /// One of them changed there: kept at once, and the running chatbot told (nothing to restart for)
 fn flow_req_set(shared: &Shared, key: &str, v: &str) {
     let key = botpage::key_of(key).to_string();
+    if req_pref_set(shared, &key, v) { if v == "true" || v == "false" { flow_req_paint(shared); } return; }
     let manifest = bot_manifest().map(|m| m.settings).unwrap_or_default();
     let value = botpage::value_of(&manifest, &key, v);
     bot_keep(shared, &key, value.clone());
@@ -7388,7 +7389,25 @@ fn bot_manifest() -> Option<omnipulse_core::plugins::Manifest> {
 fn bot_current(shared: &Shared) -> serde_json::Map<String, serde_json::Value> {
     let saved = bot_manifest().map(|m| plugrun::settings_of(&m, &shared.borrow().web.prefs)).and_then(|v| v.as_object().cloned()).unwrap_or_default();
     let edit = PF_EDIT.with(|e| e.borrow().as_ref().filter(|(id, _)| id == botpage::BOT).map(|(_, v)| v.clone())).unwrap_or_default();
-    PF_ORIG.with(|o| botpage::current(&saved, &edit, &o.borrow()))
+    let mut cur = PF_ORIG.with(|o| botpage::current(&saved, &edit, &o.borrow()));
+    // (Song Requests' own: the app's settings for which songs and how many, shown on its page with the rest)
+    for k in REQ_PREFS { let v = shared.borrow().web.prefs[k].clone(); if !v.is_null() { cur.insert(format!("pref_{k}"), v); } else { cur.remove(&format!("pref_{k}")); } }
+    cur
+}
+
+/// The app's own settings shown on Song Requests' page in the Suite (as "pref_<name>")
+const REQ_PREFS: [&str; 5] = ["reqRadioEdit", "reqNoAi", "reqLimits", "reqMax", "reqPerUser"];
+
+/// One of them changed there: kept at once (a number within what it can be). Whether it was one
+fn req_pref_set(shared: &Shared, key: &str, v: &str) -> bool {
+    let Some(k) = key.strip_prefix("pref_").filter(|k| REQ_PREFS.contains(k)) else { return false };
+    let value = match k {
+        "reqMax" => match v.trim().parse::<i64>() { Ok(n) => serde_json::json!(n.clamp(1, 50)), Err(_) => return true },
+        "reqPerUser" => match v.trim().parse::<i64>() { Ok(n) => serde_json::json!(n.clamp(1, 10)), Err(_) => return true },
+        _ => serde_json::json!(v == "true"),
+    };
+    pref_put(shared, k, value);
+    true
 }
 
 fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
@@ -7696,6 +7715,7 @@ const PANEL_TPL_KEYS: [&str; 15] = ["panelTheme", "panelShape", "panelHeight", "
 
 fn bot_set(shared: &Shared, key: &str, v: &str) {
     let key = botpage::key_of(key).to_string();
+    if req_pref_set(shared, &key, v) { if v == "true" || v == "false" { bot_paint(shared); } return; }
     // (a theme's font: "theme:font" picked, or typed (any Google Font), kept in themeFonts for that theme)
     if key == "fontPick" || key == "fontCustom" {
         let cur = bot_current(shared);

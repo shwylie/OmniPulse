@@ -921,7 +921,17 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 f("number", "srCooldown", "Wait between requests", "Seconds before the same viewer can request again. 0 for no wait.", &n(cur, "srCooldown"), "0"),
             ];
             if on(cur, "pointsOn", false) { v.push(f("number", "srCost", "Points per request", "Taken when the song is added. 0 for free.", &n(cur, "srCost"), "0")); }
-            v.push(f("link", "", "Which songs, limits and replies", "Radio edits, keeping out AI music, how many can wait, and what's said back in chat.", "", "row-more:req"));
+            // (which songs, and how many: here with the rest, not a page away. They're the app's own settings
+            // (pref_...), kept as you change them)
+            v.push(f("head", "", "Which Songs", "", "", ""));
+            v.push(f("toggle", "pref_reqRadioEdit", "Prefer Radio Edits", "Plays a long song's radio edit, if there is one.", if on(cur, "pref_reqRadioEdit", false) { "true" } else { "false" }, ""));
+            v.push(f("toggle", "pref_reqNoAi", "Keep Out AI Music", "Requests never play AI-made music: artists on Soul Over AI's list of confirmed AI artists, and anything whose title or artist says it's AI, like Suno, Udio or an \"AI cover\".", if on(cur, "pref_reqNoAi", false) { "true" } else { "false" }, ""));
+            v.push(f("head", "", "Limits", "", "", ""));
+            v.push(f("toggle", "pref_reqLimits", "Limit Requests", "The most songs waiting, and the most per viewer. When this is off, chat can request as many songs as it likes.", if on(cur, "pref_reqLimits", true) { "true" } else { "false" }, ""));
+            if on(cur, "pref_reqLimits", true) {
+                v.push(f("number", "pref_reqMax", "Most Waiting", "How many requests can wait at once (1 to 50).", &n(cur, "pref_reqMax"), "10"));
+                v.push(f("number", "pref_reqPerUser", "Most per Viewer", "How many of one viewer's can wait at once (1 to 10).", &n(cur, "pref_reqPerUser"), "2"));
+            }
             v
         }),
         // (the Suite's widgets: where each goes in OBS, then how it's set; Try It sends a pretend one)
@@ -1269,12 +1279,17 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
 pub fn steps(cur: &Map<String, Value>) -> Vec<(&'static str, String, String, bool, bool)> {
     let tw = s(cur, "login");
     let kk = s(cur, "kickLogin");
+    let yt = on(cur, "ytOn", false) && !s(cur, "ytChannel").is_empty();
+    // (the streaming apps connected, by name)
+    let app = [("OBS", on(cur, "obsOn", false)), ("Meld Studio", on(cur, "meldOn", false)), ("Streamlabs Desktop", on(cur, "slobsOn", false) && !s(cur, "slobsToken").is_empty())].iter().filter(|x| x.1).map(|x| x.0).collect::<Vec<_>>().join(" and ");
     vec![
-        ("twitch", "Your Twitch channel".into(), if tw.is_empty() { "Connect the channel you stream on. Only stream on Kick? Skip this.".into() } else { format!("Signed in as {tw}") }, !tw.is_empty(), true),
+        ("twitch", "Your Twitch channel".into(), if tw.is_empty() { "Connect the channel you stream on. Only stream on Kick or YouTube? Skip this.".into() } else { format!("Signed in as {tw}") }, !tw.is_empty(), true),
         ("twitchbot", "A bot account for Twitch".into(), if s(cur, "botLogin").is_empty() { "Optional. A second account that posts the chatbot's replies.".into() } else { format!("{} posts the replies", s(cur, "botLogin")) }, !s(cur, "botLogin").is_empty(), true),
         ("kick", "Kick".into(), if kk.is_empty() { "Optional. Connect your Kick chat too.".into() } else { format!("Signed in as {kk}") }, !kk.is_empty(), true),
         ("kickbot", "A bot account for Kick".into(), if s(cur, "kickBotLogin").is_empty() { "Optional. A second Kick account that posts the replies.".into() } else { format!("{} posts the replies", s(cur, "kickBotLogin")) }, !s(cur, "kickBotLogin").is_empty(), true),
-        ("obs", "OBS".into(), if on(cur, "obsOn", false) { "Connected to OBS.".into() } else { "Optional. Lets your actions change scenes and sources.".into() }, on(cur, "obsOn", false), true),
+        ("youtube", "YouTube".into(), if yt { format!("Reading {}'s live chat", s(cur, "ytChannel")) } else { "Optional. Read your YouTube live chat too. No sign-in needed.".into() }, yt, true),
+        // (kept as "obs": what's skipped is remembered by it)
+        ("obs", "Your streaming software".into(), if app.is_empty() { "Optional. OBS, Meld Studio or Streamlabs Desktop. Lets your actions change scenes and sources.".into() } else { format!("Connected to {app}.") }, !app.is_empty(), true),
         ("import", "Coming from another bot?".into(), if on(cur, "imported", false) { "Your commands and actions came across.".into() } else { "Optional. Bring your commands and actions from Streamer.bot or Mix It Up.".into() }, on(cur, "imported", false), true),
         ("features", "Choose what it does".into(), "Song requests, alerts and points. You can add games, timers and more in Actions later.".into(), on(cur, "setupDone", false), false),
     ]
@@ -1291,7 +1306,8 @@ pub fn step_fields(id: &str, cur: &Map<String, Value>) -> Vec<Field> {
             v.extend(sheet(plat, cur).1.into_iter().filter(|x| x.key == format!("{plat}:bot")));
             v
         }
-        "obs" => sheet("obs", cur).1,
+        "youtube" => sheet("youtube", cur).1,
+        "obs" => sheet("software", cur).1,
         "import" => sheet("import", cur).1,
         "features" => vec![
             f("toggle", "requests", "Song requests", "Viewers can ask for songs with !sr.", if on(cur, "requests", true) { "true" } else { "false" }, ""),
@@ -1508,7 +1524,11 @@ mod tests {
         let st = steps(&cur);
         assert_eq!(step_state(&cur, "twitch", st[0].3, "kick"), "done");
         assert_eq!(step_state(&cur, "twitchbot", st[1].3, "kick"), "skipped");
-        assert_eq!(step_state(&cur, "obs", st[4].3, "kick"), "todo");
+        assert_eq!(step_state(&cur, "obs", st[5].3, "kick"), "todo");
+        assert_eq!(st[5].0, "obs");
+        // (any of the streaming apps counts, and YouTube once it has a channel)
+        let st = steps(&m(json!({ "meldOn": true, "ytOn": true, "ytChannel": "@me" })));
+        assert!(st[4].3 && st[5].3 && st[5].2.contains("Meld Studio"));
     }
 
     #[test]
