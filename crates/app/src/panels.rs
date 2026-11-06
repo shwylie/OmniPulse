@@ -859,8 +859,10 @@ pub fn plug_access(m: &omnipulse_core::plugins::Manifest) -> (Vec<String>, Vec<S
     if caps.contains("sockets") { can.push("Keep live connections open to its sites (a chat, its events)".into()); }
     if caps.contains("app") { warn.push("Lets the plugin use the app: add songs to your queue as requests, show alerts, read what's playing, open its sign-in pages in your browser, and keep its own settings. Only allow this for plugins you trust.".into()); }
     if !web.is_empty() { can.push(format!("Connect to {}", web.join(", "))); }
-    if !local.is_empty() { warn.push(format!("It can connect to programs running on this PC ({}). Only allow this if you know what it talks to.", local.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "))); }
     let sets = m.settings.as_array().cloned().unwrap_or_default();
+    let typed: Vec<String> = m.host_settings.iter().map(|k| sets.iter().find(|s| s["key"] == *k).and_then(|s| s["label"].as_str()).unwrap_or(k).to_string()).collect();
+    if !typed.is_empty() { can.push(format!("Connect to the site whose address you type into its settings ({}), https only", typed.join(", "))); }
+    if !local.is_empty() { warn.push(format!("It can connect to programs running on this PC ({}). Only allow this if you know what it talks to.", local.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "))); }
     if sets.iter().any(|x| x["type"] == "password") { can.push("Saves a password or key you give it on this PC. The plugin can send it to the sites above.".into()); }
     else if !sets.is_empty() { can.push("Keep its own settings, on this PC".into()); }
     cannot.push(if m.hosts.is_empty() { "Connect to the internet".into() } else { "Connect to any other site".into() });

@@ -83,6 +83,8 @@ and its page's calls (its chat and state) are kept for it alone.
 
 - `id`: lower-case letters, digits and dashes.
 - `hosts`: site names, optionally `*.` for their subdomains. Only https (or http to 127.0.0.1).
+- `hostSettings` (optional): keys of `text` settings that hold an address of a site of the user's own (a
+  server they run, say); its host is allowed as `hosts` are, https only, and named before the plugin's added.
 - `icon`: SVG path data for a 24x24 icon.
 - `settings` types: `text`, `password`, `number`, `toggle`, `select` (with `"options"`: its values), and
   `button` (see above). Each can have a `"note"`, shown under it, and a `"default"`. They show under the
@@ -107,7 +109,7 @@ OmniPulse.register({
   },
   // required: a playable address for one of them (any format the app's player takes: MP3, AAC, FLAC, Ogg, Opus, WAV)
   async resolve(track) {
-    return { url: "https://cdn.example.com/stream/" + track.id };
+    return { url: "https://cdn.example.com/stream/" + track.id, ext: "flac" };   // ext: optional, when the address doesn't end in the file's name
   },
   // optional: your saved songs there, for the Library
   async library() { return []; },

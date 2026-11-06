@@ -36,6 +36,10 @@ pub struct Manifest {
     pub main: String,
     #[serde(default)]
     pub hosts: Vec<String>,
+    /// the keys of text settings whose value is an address of its own site too (a server of yours, say):
+    /// its host is reached as the manifest's are, https only; shown before the plugin's added
+    #[serde(default, rename = "hostSettings")]
+    pub host_settings: Vec<String>,
     #[serde(default)]
     pub capabilities: Vec<String>,
     #[serde(default)]
@@ -141,7 +145,29 @@ pub fn check_manifest(m: &Manifest) -> Result<(), String> {
     if m.icon.len() > 4000 {
         return Err("The plugin's icon is too big.".into());
     }
+    for k in &m.host_settings {
+        let is_text = m.settings.as_array().into_iter().flatten().any(|s| s["key"] == *k && s["type"].as_str().unwrap_or("text") == "text");
+        if !is_text {
+            return Err(format!("\"{k}\" (hostSettings) isn't one of its text settings."));
+        }
+    }
     Ok(())
+}
+
+/// The sites a plugin may reach with these settings: its manifest's, and the host of each address typed
+/// into a setting its manifest names (hostSettings), https only (or this PC)
+pub fn hosts_with(m: &Manifest, settings: &Value) -> Vec<String> {
+    let mut hosts = m.hosts.clone();
+    for k in &m.host_settings {
+        let Some(v) = settings[k].as_str().map(str::trim).filter(|v| !v.is_empty()) else { continue };
+        let Ok(u) = reqwest::Url::parse(v) else { continue };
+        let Some(host) = u.host_str().map(|h| h.to_ascii_lowercase()) else { continue };
+        let local = host == "127.0.0.1" || host == "localhost";
+        if (u.scheme() == "https" || (u.scheme() == "http" && local)) && !hosts.contains(&host) {
+            hosts.push(host);
+        }
+    }
+    hosts
 }
 
 /// Whether a plugin may reach this address: https (or http on this PC), to one of its sites
@@ -424,6 +450,18 @@ mod tests {
         assert!(!host_allowed(&hosts, "https://evilarchive.org/x"));
         assert!(!host_allowed(&hosts, "https://api.soundcloud.com/me"));
         assert!(!host_allowed(&hosts, "file:///C:/Users"));
+        // (a site typed into a named setting: reached too, https only)
+        let mut m = m("idx", &["api.example.com"]);
+        m.host_settings = vec!["indexUrl".into()];
+        m.settings = serde_json::json!([{ "key": "indexUrl", "type": "text" }]);
+        assert!(check_manifest(&m).is_ok());
+        assert_eq!(hosts_with(&m, &serde_json::json!({ "indexUrl": "https://My.Example.com:8443/api/search?x=1" })), vec!["api.example.com".to_string(), "my.example.com".into()]);
+        assert_eq!(hosts_with(&m, &serde_json::json!({ "indexUrl": "http://my.example.com/api" })), vec!["api.example.com".to_string()]);
+        assert_eq!(hosts_with(&m, &serde_json::json!({ "indexUrl": "http://127.0.0.1:9117/api" })), vec!["api.example.com".to_string(), "127.0.0.1".into()]);
+        assert_eq!(hosts_with(&m, &serde_json::json!({})), vec!["api.example.com".to_string()]);
+        m.host_settings = vec!["apiKey".into()];
+        m.settings = serde_json::json!([{ "key": "apiKey", "type": "password" }]);
+        assert!(check_manifest(&m).is_err());
         assert!(host_allowed(&["127.0.0.1".to_string()], "http://127.0.0.1:9/x"));
     }
 

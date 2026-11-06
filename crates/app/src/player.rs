@@ -68,8 +68,11 @@ pub async fn open_source(t: &Track, rt: tokio::runtime::Handle) -> Result<Box<dy
             if !core::plugins::host_allowed(&p.hosts, &url) {
                 return Err(format!("{} may only play from {}", p.name, p.hosts.join(", ")));
             }
+            // (the format: as the plugin says, else from the address's end)
+            let known = |e: &str| ["mp3", "flac", "m4a", "ogg", "wav", "aac", "opus"].contains(&e);
+            let said = r["ext"].as_str().unwrap_or("").trim_start_matches('.').to_lowercase();
             let ext = url.split(['?', '#']).next().unwrap_or("").rsplit('.').next().unwrap_or("mp3").to_lowercase();
-            let ext = if ["mp3", "flac", "m4a", "ogg", "wav", "aac", "opus"].contains(&ext.as_str()) { ext } else { "mp3".to_string() };
+            let ext = if known(&said) { said } else if known(&ext) { ext } else { "mp3".to_string() };
             tokio::task::spawn_blocking(move || omnipulse_audio::open_url(&url, &ext).map(|d| Box::new(d) as Box<dyn Source>)).await.map_err(|e| e.to_string())?
         }
         Src::Local(path) => {

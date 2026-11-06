@@ -163,14 +163,15 @@ pub fn start(pkg: &core::plugins::Package, settings: &Value, rt: tokio::runtime:
     stop(&id);
     let (jobs, inbox) = std::sync::mpsc::channel::<Msg>();
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<Vec<String>, String>>();
-    let caps = Caps { sockets: pkg.manifest.capabilities.iter().any(|c| c == "sockets"), app: pkg.manifest.capabilities.iter().any(|c| c == "app"), hosts: pkg.manifest.hosts.clone() };
+    let hosts = core::plugins::hosts_with(&pkg.manifest, settings);
+    let caps = Caps { sockets: pkg.manifest.capabilities.iter().any(|c| c == "sockets"), app: pkg.manifest.capabilities.iter().any(|c| c == "app"), hosts: hosts.clone() };
     let (code, settings, pid, tx) = (pkg.code.clone(), settings.to_string(), id.clone(), jobs.clone());
     std::thread::Builder::new()
         .name(format!("plugin {id}"))
         .spawn(move || run(pid, code, settings, caps, rt, tx, inbox, ready_tx))
         .map_err(|e| e.to_string())?;
     let methods = ready_rx.recv_timeout(Duration::from_secs(CALL_SECS)).map_err(|_| "it took too long to start".to_string())??;
-    let p = Arc::new(Plugin { id: id.clone(), name: pkg.manifest.name.clone(), hosts: pkg.manifest.hosts.clone(), methods, jobs });
+    let p = Arc::new(Plugin { id: id.clone(), name: pkg.manifest.name.clone(), hosts, methods, jobs });
     RUNNING.lock().unwrap().get_or_insert_with(HashMap::new).insert(id, p.clone());
     // (a plugin that runs on its own, a chatbot: started once it's in)
     if p.can("start") {
