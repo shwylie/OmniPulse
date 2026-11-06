@@ -342,11 +342,7 @@
       "note": "How the Suite's widgets look."
     },
     { "key": "streamApp", "label": "Your Streaming Software", "type": "select", "default": "", "options": ["", "obs", "meld", "slobs"] },
-    {"key": "camSpot", "label": "Where Your Camera Is", "type": "select", "default": "br", "options": ["br", "bl", "tr", "tl", "custom"]},
-    {"key": "camX", "label": "Camera Across (%)", "type": "number", "default": 72},
-    {"key": "camY", "label": "Camera Down (%)", "type": "number", "default": 62},
-    {"key": "camW", "label": "Camera Width (%)", "type": "number", "default": 26},
-    {"key": "camH", "label": "Camera Height (%)", "type": "number", "default": 34},
+    {"key": "camRatio", "label": "Your Camera's Shape", "type": "select", "default": "wide", "options": ["wide", "classic", "square", "tall"]},
     {"key": "camShape", "label": "Frame Shape", "type": "select", "default": "rounded", "options": ["rounded", "square", "circle", "hex", "arch"]},
     {"key": "camBorder", "label": "Frame Border", "type": "select", "default": "glow", "options": ["thin", "thick", "double", "glow", "neon", "gradient", "duo", "brackets", "edge", "dashed", "dotted", "comic", "glass"]},
     {"key": "camThick", "label": "Frame Line", "type": "select", "default": "normal", "options": ["thin", "normal", "thick", "heavy"]},

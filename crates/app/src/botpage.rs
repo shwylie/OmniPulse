@@ -39,7 +39,7 @@ thread_local! {
 }
 
 /// The webcam overlay's setup, step by step
-pub const CAM_STEPS: [&str; 6] = ["Your Camera", "Frame", "Look", "What's On It", "Arrange", "Add to OBS"];
+pub const CAM_STEPS: [&str; 3] = ["Frame", "Round Your Camera", "Add to OBS"];
 
 /// A setting that changes only how widgets look or behave: taken by the running Suite as it's saved, no
 /// restart. Anything to do with an account, a connection, a sign-in, commands or actions isn't
@@ -236,27 +236,70 @@ pub const CAM_SIDES: [(&str, &str); 6] = [("above", "Above"), ("below", "Below")
 pub struct CamPart { pub id: String, pub name: String, pub label: String, pub x: f32, pub y: f32, pub w: f32, pub h: f32, pub place: String }
 
 /// The webcam overlay laid out: the camera first, then each part that's on; the parts moved to the other side
-/// for want of room (name, the side they went to); and the parts that still overlap (two names; the camera's
-/// "your camera"; a part off the canvas's edge, its name and "")
+/// for want of room (name, the side they went to); the parts that still overlap (two names; the camera's
+/// "your camera"; a part off the canvas's edge, its name and ""); and the overlay's own size (cam_laid's)
 #[derive(Clone, Debug, Default)]
-pub struct CamArranged { pub parts: Vec<CamPart>, pub moved: Vec<(String, String)>, pub overlaps: Vec<(String, String)> }
+#[allow(dead_code)]
+pub struct CamArranged { pub parts: Vec<CamPart>, pub moved: Vec<(String, String)>, pub overlaps: Vec<(String, String)>, pub w: f32, pub h: f32 }
 
-/// The webcam overlay laid out as cam.html lays it out (the two kept the same), on a 1920 × 1080 canvas. Parts
-/// sharing a side are stacked (one after another, out from the camera) or side by side, as that side's flow is
-/// set ("auto" picks stacked if there's room for it); a side without the room for its parts has them moved to the
-/// other side if there's room there; each side's parts are kept on the canvas together
-pub fn cam_arrange(cur: &Map<String, Value>) -> CamArranged {
-    let num = |k: &str, d: f32| cur.get(k).and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).map(|v| v as f32).unwrap_or(d);
+/// The shapes a camera can have: (id, name, its size in the overlay's own pixels). The overlay is one source,
+/// as big as the camera and what's round it; in OBS it's moved and resized like any source, so there's no
+/// place for it to be set here
+pub const CAM_RATIOS: [(&str, &str, f32, f32); 4] = [("wide", "Widescreen", 640.0, 360.0), ("classic", "Classic 4:3", 600.0, 450.0), ("square", "Square", 480.0, 480.0), ("tall", "Tall", 405.0, 720.0)];
+/// The room the overlay's laid out in (more than any set of parts takes), and the room kept round it for a
+/// frame's glow and extras. cam.html has the same two
+const CAM_ROOM: f32 = 6000.0;
+const CAM_MARGIN: f32 = 36.0;
+
+pub fn cam_ratio(id: &str) -> (f32, f32) {
+    CAM_RATIOS.iter().find(|r| r.0 == id).map_or((CAM_RATIOS[0].2, CAM_RATIOS[0].3), |r| (r.2, r.3))
+}
+
+/// The overlay laid out as cam.html's layout() does (the two kept the same): round a camera of this size with
+/// all the room it wants, then cut down to what's used and a margin, so the camera and every part are where
+/// they'll be in the source, and `w` x `h` is the source's size
+pub fn cam_laid(rw: f32, rh: f32, parts: &[(String, String, String, String)], flows: &[(String, String)]) -> CamArranged {
+    let (cx, cy) = (((CAM_ROOM - rw) / 2.0).round(), ((CAM_ROOM - rh) / 2.0).round());
+    let mut a = cam_arrange_px(CAM_ROOM, CAM_ROOM, (cx, cy, rw, rh), parts, flows);
+    let (x0, y0) = a.parts.iter().fold((f32::MAX, f32::MAX), |m, p| (m.0.min(p.x), m.1.min(p.y)));
+    let (x1, y1) = a.parts.iter().fold((f32::MIN, f32::MIN), |m, p| (m.0.max(p.x + p.w), m.1.max(p.y + p.h)));
+    let (ox, oy) = ((x0 - CAM_MARGIN).floor(), (y0 - CAM_MARGIN).floor());
+    for p in a.parts.iter_mut() { p.x -= ox; p.y -= oy; }
+    a.w = ((x1 + CAM_MARGIN - ox) / 2.0).ceil() * 2.0;
+    a.h = ((y1 + CAM_MARGIN - oy) / 2.0).ceil() * 2.0;
+    a
+}
+
+/// The overlay as its page takes it (the chatbot's camOverlay, kept the same): for its preview in the app, from
+/// the settings as they are on the page, saved or not. `colors` none: the app theme's two
+pub fn cam_config(cur: &Map<String, Value>, colors: Option<(String, String)>) -> Value {
     let or = |k: &str, d: &str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
-    let (bx, by, bw, bh) = match or("camSpot", "br").as_str() {
-        "bl" => (2.0, 62.0, 26.0, 34.0), "tr" => (72.0, 4.0, 26.0, 34.0), "tl" => (2.0, 4.0, 26.0, 34.0),
-        "custom" => (num("camX", 72.0), num("camY", 62.0), num("camW", 26.0), num("camH", 34.0)),
-        _ => (72.0, 62.0, 26.0, 34.0),
-    };
+    let theme = or("camTheme", "dark");
+    let font = serde_json::from_str::<Value>(s(cur, "themeFonts")).ok().and_then(|m| m[&theme].as_str().map(String::from)).unwrap_or_default();
+    let name = if s(cur, "camNameText").is_empty() { if s(cur, "login").is_empty() { "Your Name".to_string() } else { s(cur, "login").to_string() } } else { s(cur, "camNameText").to_string() };
+    json!({
+        "id": "main", "kind": "cam", "ratio": or("camRatio", "wide"),
+        "shape": or("camShape", "rounded"), "border": or("camBorder", "glow"), "theme": theme, "thick": or("camThick", "normal"), "anim": or("camAnim", "none"),
+        "decor": or("camDecor", "none"), "shadow": on(cur, "camShadow", false), "tagAnim": or("camTagAnim", "none"), "enter": or("camEnter", "none"),
+        "colors": colors.map(|(a, b)| json!({ "c1": a, "c2": b })), "font": font,
+        "flows": CAM_SIDES.iter().map(|(k, _)| (k.to_string(), json!(or(&format!("camFlow_{k}"), "auto")))).collect::<Map<String, Value>>(),
+        "parts": CAM_PARTS.iter().filter(|p| on(cur, &format!("camP_{}", p.0), p.2)).map(|(id, _, _, place, size)| json!({
+            "type": id, "place": or(&format!("camP_{id}Place"), place), "size": or(&format!("camP_{id}Size"), size),
+            "text": if *id == "name" { name.clone() } else { String::new() }, "img": if *id == "sticker" { s(cur, "camStickerImg").to_string() } else { String::new() },
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// The webcam overlay laid out as cam.html lays it out (the two kept the same): the camera in its shape, each
+/// part that's on round it, in the overlay's own pixels (see cam_laid). Parts sharing a side are stacked (one
+/// after another, out from the camera) or side by side, as that side's flow is set ("auto": stacked)
+pub fn cam_arrange(cur: &Map<String, Value>) -> CamArranged {
+    let or = |k: &str, d: &str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
+    let (rw, rh) = cam_ratio(&or("camRatio", "wide"));
     let parts: Vec<(String, String, String, String)> = CAM_PARTS.iter().filter(|p| on(cur, &format!("camP_{}", p.0), p.2))
         .map(|(id, name, _, place, size)| (id.to_string(), name.to_string(), or(&format!("camP_{id}Place"), place), or(&format!("camP_{id}Size"), size))).collect();
     let flows: Vec<(String, String)> = CAM_SIDES.iter().map(|(k, _)| (k.to_string(), or(&format!("camFlow_{k}"), "auto"))).collect();
-    let mut a = cam_arrange_in(1920.0, 1080.0, (bx, by, bw, bh), &parts, &flows);
+    let mut a = cam_laid(rw, rh, &parts, &flows);
     for p in a.parts.iter_mut().filter(|p| p.id == "name") { p.label = or("camNameText", "Your Name"); }
     a
 }
@@ -264,7 +307,12 @@ pub fn cam_arrange(cur: &Map<String, Value>) -> CamArranged {
 /// The layout itself (see cam_arrange): the canvas's size, the camera's box (percent of it), the parts on
 /// (id, name, place, size), and each side's flow ("row", "column" or "auto")
 pub fn cam_arrange_in(cw: f32, ch: f32, cam: (f32, f32, f32, f32), parts: &[(String, String, String, String)], flows: &[(String, String)]) -> CamArranged {
-    let (bx, by, bw, bh) = (cam.0 / 100.0 * cw, cam.1 / 100.0 * ch, cam.2 / 100.0 * cw, cam.3 / 100.0 * ch);
+    cam_arrange_px(cw, ch, (cam.0 / 100.0 * cw, cam.1 / 100.0 * ch, cam.2 / 100.0 * cw, cam.3 / 100.0 * ch), parts, flows)
+}
+
+/// The same, the camera's box in the canvas's pixels
+pub fn cam_arrange_px(cw: f32, ch: f32, cam: (f32, f32, f32, f32), parts: &[(String, String, String, String)], flows: &[(String, String)]) -> CamArranged {
+    let (bx, by, bw, bh) = cam;
     let gap = 10.0f32;
     // (each part's size: from the camera's width, its shape as its widget's)
     let sized: Vec<(String, String, String, f32, f32)> = parts.iter().map(|(id, name, place, size)| {
@@ -384,7 +432,7 @@ pub fn cam_arrange_in(cw: f32, ch: f32, cam: (f32, f32, f32, f32), parts: &[(Str
         if !inside && over(&out[0], &out[i]) { overlaps.push((out[i].name.clone(), "your camera".to_string())); }
         for j in i + 1..out.len() { if over(&out[i], &out[j]) { overlaps.push((out[i].name.clone(), out[j].name.clone())); } }
     }
-    CamArranged { parts: out, moved, overlaps }
+    CamArranged { parts: out, moved, overlaps, w: cw, h: ch }
 }
 
 /// The widgets' colours, as hex: a palette's, your own, or none (your accent)
@@ -767,102 +815,74 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         }),
         "cam" => ("Webcam Overlay".into(), {
             let or = |k: &str, d: &'static str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
-            let spot = or("camSpot", "br");
-            let step = CAM_STEP.with(|c| c.get()).min(CAM_STEPS.len() - 1);
-            let mut wiz = f("wizard", "cam", "", "", &step.to_string(), &CAM_STEPS.join("|"));
-            wiz.n = step as i32;
+            let at = CAM_STEP.with(|c| c.get()).min(CAM_STEPS.len() - 1);
+            let mut wiz = f("wizard", "cam", "", "", &at.to_string(), &CAM_STEPS.join("|"));
+            wiz.n = at as i32;
             let mut v = vec![wiz];
-            match step {
-                // (1: where your camera is on your canvas)
+            let a = cam_arrange(cur);
+            match at {
+                // (1: the frame; where it goes is OBS's to say, as any source's)
                 0 => {
-                    v.push(f("note", "", "First, where your camera sits on your stream. Pick its corner, or choose Your Own Spot to set it exactly.", "", "", ""));
-                    v.push(f("chips", "camSpot", "Where it is", "Put your camera there in OBS too, or choose Your Own Spot and match it.", &spot, "br=Bottom Right|bl=Bottom Left|tr=Top Right|tl=Top Left|custom=Your Own Spot"));
-                    if spot == "custom" {
-                        v.push(f("number", "camX", "Across (%)", "Where the left edge sits: 0 is the left of the canvas, 100 the right.", &n(cur, "camX"), "72"));
-                        v.push(f("number", "camY", "Down (%)", "Where the top edge sits: 0 is the top of the canvas, 100 the bottom.", &n(cur, "camY"), "62"));
-                        v.push(f("number", "camW", "Width (%)", "Of the canvas's width.", &n(cur, "camW"), "26"));
-                        v.push(f("number", "camH", "Height (%)", "Of the canvas's height.", &n(cur, "camH"), "34"));
-                    }
-                }
-                // (2: the frame round it)
-                1 => {
-                    v.push(f("note", "", "Now the frame that goes round your camera.", "", "", ""));
-                    v.push(f("chips", "camShape", "Shape", "", &or("camShape", "rounded"), "rounded=Rounded|square=Square|circle=Circle|hex=Hexagon|arch=Arch"));
+                    v.push(f("note", "", "This is the frame that goes round your camera. You place it in OBS, where you can move and resize it like any source.", "", "", ""));
+                    v.push(f("chips", "camRatio", "Your Camera's Shape", "Pick the shape your camera has in OBS, so the frame fits it.", &or("camRatio", "wide"), &CAM_RATIOS.iter().map(|r| format!("{}={}", r.0, r.1)).collect::<Vec<_>>().join("|")));
+                    v.push(f("chips", "camShape", "Frame Shape", "", &or("camShape", "rounded"), "rounded=Rounded|square=Square|circle=Circle|hex=Hexagon|arch=Arch"));
                     v.push(f("chips", "camBorder", "Border", "", &or("camBorder", "glow"), "thin=Thin|thick=Thick|double=Double|glow=Glow|neon=Neon Tube|gradient=Gradient|duo=Two-Tone|brackets=Corner Brackets|edge=Edge Light|dashed=Dashed|dotted=Dotted|comic=Comic|glass=Glass"));
                     v.push(f("chips", "camThick", "Line", "How heavy the border is.", &or("camThick", "normal"), "thin=Thin|normal=Normal|thick=Thick|heavy=Heavy"));
+                    v.push(f("chips", "suiteColors", "Colours", "Shared with the Suite's widgets.", if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") }, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"));
+                    v.push(f("head", "", "Extras", "", "", ""));
                     v.push(f("chips", "camAnim", "Animation", "Something moving on the frame. Still keeps it calm.", &or("camAnim", "none"), "none=Still|light=A Light Running Round|pulse=Slow Pulse|breathe=Breathing|hue=Colours Shifting|flash=A Flash Now and Then"));
-                    v.push(f("chips", "camDecor", "Extras", "Something more round the frame.", &or("camDecor", "none"), "none=None|ticks=Corner Ticks|bars=Top and Bottom Bars|sparkle=Sparkles"));
+                    v.push(f("chips", "camDecor", "Decoration", "Something more round the frame.", &or("camDecor", "none"), "none=None|ticks=Corner Ticks|bars=Top and Bottom Bars|sparkle=Sparkles"));
                     v.push(f("toggle", "camShadow", "A Shadow Under It", "Lifts the frame off the game a little.", if on(cur, "camShadow", false) { "true" } else { "false" }, ""));
                 }
-                // (3: its look)
-                2 => {
-                    v.push(f("note", "", "Pick a look for the name tag and the clock, and the colours for it all.", "", "", ""));
-                    v.push(f("chips", "camTheme", "Theme", "For the name tag and the clock.", &or("camTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|gradient=Gradient|minimal=Minimal|ribbon=Ribbon|outline=Outline|pixel=Pixel|tape=Label Tape"));
-                    v.push(f("chips", "camTagAnim", "Name Tag Animation", "", &or("camTagAnim", "none"), "none=Still|shine=A Shine Across It|float=Floating|glow=Glowing"));
-                    v.push(f("chips", "camEnter", "How the Parts Come In", "When the overlay loads, or you change it.", &or("camEnter", "none"), "none=Just There|fade=Fade In|slide=Slide Up|pop=Pop"));
-                    v.push(f("chips", "suiteColors", "Colours", "Shared with the Suite's widgets.", if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") }, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"));
-                }
-                // (4: what's on it)
-                3 => {
-                    v.push(f("note", "", "Switch on what you'd like round your camera. The live ones are your widgets, as you've set them up on their own pages. You'll arrange them next.", "", "", ""));
-                    for (id, name, dflt, _, _) in CAM_PARTS {
+                // (2: what's round it: each part switched on where it's placed and sized, so one's never set up in
+                // two places)
+                1 => {
+                    let names = |l: &[String]| match l.len() { 0 => String::new(), 1 => l[0].clone(), n => format!("{} and {}", l[..n - 1].join(", "), l[n - 1]) };
+                    if !a.overlaps.is_empty() {
+                        let mut said: Vec<String> = a.overlaps.iter().filter(|(_, y)| !y.is_empty()).map(|(x, y)| format!("{x} is over {y}")).collect();
+                        said.dedup();
+                        if !said.is_empty() { v.push(f("status", "", &format!("{}. Move one somewhere else, or make it smaller.", names(&said)), "warn", "", "")); }
+                    }
+                    v.push(f("note", "", "Switch on what you'd like round your camera. Then click where it goes on its little picture of your camera, and pick a size. The live ones (Alerts, Chat and the rest) are your widgets, as you've set them up on their own pages.", "", "", ""));
+                    for (id, name, dflt, place, size) in CAM_PARTS {
                         let k = format!("camP_{id}");
                         let is = on(cur, &k, dflt);
-                        v.push(f("toggle", &k, name, "", if is { "true" } else { "false" }, ""));
+                        v.push(f("campart", &k, name, "", if is { "true" } else { "false" }, &format!("{}|{}", or(&format!("{k}Place"), place), or(&format!("{k}Size"), size))));
                         if !is { continue; }
-                        if id == "name" { v.push(f("text", "camNameText", "Name tag text", "Your name, or anything you like.", s(cur, "camNameText"), if s(cur, "login").is_empty() { "Your Name" } else { s(cur, "login") })); }
-                        if id == "sticker" { v.push(f("text", "camStickerImg", "Sticker address", "A GIF's or picture's address (on GIPHY or Tenor: right-click it, Copy Image Address).", s(cur, "camStickerImg"), "https://…/your.gif")); }
+                        if id == "name" { v.push(f("text", "camNameText", "Name Tag Text", "Your name, or anything you like.", s(cur, "camNameText"), if s(cur, "login").is_empty() { "Your Name" } else { s(cur, "login") })); }
+                        if id == "sticker" { v.push(f("text", "camStickerImg", "Picture Address", "A GIF's or picture's address (on GIPHY or Tenor: right-click it, Copy Image Address).", s(cur, "camStickerImg"), "https://…/your.gif")); }
                     }
-                }
-                // (5: where each part goes, and how the parts sharing a side sit; overlaps found and said)
-                4 => {
-                    let a = cam_arrange(cur);
-                    let on_parts: Vec<_> = CAM_PARTS.iter().filter(|p| on(cur, &format!("camP_{}", p.0), p.2)).collect();
-                    if on_parts.is_empty() {
-                        v.push(f("note", "", "Nothing's switched on yet. Go back a step to choose what goes round your camera.", "", "", ""));
-                    } else {
-                        let names = |l: &[String]| match l.len() { 0 => String::new(), 1 => l[0].clone(), n => format!("{} and {}", l[..n - 1].join(", "), l[n - 1]) };
-                        if a.overlaps.is_empty() {
-                            v.push(f("status", "", "Nothing overlaps. Parts on the same side are lined up one after another.", "ok", "", ""));
-                        } else {
-                            let mut said: Vec<String> = a.overlaps.iter().map(|(x, y)| if y.is_empty() { format!("{x} goes off the edge of your canvas") } else { format!("{x} is over {y}") }).collect();
-                            said.dedup();
-                            v.push(f("status", "", &format!("{}. Try another place, a smaller size, or Side by Side instead of Stacked.", names(&said)), "warn", "", ""));
-                        }
-                        for side in CAM_SIDES.iter().map(|s| s.0) {
-                            let went: Vec<String> = a.moved.iter().filter(|m| m.1 == side).map(|m| m.0.clone()).collect();
-                            if !went.is_empty() {
-                                let from = match side { "above" => "below", "below" => "above", "left" => "on the left of", _ => "on the right of" };
-                                let to = match side { "above" | "below" => side.to_string(), s => format!("on the {s} of") };
-                                v.push(f("status", "", &format!("There isn't room for {} {from} your camera, so {} shown {to} it instead.", names(&went), if went.len() == 1 { "it's" } else { "they're" }), "ok", "", ""));
-                            }
-                        }
-                        // (each side with two or more parts: stacked or side by side)
-                        for (side, side_name) in CAM_SIDES {
-                            let here = a.parts.iter().skip(1).filter(|p| p.place == side).count();
-                            if here < 2 { continue; }
-                            let k = format!("camFlow_{side}");
-                            v.push(f("chips", &k, &format!("{side_name} your camera"), "How the parts there sit together.", &or(&k, "auto"), "auto=Automatic|column=Stacked|row=Side by Side"));
-                        }
-                        for (id, name, _, place, size) in on_parts {
-                            let k = format!("camP_{id}");
-                            v.push(f("head", "", name, "", "", ""));
-                            v.push(f("chips", &format!("{k}Place"), "Where", "", &or(&format!("{k}Place"), place), "above=Above|below=Below|left=Left|right=Right|in-top=Inside, Top|in-bottom=Inside, Bottom|corner=On the Corner"));
-                            v.push(f("chips", &format!("{k}Size"), "Size", "", &or(&format!("{k}Size"), size), "small=Small|medium=Medium|large=Large"));
-                        }
+                    // (a side with two or more parts: stacked or side by side)
+                    let shared: Vec<_> = CAM_SIDES.iter().filter(|(side, _)| a.parts.iter().skip(1).filter(|p| p.place == *side).count() >= 2).collect();
+                    if !shared.is_empty() { v.push(f("head", "", "Parts Sharing a Side", "", "", "")); }
+                    for (side, side_name) in shared {
+                        let k = format!("camFlow_{side}");
+                        v.push(f("chips", &k, &format!("{side_name} Your Camera"), "How the parts there sit together.", &or(&k, "auto"), "auto=Automatic|column=Stacked|row=Side by Side"));
                     }
+                    let (tag, clock) = (on(cur, "camP_name", true), on(cur, "camP_clock", false));
+                    v.push(f("head", "", "How They Look", "", "", ""));
+                    if tag || clock { v.push(f("chips", "camTheme", "Theme", if tag && clock { "For the name tag and the clock." } else if tag { "For the name tag." } else { "For the clock." }, &or("camTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|gradient=Gradient|minimal=Minimal|ribbon=Ribbon|outline=Outline|pixel=Pixel|tape=Label Tape")); }
+                    if tag { v.push(f("chips", "camTagAnim", "Name Tag Animation", "", &or("camTagAnim", "none"), "none=Still|shine=A Shine Across It|float=Floating|glow=Glowing")); }
+                    v.push(f("chips", "camEnter", "How the Parts Come In", "When the overlay loads, or you change it.", &or("camEnter", "none"), "none=Just There|fade=Fade In|slide=Slide Up|pop=Pop"));
                 }
-                // (6: into OBS)
+                // (3: into OBS: one source, its size said)
                 _ => {
-                    v.push(f("note", "", "Last, add it to OBS. Add a Browser source the size of your canvas (1920 × 1080), above your camera, with the address below. It's see-through: the frame goes round your camera, and the parts come with it, live ones included, so it's all one source.", "", "", ""));
-                    v.push(addr("/cam/main", ""));
-                    v.push(f("note", "", "Change anything later by clicking a step above.", "", "", ""));
+                    let (w, h) = (a.w.round() as i64, a.h.round() as i64);
+                    let url = addr("/cam/main", "").value;
+                    v.push(f("note", "", "Add it to OBS once. After that, what you change here shows there by itself.", "", "", ""));
+                    v.push(step(1, "In OBS, click + under Sources and choose Browser. Give it a name, like Webcam Overlay.", "", "", ""));
+                    v.push(step(2, &format!("Paste this address. Set Width to {w} and Height to {h}, then click OK."), &url, "", ""));
+                    v.push(step(3, "Drag it to where you want your camera. Resize it by its corners, like any source.", "", "", ""));
+                    v.push(step(4, "Put your camera under it in the Sources list. Drag your camera's corners until it fills the frame. To trim a side, hold Alt while you drag it.", "", "", ""));
+                    v.push(step(5, "To move the two together later, click one, hold Ctrl and click the other, then drag.", "", "", ""));
+                    v.push(f("status", "", &format!("The overlay is {w} × {h} with the parts you have on now. If you add or take away parts, come back for the new size and set it in the source's Properties. Until you do, it shrinks to fit."), "ok", "", ""));
+                    v.push(f("link", "", "See It in a Window", "The real overlay, moving as it will in OBS.", "", "realprev:cam"));
                 }
             }
             let last = CAM_STEPS.len() - 1;
-            let back = if step > 0 { format!("cam:step:{}=Back", step - 1) } else { "=".into() };
-            let next = if step < last { format!("cam:step:{}=Next: {}", step + 1, CAM_STEPS[step + 1]) } else { "=".into() };
-            v.push(f("wiznav", "", &format!("Step {} of {}", step + 1, CAM_STEPS.len()), "", "", &format!("{back}|{next}")));
+            let back = if at > 0 { format!("cam:step:{}=Back", at - 1) } else { "=".into() };
+            let next = if at < last { format!("cam:step:{}=Next: {}", at + 1, CAM_STEPS[at + 1]) } else { "=".into() };
+            v.push(f("wiznav", "", &format!("Step {} of {}", at + 1, CAM_STEPS.len()), "", "", &format!("{back}|{next}")));
             v
         }),
         "tips" => ("Tips and Donations".into(), {
@@ -1452,6 +1472,35 @@ pub fn method(act: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_webcam_overlay_is_one_source_the_size_of_what_it_holds() {
+        let p = |id: &str, place: &str, size: &str| (id.to_string(), id.to_string(), place.to_string(), size.to_string());
+        // (a camera alone: its own size, with the margin round it)
+        let a = cam_laid(640.0, 360.0, &[], &[]);
+        assert_eq!((a.w, a.h), (640.0 + 72.0, 360.0 + 72.0));
+        assert_eq!((a.parts[0].x, a.parts[0].y, a.parts[0].w, a.parts[0].h), (36.0, 36.0, 640.0, 360.0));
+        // (parts round it: all of them inside it, none moved for want of room, nothing overlapping; it's wider
+        // with one on the left, taller with ones above and below)
+        let parts = [p("name", "below", "medium"), p("live", "corner", "small"), p("alerts", "above", "large"), p("now", "above", "medium"), p("chat", "left", "medium")];
+        let b = cam_laid(640.0, 360.0, &parts, &[]);
+        assert!(b.moved.is_empty() && b.overlaps.is_empty(), "{:?} {:?}", b.moved, b.overlaps);
+        assert!(b.parts.iter().all(|q| q.x >= 35.0 && q.y >= 35.0 && q.x + q.w <= b.w - 35.0 && q.y + q.h <= b.h - 35.0), "{b:?}");
+        assert!(b.w > a.w + 200.0 && b.h > a.h + 200.0 && b.w % 2.0 == 0.0 && b.h % 2.0 == 0.0, "{} {}", b.w, b.h);
+        // (its page's settings: the shape asked for, and no place on a canvas anywhere)
+        let cur: Map<String, Value> = serde_json::from_value(json!({ "camRatio": "square", "camP_alerts": false, "camP_live": false, "camP_name": false })).unwrap();
+        let c = cam_arrange(&cur);
+        assert_eq!((c.parts.len(), c.w, c.h), (1, 480.0 + 72.0, 480.0 + 72.0));
+        let cfg = cam_config(&cur, None);
+        assert!(cfg["ratio"] == "square" && cfg["parts"].as_array().unwrap().is_empty() && cfg.get("spot").is_none());
+        // (its setup: three steps, none of them asking where the camera is)
+        for at in 0..CAM_STEPS.len() {
+            CAM_STEP.with(|s| s.set(at));
+            let f = sheet("cam", &cur).1;
+            assert!(f.iter().all(|x| !x.key.starts_with("camSpot") && !matches!(x.key.as_str(), "camX" | "camY" | "camW" | "camH")), "step {at}");
+        }
+        CAM_STEP.with(|s| s.set(0));
+    }
 
     #[test]
     fn webcam_parts_sharing_a_side_dont_overlap() {

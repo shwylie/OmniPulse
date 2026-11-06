@@ -4,10 +4,12 @@
 <meta charset="utf-8">
 <!--
   A webcam overlay you made in the Stream Suite (Settings > Streaming > Suite > Creators): one OBS Browser
-  source the size of your canvas, see-through. Its frame goes round where your camera is; its parts (a name tag,
-  a sticker, a LIVE badge, a clock, and live ones: Now Playing, alerts, the latest follow or sub, goals, the hype
-  train, chat) sit round it. The live parts are the widgets' own pages, each in its slot, so they update just as
-  the separate widgets do. /cam/<id>; it reads /now.json's suite.creators.
+  source, see-through, as big as your camera's frame and what's round it. In OBS it's put over your camera and
+  moved or resized like any source: nothing here says where on your stream it is. Its parts (a name tag, a
+  sticker, a LIVE badge, a clock, and live ones: Now Playing, alerts, the latest follow or sub, goals, the hype
+  train, chat) sit round the frame. The live parts are the widgets' own pages, each in its slot, so they update
+  just as the separate widgets do. Whatever size the source is given, all of it is shown, scaled to fit.
+  /cam/<id>; it reads /now.json's suite.creators.
 -->
 <title>OmniPulse Webcam Overlay</title>
 <style>
@@ -145,28 +147,38 @@
   const ID = decodeURIComponent((location.pathname.match(/^\/cam\/([^/?#]+)/) || [])[1] || "");
   const PREVIEW = /[?&]preview=1/.test(location.search);
   if (PREVIEW) document.body.classList.add("preview");
-  // (?live=1: the app's own preview: the overlay as its page has it now (changes not saved yet too), on a canvas of
-  // 1920 x 1080 zoomed to the camera and what's round it)
+  // (?live=1: the app's own preview: the overlay as its page has it now, changes not saved yet too)
   const LIVEPREV = /[?&]live=1/.test(location.search);
-  const SPOTS = { br: [72, 62, 26, 34], bl: [2, 62, 26, 34], tr: [72, 4, 26, 34], tl: [2, 4, 26, 34] };
+  // (the camera's shapes, in the overlay's own pixels; the room it's laid out in, and the room kept round it for
+  // a frame's glow and extras: botpage.rs's CAM_RATIOS, CAM_ROOM and CAM_MARGIN, kept the same)
+  const RATIOS = { wide: [640, 360], classic: [600, 450], square: [480, 480], tall: [405, 720] };
+  const ROOM = 6000, MARGIN = 36;
   // (each live part: its widget's page, and the shape of its slot as wide : tall)
   const LIVE = { now: ["/", 3.6], alerts: ["/alerts", 3.6], follow: ["/latest-follow", 4.6], sub: ["/latest-sub", 4.6], goals: ["/goals", 1.8], hype: ["/hype", 4.6], chat: ["/chat", 0.7], socials: ["/socials", 4.2] };
   const SIZES = { small: 0.6, medium: 0.85, large: 1.1 };
   const NAMES = { now: "Now Playing", alerts: "Alerts", follow: "Latest Follow", sub: "Latest Sub", goals: "Goals", hype: "Hype Train", chat: "Chat", socials: "Social Plug" };
   let sig = "";
 
-  function box(c) {
-    const s = c.spot === "custom" ? [Number(c.x) || 70, Number(c.y) || 60, Number(c.w) || 26, Number(c.h) || 34] : SPOTS[c.spot] || SPOTS.br;
-    return { x: s[0], y: s[1], w: s[2], h: s[3] };
+  // The overlay laid out (botpage.rs's cam_laid, kept the same): round a camera of its shape with all the room it
+  // wants, then cut down to what's used and a margin. Where the camera is in it, each part's box, and its size
+  function layout(c) {
+    const [rw, rh] = RATIOS[c.ratio] || RATIOS.wide;
+    const cx = Math.round((ROOM - rw) / 2), cy = Math.round((ROOM - rh) / 2);
+    const parts = arrange(c, { x: cx, y: cy, w: rw, h: rh }, ROOM, ROOM);
+    let x0 = cx, y0 = cy, x1 = cx + rw, y1 = cy + rh;
+    for (const { box: r } of parts) { if (!r) continue; x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y); x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h); }
+    const ox = Math.floor(x0 - MARGIN), oy = Math.floor(y0 - MARGIN);
+    for (const { box: r } of parts) { if (r) { r.x -= ox; r.y -= oy; } }
+    return { cam: { x: cx - ox, y: cy - oy, w: rw, h: rh }, parts, w: Math.ceil((x1 + MARGIN - ox) / 2) * 2, h: Math.ceil((y1 + MARGIN - oy) / 2) * 2 };
   }
-  // The parts laid out round the camera, as the app lays them out (botpage.rs's cam_arrange_in: keep the two the
-  // same): sharing a side, stacked one after another or side by side (its flow: "auto" stacked if there's room);
+  // The parts laid out round the camera (its box `b`, in pixels of a room W x H), as the app lays them out
+  // (botpage.rs's cam_arrange_px: keep the two the same): sharing a side, stacked one after another or side by side (its flow: "auto" stacked if there's room);
   // a side without the room moved to the other side if there's room there; each side's parts kept on the canvas
   // together; the corner's just inside it while something's above the camera. Each part's box, by its index
   const SIDES = ["above", "below", "left", "right", "in-top", "in-bottom"];
   const RATIO = { now: 3.6, alerts: 3.6, follow: 4.6, sub: 4.6, hype: 4.6, goals: 1.8, chat: 0.7, socials: 4.2, name: 4.4, live: 3.2, clock: 3.2 };
   function arrange(c, b, W, H) {
-    const bx = (b.x / 100) * W, by = (b.y / 100) * H, bw = (b.w / 100) * W, bh = (b.h / 100) * H, gap = 10;
+    const bx = b.x, by = b.y, bw = b.w, bh = b.h, gap = 10;
     const parts = (c.parts || []).filter((p) => p.on !== false);
     const sized = parts.map((p) => {
       const k = SIZES[p.size] || SIZES.medium, ratio = RATIO[p.type] || 1;
@@ -251,7 +263,7 @@
     document.body.className = (PREVIEW ? "preview " : "") + "t-" + (c.theme || "dark") + " ta-" + (c.tagAnim || "none") + " en-" + (c.enter || "none") + (now && now.suite && now.suite.anim === "none" ? " still" : "");
     if (c.colors && c.colors.c1) { document.body.style.setProperty("--c1", c.colors.c1); document.body.style.setProperty("--c2", c.colors.c2); }
     useFont(c.font);
-    const b = box(c), stage = $("stage");
+    const L = layout(c), stage = $("stage");
     const next = JSON.stringify(c) + innerWidth + "x" + innerHeight;
     if (next === sig) return tick(c);
     sig = next;
@@ -259,21 +271,27 @@
     const keep = {};
     stage.querySelectorAll(".part.live").forEach((e) => (keep[e.dataset.src] = e));
     stage.innerHTML = "";
-    const W = LIVEPREV ? 1920 : innerWidth, H = LIVEPREV ? 1080 : innerHeight;
+    // (all of it shown, whatever size the source is: at its own size if that's what OBS was given, else scaled
+    // to fit, in the middle)
+    const k = Math.min(innerWidth / L.w, innerHeight / L.h);
+    Object.assign(stage.style, { inset: "auto", left: "0", top: "0", width: L.w + "px", height: L.h + "px", transformOrigin: "0 0",
+      transform: "translate(" + (innerWidth - L.w * k) / 2 + "px, " + (innerHeight - L.h * k) / 2 + "px) scale(" + k + ")" });
+    document.documentElement.style.fontSize = "16px";
     const cam = document.createElement("div"); cam.id = "cam";
     const fr = document.createElement("div"); fr.id = "frame"; fr.className = "s-" + (c.shape || "rounded") + " b-" + (c.border || "thin") + " k-" + (c.thick || "normal") + " a-" + (c.anim || "none") + " d-" + (c.decor || "none") + (c.shadow ? " sh" : "");
-    [cam, fr].forEach((e) => Object.assign(e.style, { left: (b.x / 100) * W + "px", top: (b.y / 100) * H + "px", width: (b.w / 100) * W + "px", height: (b.h / 100) * H + "px" }));
-    cam.style.borderRadius = getComputedStyle(document.body).getPropertyValue("--r") || "";
+    [cam, fr].forEach((e) => put(e, L.cam));
     fr.innerHTML = '<div class="edge"></div><div class="sweep"></div>';
     if ((c.shape || "rounded") === "hex") {
       // (its six sides, in the frame's own pixels; a second line a little inside it, for the borders with two)
-      const fw = (b.w / 100) * W, fh = (b.h / 100) * H, hex = [[0.12, 0], [0.88, 0], [1, 0.5], [0.88, 1], [0.12, 1], [0, 0.5]];
+      const fw = L.cam.w, fh = L.cam.h, hex = [[0.12, 0], [0.88, 0], [1, 0.5], [0.88, 1], [0.12, 1], [0, 0.5]];
       const d = (k) => "M" + hex.map(([x, y]) => ((0.5 + (x - 0.5) * k) * fw).toFixed(1) + " " + ((0.5 + (y - 0.5) * k) * fh).toFixed(1)).join(" L") + " Z";
       fr.insertAdjacentHTML("beforeend", '<svg viewBox="0 0 ' + fw + " " + fh + '" preserveAspectRatio="none"><defs><linearGradient id="hxg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:var(--c1)"/><stop offset="1" style="stop-color:var(--c2)"/></linearGradient></defs><path class="hx" d="' + d(1) + '"/><path class="hx2" d="' + d(0.93) + '"/><path class="hxrun" pathLength="100" d="' + d(1) + '"/></svg>');
       cam.style.clipPath = "polygon(12% 0, 88% 0, 100% 50%, 88% 100%, 12% 100%, 0 50%)";
     }
     stage.append(cam, fr);
-    for (const { p, box: r } of arrange(c, b, W, H)) {
+    // (the made-up camera in the frame's shape: its corners as the frame's are)
+    cam.style.borderRadius = getComputedStyle(fr).getPropertyValue("--r") || "";
+    for (const { p, box: r } of L.parts) {
       if (!r) continue;
       let el;
       if (LIVE[p.type] && LIVEPREV) {
@@ -300,15 +318,6 @@
         put(el, r);
       }
       if (el) stage.append(el);
-    }
-    // (the app's preview: zoomed to the camera and what's round it, with a little room, in the middle)
-    if (LIVEPREV) {
-      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
-      for (const e of stage.children) { if (e.id === "cam") continue; const l = parseFloat(e.style.left) || 0, t = parseFloat(e.style.top) || 0, w = parseFloat(e.style.width) || 0, h = parseFloat(e.style.height) || 0; x0 = Math.min(x0, l); y0 = Math.min(y0, t); x1 = Math.max(x1, l + w); y1 = Math.max(y1, t + h); }
-      const m = 46, bw = x1 - x0 + m * 2, bh = y1 - y0 + m * 2, k = Math.min(innerWidth / bw, innerHeight / bh);
-      Object.assign(stage.style, { inset: "auto", left: "0", top: "0", width: W + "px", height: H + "px", transformOrigin: "0 0",
-        transform: "translate(" + ((innerWidth - bw * k) / 2 - (x0 - m) * k) + "px, " + ((innerHeight - bh * k) / 2 - (y0 - m) * k) + "px) scale(" + k + ")" });
-      document.documentElement.style.fontSize = "16px";
     }
     tick(c);
   }

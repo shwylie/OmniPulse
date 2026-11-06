@@ -2616,12 +2616,13 @@ function suitePush() {
     }).catch(() => {});
   }, 250);
 }
-// (the webcam overlay, from the Creators' settings: where the camera is, its frame, and each part that's on)
+// (the webcam overlay, from the Creators' settings: the camera's shape, its frame, and each part that's on. Where
+// it goes on stream is OBS's to say: it's one source, moved and resized there)
 const CAM_PARTS = [["name", true, "below", "medium"], ["live", true, "corner", "small"], ["now", false, "above", "medium"], ["alerts", true, "above", "large"], ["follow", false, "left", "medium"], ["sub", false, "left", "medium"], ["goals", false, "left", "medium"], ["hype", false, "above", "medium"], ["chat", false, "left", "medium"], ["socials", false, "below", "medium"], ["clock", false, "in-top", "small"], ["sticker", false, "corner", "medium"]];
 function camOverlay() {
   const x = S(), v = (k, d) => (x[k] === undefined || x[k] === "" ? d : x[k]);
   return {
-    id: "main", kind: "cam", spot: String(v("camSpot", "br")), x: num(v("camX", 72)), y: num(v("camY", 62)), w: num(v("camW", 26)), h: num(v("camH", 34)),
+    id: "main", kind: "cam", ratio: String(v("camRatio", "wide")),
     shape: String(v("camShape", "rounded")), border: String(v("camBorder", "glow")), theme: String(v("camTheme", "dark")),
     thick: String(v("camThick", "normal")), anim: String(v("camAnim", "none")), decor: String(v("camDecor", "none")), shadow: yes(v("camShadow", false)),
     tagAnim: String(v("camTagAnim", "none")), enter: String(v("camEnter", "none")), colors: suiteColors(), font: themeFonts()[String(v("camTheme", "dark"))] || "",

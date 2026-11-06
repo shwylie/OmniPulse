@@ -4101,22 +4101,61 @@ component PanelPreview inherits Rectangle {
     }
 }
 
-/// The webcam overlay on a 16:9 canvas: a made-up camera in its frame, each part a stand-in where it'll go
+/// Where a webcam overlay's part goes: a little picture of your camera, with each place round it and inside it
+/// to click (the one it's in lit); the place pointed at, for its name to be shown
+component CamPlacePick inherits Rectangle {
+    in property <string> place;
+    out property <string> hover: sa.has-hover ? "above" : sb.has-hover ? "below" : sl.has-hover ? "left" : sr.has-hover ? "right" : st.has-hover ? "in-top" : si.has-hover ? "in-bottom" : sc.has-hover ? "corner" : "";
+    callback picked(string);
+    width: 150px;
+    height: 104px;
+    border-radius: 10px;
+    background: Theme.bg.mix(Theme.panel, 0.4);
+    border-width: 1px;
+    border-color: Theme.line;
+    // (your camera, someone in it)
+    Rectangle {
+        x: 40px; y: 28px; width: 70px; height: 48px;
+        border-radius: 6px;
+        background: #3b4766;
+        border-width: 1.5px;
+        border-color: Theme.accent.with-alpha(0.7);
+        clip: true;
+        Rectangle { width: 12px; height: 12px; border-radius: 6px; x: (parent.width - self.width) / 2; y: 13px; background: #7f8bb0; }
+        Rectangle { width: 30px; height: 20px; border-radius: 10px; x: (parent.width - self.width) / 2; y: 28px; background: #6b7699; }
+    }
+    // (round it)
+    Rectangle { x: 50px; y: 8px; width: 50px; height: 14px; border-radius: 4px; background: root.place == "above" ? Theme.accent : sa.has-hover ? Theme.line : Theme.elevated; border-width: 1px; border-color: Theme.line; sa := TouchArea { mouse-cursor: pointer; clicked => { root.picked("above"); } } }
+    Rectangle { x: 50px; y: 82px; width: 50px; height: 14px; border-radius: 4px; background: root.place == "below" ? Theme.accent : sb.has-hover ? Theme.line : Theme.elevated; border-width: 1px; border-color: Theme.line; sb := TouchArea { mouse-cursor: pointer; clicked => { root.picked("below"); } } }
+    Rectangle { x: 8px; y: 38px; width: 26px; height: 28px; border-radius: 4px; background: root.place == "left" ? Theme.accent : sl.has-hover ? Theme.line : Theme.elevated; border-width: 1px; border-color: Theme.line; sl := TouchArea { mouse-cursor: pointer; clicked => { root.picked("left"); } } }
+    Rectangle { x: 116px; y: 38px; width: 26px; height: 28px; border-radius: 4px; background: root.place == "right" ? Theme.accent : sr.has-hover ? Theme.line : Theme.elevated; border-width: 1px; border-color: Theme.line; sr := TouchArea { mouse-cursor: pointer; clicked => { root.picked("right"); } } }
+    // (inside it, and on its corner)
+    Rectangle { x: 53px; y: 32px; width: 44px; height: 10px; border-radius: 3px; background: root.place == "in-top" ? Theme.accent : st.has-hover ? #ffffff70 : #ffffff38; st := TouchArea { mouse-cursor: pointer; clicked => { root.picked("in-top"); } } }
+    Rectangle { x: 53px; y: 62px; width: 44px; height: 10px; border-radius: 3px; background: root.place == "in-bottom" ? Theme.accent : si.has-hover ? #ffffff70 : #ffffff38; si := TouchArea { mouse-cursor: pointer; clicked => { root.picked("in-bottom"); } } }
+    Rectangle { x: 98px; y: 20px; width: 22px; height: 14px; border-radius: 4px; background: root.place == "corner" ? Theme.accent : sc.has-hover ? Theme.line : Theme.elevated; border-width: 1px; border-color: Theme.line; sc := TouchArea { mouse-cursor: pointer; clicked => { root.picked("corner"); } } }
+}
+
+/// The webcam overlay, all of it, as OBS will have it: a made-up camera in its frame, each part a stand-in where
+/// it'll go; fitted into this box, as the overlay fits itself into its source
 component CamPreview inherits Rectangle {
-    height: self.width * CamLook.ratio;
+    height: min(520px, self.width * CamLook.ratio);
     border-radius: 14px;
     border-width: 1px;
     border-color: Theme.line;
     clip: true;
     background: #2a2e3c;
+    property <length> iw: min(self.width, self.height / max(0.05, CamLook.ratio));
+    property <length> ih: self.iw * CamLook.ratio;
+    property <length> ix: (self.width - self.iw) / 2;
+    property <length> iy: (self.height - self.ih) / 2;
     Checker { x: 0; y: 0; width: parent.width; height: parent.height; }
     // (the real overlay over this drawing, once it's loaded: its borders, animations and extras as they'll be)
     BotLiveSpot { which: "cam"; x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px; }
     for r in CamLook.rects: Rectangle {
-        x: parent.width * r.x;
-        y: parent.height * r.y;
-        width: parent.width * r.w;
-        height: parent.height * r.h;
+        x: root.ix + root.iw * r.x;
+        y: root.iy + root.ih * r.y;
+        width: root.iw * r.w;
+        height: root.ih * r.h;
         property <bool> cam: r.id == "cam";
         property <bool> light: CamLook.theme == "comic" || CamLook.theme == "pastel";
         border-radius: self.cam ? (CamLook.shape == "circle" ? min(self.width, self.height) / 2 : CamLook.shape == "square" || CamLook.shape == "hex" ? 0px : 12px) : 6px;
@@ -5732,6 +5771,37 @@ component BotFieldRow inherits VerticalLayout {
         // (a web page: opened in your browser; anything else is done here, now)
         VerticalLayout { alignment: center; IconButton { d: root.f.n == 1 ? Icons.open : Icons.play; size: 34px; tint: Theme.accent; tip: root.f.n == 1 ? "Open it in your browser" : "Do it now"; clicked => { root.act(root.f.extra); } } }
     }
+    // (a webcam overlay's part: switched on, and then, right here, where it goes (clicked on a little picture
+    // of your camera) and how big)
+    if root.f.kind == "campart": VerticalLayout {
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout { horizontal-stretch: 1; alignment: center; Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; } }
+            CenterToggle { checked: root.f.value == "true"; toggled => { root.set(root.f.key, self.checked ? "true" : "false"); } }
+        }
+        if root.f.value == "true" && root.f.opts.length > 1: HorizontalLayout {
+            spacing: 16px;
+            alignment: start;
+            cpp := CamPlacePick { place: root.f.opts[0]; picked(p) => { root.set(root.f.key + "Place", p); } }
+            VerticalLayout {
+                alignment: center;
+                spacing: 8px;
+                property <string> shown: cpp.hover != "" ? cpp.hover : root.f.opts[0];
+                Text {
+                    text: parent.shown == "above" ? "Above Your Camera" : parent.shown == "below" ? "Below Your Camera" : parent.shown == "left" ? "Left of Your Camera" : parent.shown == "right" ? "Right of Your Camera" : parent.shown == "in-top" ? "Inside, at the Top" : parent.shown == "in-bottom" ? "Inside, at the Bottom" : "On the Top Corner";
+                    color: cpp.hover != "" && cpp.hover != root.f.opts[0] ? Theme.muted : Theme.text;
+                    font-size: 12px;
+                    font-weight: 600;
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    for z in [{ id: "small", n: "Small" }, { id: "medium", n: "Medium" }, { id: "large", n: "Large" }]: Chip { label: z.n; on: root.f.opts[1] == z.id; clicked => { root.set(root.f.key + "Size", z.id); } }
+                }
+            }
+        }
+    }
     if root.f.kind == "toggle": Rectangle {
         height: tl.preferred-height;
         if root.f.changed: Pulse { x: -8px; width: parent.width + 16px; height: parent.height + 8px; y: -4px; r: 10px; }
@@ -6424,9 +6494,9 @@ component BotPage inherits Rectangle {
                     spacing: 6px;
                     alignment: start;
                     vertical-stretch: 1;
-                    Text { text: "Your webcam's area, with a made-up camera"; color: Theme.muted; font-size: 11px; }
+                    Text { text: "Your overlay, with a made-up camera"; color: Theme.muted; font-size: 11px; }
                     CamPreview { }
-                    Text { text: "This is where your camera sits on stream, with the parts around it. It changes as you change the settings."; color: Theme.muted; font-size: 11px; wrap: word-wrap; }
+                    Text { text: "This is the whole overlay, as OBS will show it. It changes as you change the settings. In OBS, you put it over your camera."; color: Theme.muted; font-size: 11px; wrap: word-wrap; }
                 }
                 if root.sheet == "panels": HorizontalLayout {
                     spacing: 10px;

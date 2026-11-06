@@ -7602,6 +7602,8 @@ fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
             // (a panel's card: its icon chosen ("" the title's) and its picture made into an icon, as ids; the icon shown's shape)
             // (a setup's steps: their names)
             else if x.kind == "wizard" { (Vec::new(), x.extra.split('|').map(String::from).collect()) }
+            // (a webcam overlay's part: where it is, and its size)
+            else if x.kind == "campart" { (Vec::new(), x.extra.split('|').map(String::from).collect()) }
             else if x.kind == "panelcard" { let (k, m) = x.note.split_once('|').unwrap_or(("", "")); (vec![k.to_string(), m.to_string()], vec![panelicon::shape(panelicon::of(k, &x.label)).to_string()]) }
             else if x.kind == "list" || x.kind == "piclist" { (Vec::new(), botpage::list_items(if x.value.is_empty() { &x.extra } else { &x.value })) }
             else { (Vec::new(), Vec::new()) };
@@ -7779,21 +7781,15 @@ fn bot_paint(shared: &Shared) {
     // (the webcam overlay's preview: its layout, as the page lays it out)
     if sheet == "cam" {
         let g = ui.global::<CamLook>();
-        // (only the webcam's area: round the camera and its parts, with a little room, not the whole canvas;
-        // each piece as a fraction of that, and its shape as tall as it is wide)
+        // (the overlay as it'll be in OBS, all of it: each piece as a fraction of it, and its shape as tall as
+        // it is wide)
         let arranged = botpage::cam_arrange(&cur);
+        let (aw, ah) = (arranged.w.max(1.0), arranged.h.max(1.0));
         // (the parts overlapping something, outlined in the preview)
         let clashing: Vec<String> = arranged.overlaps.iter().flat_map(|(a, b)| [a.clone(), b.clone()]).collect();
-        let all: Vec<(String, String, f32, f32, f32, f32, bool)> = arranged.parts.into_iter().map(|p| { let clash = p.id != "cam" && clashing.contains(&p.name); (p.id, p.label, p.x / 1920.0, p.y / 1080.0, p.w / 1920.0, p.h / 1080.0, clash) }).collect();
-        let (mut x0, mut y0, mut x1, mut y1) = (1f32, 1f32, 0f32, 0f32);
-        for (_, _, x, y, w, h, _) in &all { x0 = x0.min(*x); y0 = y0.min(*y); x1 = x1.max(x + w); y1 = y1.max(y + h); }
-        let pad = 0.02;
-        let (x0, y0, x1, y1) = ((x0 - pad).max(0.0), (y0 - pad * 1.78).max(0.0), (x1 + pad).min(1.0), (y1 + pad * 1.78).min(1.0));
-        let (bw, bh) = ((x1 - x0).max(0.05), (y1 - y0).max(0.05));
-        let rects: Vec<CamRect> = all.into_iter().map(|(id, label, x, y, w, h, clash)| CamRect { clash, id: id.into(), label: label.into(), x: (x - x0) / bw, y: (y - y0) / bh, w: w / bw, h: h / bh }).collect();
+        let rects: Vec<CamRect> = arranged.parts.into_iter().map(|p| CamRect { clash: p.id != "cam" && clashing.contains(&p.name), id: p.id.into(), label: p.label.into(), x: p.x / aw, y: p.y / ah, w: p.w / aw, h: p.h / ah }).collect();
         g.set_rects(ModelRc::from(Rc::new(VecModel::from(rects))));
-        // (its height for its width, as the canvas is 16:9)
-        g.set_ratio((bh * 9.0) / (bw * 16.0));
+        g.set_ratio(ah / aw);
         let or = |k: &str, d: &str| cur.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty()).unwrap_or(d).to_string();
         g.set_shape(or("camShape", "rounded").into());
         g.set_border(or("camBorder", "glow").into());
@@ -9718,14 +9714,17 @@ fn bot_live(shared: &Shared) {
         let changed = BLIVE.with(|b| b.borrow().as_ref().is_none_or(|x| x.3 != sig));
         if changed {
             BLIVE.with(|b| if let Some(x) = b.borrow_mut().as_mut() { x.3 = sig.clone(); });
-            if let Some(p) = plugrun::get(BOT) {
+            // (the Webcam Overlay's is made here, so it shows with the Suite off too; the HUD frames' is the chatbot's)
+            if which == "cam" {
+                omnipulse_core::widget::creators_preview_set(Some(serde_json::json!({ "list": [botpage::cam_config(&vals, botpage::suite_colours(&vals).or_else(|| Some(theme_accents(&shared.borrow().web.prefs))))] })));
+            } else if let Some(p) = plugrun::get(BOT) {
                 let rt = shared.borrow().rt.clone();
                 rt.spawn(async move { if let Ok(v) = p.call("creatorsWith", vec![serde_json::Value::Object(vals)]).await { if v["list"].is_array() { omnipulse_core::widget::creators_preview_set(Some(v)); } } });
             }
         }
     }
     if BLIVE.with(|b| b.borrow().is_none()) {
-        if !show || plugrun::get(BOT).is_none() { return; }
+        if !show || (which != "cam" && plugrun::get(BOT).is_none()) { return; }
         let prefs = shared.borrow().web.prefs.clone();
         let port = prefs["widgetPort"].as_u64().unwrap_or(7878);
         let mut on = prefs.clone();
@@ -16508,7 +16507,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dockspage") { vec![(6, "size:1500:950"), (7, "bot:docks"), (10, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("pointspage") { vec![(6, "size:1500:950"), (7, "bot:sheet:points"), (8, "botset:pointsOn=true"), (9, "botset:pointsCurrency=channel"), (11, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("hudshape") { vec![(6, "size:1500:950"), (7, "bot:sheet:hud"), (8, "hudsample"), (10, "bot:hud:add:0.238,0.896,0.288,0.956"), (11, "bot:hud:add:0.29,0.896,0.339,0.956"), (12, "bot:hud:add:0.463,0.837,0.537,0.953"), (13, "bot:hud:add:0.673,0.896,0.723,0.956"), (14, "bot:hud:add:0.781,0.88,0.976,0.956"), (16, "bot:hud:none"), (17, "end")] }
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("camwiz") { vec![(6, "size:1500:950"), (7, "bot:sheet:cam"), (9, "bot:cam:step:0"), (10, "bot:cam:step:1"), (11, "bot:cam:step:2"), (12, "bot:cam:step:3"), (13, "bot:cam:step:4"), (14, "scroll:700"), (15, "bot:cam:step:5"), (16, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("camwiz") { vec![(6, "size:1500:950"), (7, "bot:sheet:cam"), (9, "bot:cam:step:0"), (11, "bot:cam:step:1"), (13, "scroll:700"), (15, "bot:cam:step:2"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("icons") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "bot:pnl:1:icon:trophy"), (11, "click:933,309"), (13, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("words") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "bot:pnl:0:edit"), (13, "wordsbold"), (16, "wordsgot"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("creators") { vec![(6, "size:1500:950"), (7, "bot:sheet:panels"), (9, "scroll:1250"), (11, "scroll:600"), (13, "scroll:601"), (15, "bot:sheet:cam"), (17, "scroll:-3000"), (19, "bot:sheet:hud"), (20, "hudsample"), (22, "bot:hud:add:0.82,0.04,0.98,0.32"), (24, "scroll:800"), (26, "bot:hud:none"), (28, "end")] }
