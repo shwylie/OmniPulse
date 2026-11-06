@@ -2757,6 +2757,9 @@ component WidgetTile inherits Rectangle {
     in property <bool> has-copy: true;
     in property <string> open-tip;
     in property <string> gear-tip: "Settings";
+    in property <bool> has-gear: true;
+    /// (its line under its name over two lines, in a taller tile: a dock's, which says what it's for)
+    in property <bool> wrap-note;
     callback toggle();
     callback copy();
     callback open();
@@ -2782,14 +2785,14 @@ component WidgetTile inherits Rectangle {
             alignment: center;
             spacing: 2px;
             Text { text: root.name; color: Theme.text; font-size: 13px; font-weight: 700; overflow: elide; }
-            Text { text: root.note != "" ? root.note : (root.on ? "On" : "Off") + (root.path != "" ? " \u{b7} " + root.path : ""); color: root.on ? root.tint.mix(Theme.text, 0.55) : Theme.muted; font-size: 11px; overflow: elide; }
+            Text { text: root.note != "" ? root.note : (root.on ? "On" : "Off") + (root.path != "" ? " \u{b7} " + root.path : ""); color: root.on ? root.tint.mix(Theme.text, 0.55) : Theme.muted; font-size: 11px; overflow: elide; wrap: root.wrap-note ? word-wrap : no-wrap; max-height: root.wrap-note ? 44px : 16px; }
         }
         VerticalLayout { alignment: center; HorizontalLayout {
             spacing: 2px;
             if root.has-toggle: VerticalLayout { alignment: center; CenterToggle { checked: root.on; toggled => { root.toggle(); } } }
             if root.has-copy: IconButton { d: Icons.copy; size: 28px; tip: "Copy the address for OBS"; clicked => { root.copy(); } }
             if root.open-tip != "": IconButton { d: Icons.open; size: 28px; tip: root.open-tip; clicked => { root.open(); } }
-            IconButton { d: Icons.gear; size: 28px; tip: root.gear-tip; clicked => { root.gear(); } }
+            if root.has-gear: IconButton { d: Icons.gear; size: 28px; tip: root.gear-tip; clicked => { root.gear(); } }
         } }
     }
 }
@@ -5916,37 +5919,27 @@ component BotPage inherits Rectangle {
                         if r.key == "socials": StreamTile { tint: BotLook.tile(2); horizontal-stretch: 1; r: r; d: Icons.link; addr: "http://127.0.0.1:" + root.port + "/socials"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
                     }
                 }
-                if root.widgets-view == "docks": HorizontalLayout {
-                    spacing: 8px;
-                    for d[di] in [
-                        { n: "Chat Dock", t: "Twitch and Kick chat in OBS, with delete, time-out and ban on every message, and a box to chat back.", p: "/dock/chat", i: Icons.chat, k: "dockchat" },
-                        { n: "Activity Feed", t: "Follows, subs, bits, raids, rewards and the rest in OBS, each alert replayed with a click.", p: "/dock/activity", i: Icons.bell, k: "dockfeed" },
-                        { n: "Moderation Dock", t: "Pile-Up, Raid Lockdown, chat modes, Shield Mode and Auto-Ban on their own, beside your chat. You change it in the Chat Dock's settings.", p: "/dock/mod", i: Icons.shield, k: "dockchat" },
-                        { n: "Stream Info", t: "Your title and category on Twitch and Kick, changed on both at once, without opening their dashboards.", p: "/dock/info", i: Icons.broadcast, k: "" },
-                        { n: "Viewer List", t: "Who's in your chat, with moderators, VIPs and subscribers first, and a time-out or ban a click away.", p: "/dock/viewers", i: Icons.person, k: "" },
-                    ]: Rectangle {
-                        horizontal-stretch: 1;
-                        preferred-width: 0px;
-                        min-width: 0px;
-                        height: 92px;
-                        border-radius: 14px;
-                        background: Theme.panel.mix(BotLook.tile(di + 3), 0.9);
-                        border-width: 1px;
-                        border-color: BotLook.tile(di + 3).with-alpha(0.3);
-                        dta := TouchArea { }
-                        TipSpot { tip: d.t; hover: dta.has-hover; }
-                        VerticalLayout {
-                            padding: 12px;
-                            spacing: 4px;
-                            HorizontalLayout {
-                                spacing: 7px;
-                                VerticalLayout { alignment: center; Glyph { d: d.i; width: 16px; height: 16px; fill: root.widget-on ? Theme.accent : Theme.muted; } }
-                                Text { text: d.n; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
-                                IconButton { d: Icons.copy; size: 30px; tip: "Copy the address for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + d.p); } }
-                                if d.k != "": IconButton { d: Icons.gear; size: 30px; tip: d.n + ": its settings"; clicked => { root.act("dockset:" + d.k); } }
-                            }
-                            Text { text: "http://127.0.0.1:" + root.port + d.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
-                            Text { text: root.widget-on ? d.t : "Turn on the Stream Suite first. Its addresses work while it's running."; color: Theme.muted; font-size: 11px; overflow: elide; }
+                if root.widgets-view == "docks": ArtHead { text: "In OBS, Just for You"; }
+                if root.widgets-view == "docks": VerticalLayout {
+                    spacing: 10px;
+                    for row[ri] in [
+                        [{ n: "Chat Dock", t: "Twitch and Kick chat in OBS, with delete, time-out and ban on every message, and a box to chat back.", p: "/dock/chat", i: Icons.chat, k: "dockchat" },
+                            { n: "Activity Feed", t: "Follows, subs, bits, raids, rewards and the rest in OBS, each alert replayed with a click.", p: "/dock/activity", i: Icons.bell, k: "dockfeed" },
+                            { n: "Moderation Dock", t: "Pile-Up, Raid Lockdown, chat modes, Shield Mode and Auto-Ban on their own, beside your chat. You change it in the Chat Dock's settings.", p: "/dock/mod", i: Icons.shield, k: "dockchat" }],
+                        [{ n: "Stream Info", t: "Your title and category on Twitch and Kick, changed on both at once, without opening their dashboards.", p: "/dock/info", i: Icons.broadcast, k: "" },
+                            { n: "Viewer List", t: "Who's in your chat, with moderators, VIPs and subscribers first, and a time-out or ban a click away.", p: "/dock/viewers", i: Icons.person, k: "" }],
+                    ]: HorizontalLayout {
+                        spacing: 10px;
+                        for d[di] in row: WidgetTile {
+                            horizontal-stretch: 1;
+                            preferred-width: 0px;
+                            min-width: 0px;
+                            height: 92px;
+                            wrap-note: true;
+                            tint: BotLook.tile(di + ri * 3 + 3); name: d.n; d: d.i; on: root.widget-on; has-toggle: false; has-gear: d.k != ""; gear-tip: d.n + ": its settings";
+                            note: root.widget-on ? d.t : "Turn on the Stream Suite first. Its addresses work while it's running.";
+                            copy => { root.act("copy:http://127.0.0.1:" + root.port + d.p); }
+                            gear => { root.act("dockset:" + d.k); }
                         }
                     }
                 }
@@ -7499,8 +7492,9 @@ export component AppWindow inherits Window {
                         spacing: 12px;
                         RoundButton { tip: root.page == "now" && !root.can-back ? "Close Now Playing" : "Back"; d: Icons.back; enabled: root.can-back || root.page == "now" || (root.page == "settings" && root.set-cat != ""); clicked => { if (root.page == "settings" && root.set-cat != "") { root.set-cat = ""; } else if (root.page == "now" && !root.can-back) { root.nav("library"); } else { root.back(); } } }
                         Rectangle { horizontal-stretch: 1; }
-                        // the search bar: a pill in the middle
+                        // the search bar: a pill in the middle (not on the Mod Suite's page: nothing there to search)
                         Rectangle {
+                            visible: root.page-kind != "mod";
                             clip: true;
                             preferred-width: 440px;
                             min-width: 180px;
@@ -9114,8 +9108,7 @@ export component AppWindow inherits Window {
                     if root.page-kind == "mod": ModSpot {
                         vertical-stretch: 1;
                         min-height: 300px;
-                        background: Theme.bg;
-                        Text { text: "The Mod Suite is opening..."; color: Theme.muted; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
+                        // (see-through, as its page is: the app's own page shows behind it)
                     }
                     // (clear of the player's tab, laid over the page's foot: a web view draws over everything, so the
                     // Mod Suite's stops above it)

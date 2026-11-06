@@ -9346,7 +9346,7 @@ fn mod_view(shared: &Shared) {
         if let Ok(d) = omnipulse_core::data_dir() { unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", d.join("webview")); } }
         let url = format!("http://localhost:{port}/mod");
         use slint::winit_030::WinitWindowAccessor;
-        let view = ui.window().with_winit_window(|w| wry::WebViewBuilder::new().with_url(&url).with_autoplay(true).with_bounds(rect).build_as_child(w).ok()).flatten();
+        let view = ui.window().with_winit_window(|w| wry::WebViewBuilder::new().with_url(&url).with_autoplay(true).with_transparent(true).with_bounds(rect).build_as_child(w).ok()).flatten();
         if let Some(v) = view { MODV.with(|m| *m.borrow_mut() = Some((v, at))); }
         return;
     }
@@ -14456,6 +14456,8 @@ fn apply_look(shared: &Shared) {
         let mine = look::Rgb::parse(prefs["accent"].as_str().unwrap_or(ACCENTS[0]));
         (mine, prefs["accent2"].as_str().and_then(look::Rgb::parse).or(mine))
     };
+    // (the Mod Suite's page, in the app: the accents as they are on screen now)
+    if let Some(c) = c1 { omnipulse_core::modsuite::look_set(serde_json::json!({ "accent": c.hex(), "accent2": c2.unwrap_or(c).hex() })); }
     let c1 = c1.unwrap_or(look::Rgb(0x8e, 0x9b, 0xff));
     // (the docks in OBS follow it: its colours, font and corners; the theme's accent or yours, never the album art's)
     omnipulse_core::docks::app_theme_set(serde_json::json!({ "bg": p.bg.hex(), "panel": p.panel.hex(), "line": p.line.hex(), "text": p.text.hex(), "muted": p.muted.hex(),

@@ -15,26 +15,21 @@
     /* the Mod Suite's own gradient: the Stream Suite's, the other way round */
     --grad: linear-gradient(120deg, var(--accent2), var(--accent)); }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: transparent; color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
   body.sq { --r: 0px; }
   /* behind it all: the two accents as soft light, drifting slowly */
-  body::before, body::after { content: ""; position: fixed; width: 60vmax; height: 60vmax; border-radius: 50%; filter: blur(90px); opacity: .28; pointer-events: none; z-index: 0; }
-  body::before { background: var(--accent2); left: -22vmax; top: -26vmax; animation: drift 26s ease-in-out infinite alternate; }
-  body::after { background: var(--accent); right: -24vmax; bottom: -28vmax; animation: drift 32s ease-in-out infinite alternate-reverse; }
-  @keyframes drift { to { transform: translate(9vmax, 6vmax) scale(1.15); } }
-  @media (prefers-reduced-motion: reduce) { body::before, body::after { animation: none; } }
-  #grid { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; height: 100vh; gap: 10px; padding: 10px; }
+  /* (see-through: the app's own page behind it, so it sits in the app, not in a box of its own; no edge round it) */
+  #grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; height: 100vh; gap: 10px; padding: 0; }
   /* each quarter: glass over the light, its edge the gradient */
   .q { background: color-mix(in srgb, var(--panel) 78%, transparent); border: 1px solid transparent; border-radius: var(--r); overflow: hidden; min-width: 0; min-height: 0; position: relative;
     background-image: linear-gradient(color-mix(in srgb, var(--panel) 82%, transparent), color-mix(in srgb, var(--panel) 82%, transparent)), var(--grad); background-origin: border-box; background-clip: padding-box, border-box;
-    box-shadow: 0 10px 34px #0006, inset 0 1px 0 #ffffff12; backdrop-filter: blur(14px); }
+  }
   #stream { grid-column: 1; grid-row: 1; background: #000; }
   #controls { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; }
   #chat { grid-column: 2; grid-row: 1 / span 2; }
   iframe { border: 0; width: 100%; height: 100%; display: block; background: transparent; }
   /* nothing watched yet: the sword in its rings, over the gradient (as its card in Settings) */
   #stream .none { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 18px; align-items: center; justify-content: center; text-align: center; padding: 24px; color: #ffffffd8; background: var(--grad); overflow: hidden; }
-  #stream .none::before { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 30% 20%, #ffffff30, transparent 55%), linear-gradient(#0000, #0007); }
   #stream .none > * { position: relative; }
   .emblem { width: 96px; height: 96px; border-radius: 50%; background: #ffffff26; border: 1px solid #ffffff50; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 22px #ffffff0c, 0 0 0 46px #ffffff08, 0 0 0 72px #ffffff05; }
   .emblem svg { width: 52px; height: 52px; fill: #fff; }
@@ -163,7 +158,7 @@
       const t = (await (await fetch("/dock/settings.json?page=modsuite", { cache: "no-store" })).json()).theme;
       if (t && t.bg) {
         const r = document.documentElement.style;
-        r.setProperty("--bg", t.bg); r.setProperty("--panel", t.panel); r.setProperty("--line", t.line); r.setProperty("--text", t.text); r.setProperty("--dim", t.muted); r.setProperty("--accent", t.accent); r.setProperty("--accent2", t.accent2 || t.accent);
+        r.setProperty("--bg", t.bg); r.setProperty("--panel", t.panel); r.setProperty("--line", t.line); r.setProperty("--text", t.text); r.setProperty("--dim", t.muted); if (!live) { r.setProperty("--accent", t.accent); r.setProperty("--accent2", t.accent2 || t.accent); }
         document.body.classList.toggle("sq", t.rounded === false);
       }
     } catch (e) {}
@@ -171,13 +166,15 @@
   theme();
   setInterval(theme, 10000);
 
-  let S = { running: false, state: null, jam: null }, lastN = -1;
+  let S = { running: false, state: null, jam: null }, lastN = -1, live = null;
   async function poll() {
     try {
       const j = await (await fetch("/mod/state.json", { cache: "no-store" })).json();
       if (j.n === lastN) return;
       lastN = j.n;
       S = j;
+      // (the app's accents as they are on screen now, over the theme's own)
+      if (j.look && j.look.accent) { live = j.look; const r = document.documentElement.style; r.setProperty("--accent", live.accent); r.setProperty("--accent2", live.accent2 || live.accent); }
       draw();
     } catch (e) {}
   }
@@ -239,7 +236,16 @@
       return;
     }
     if (said.text && Date.now() - said.at < 15000) p.append(el("p", said.bad ? "bad" : "say", said.text));
-    if (st.note) p.append(el("p", "bad", st.note));
+    // (your sign-in needs doing again: said, with its button beside it)
+    if (st.note) {
+      const row = el("div", "warn row");
+      const t = el("span", "", st.note);
+      t.style.flex = "1";
+      const b = el("button", "b main", "Sign In to Twitch");
+      b.onclick = () => ask({ do: "signin", platform: "twitch" });
+      row.append(t, b);
+      p.append(row);
+    }
     p.append(el("h2", "", "Your Accounts"));
     for (const pl of ["twitch", "kick"]) {
       const a = st[pl] || {};

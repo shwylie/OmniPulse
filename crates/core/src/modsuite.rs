@@ -22,6 +22,14 @@ static CHAT_N: AtomicU64 = AtomicU64::new(0);
 static STATE: Mutex<Option<Value>> = Mutex::new(None);
 static JAM: Mutex<Option<Value>> = Mutex::new(None);
 static STATE_N: AtomicU64 = AtomicU64::new(0);
+/// The app's look as it is now (its accents as they're showing, the album art's among them), for its own page
+static LOOK: Mutex<Option<Value>> = Mutex::new(None);
+
+/// The app's look now: { accent, accent2 }
+pub fn look_set(v: Value) {
+    let mut l = LOOK.lock().unwrap();
+    if l.as_ref() != Some(&v) { *l = Some(v); STATE_N.fetch_add(1, Ordering::Relaxed); }
+}
 
 /// Told what the page asks: { do: ..., ... }; its answer (Ok: a line to show, or nothing) comes back by `notice`
 pub type ModHandler = std::sync::Arc<dyn Fn(Value) + Send + Sync>;
@@ -88,7 +96,7 @@ pub fn jam_set(v: Option<Value>) {
 /// with each change
 pub fn state_json() -> Value {
     let st = STATE.lock().unwrap().clone();
-    json!({ "n": STATE_N.load(Ordering::Relaxed), "running": st.is_some(), "state": st.unwrap_or(Value::Null), "jam": JAM.lock().unwrap().clone().unwrap_or(Value::Null) })
+    json!({ "n": STATE_N.load(Ordering::Relaxed), "running": st.is_some(), "state": st.unwrap_or(Value::Null), "jam": JAM.lock().unwrap().clone().unwrap_or(Value::Null), "look": LOOK.lock().unwrap().clone().unwrap_or(Value::Null) })
 }
 
 /// The plugin stopped: its state forgotten
