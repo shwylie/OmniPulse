@@ -16836,6 +16836,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 w if w.starts_with("p_") => { panel_open(&s, &w[2..]); println!("selftest: panel {} has {} fields", &w[2..], ui.get_pf_fields().row_count()); }
                 "plugread" => { panel_put(&s, "plugSource", serde_json::json!(std::env::current_dir().unwrap_or_default().join("plugins").join("internet-archive").join("manifest.json").display().to_string())); panel_press(&s, "plugCheck"); }
+                // (plugread:<file>: that plugin file read; ppress:<key>: a panel's button pressed, the fields said)
+                w if w.starts_with("plugread:") => { panel_put(&s, "plugSource", serde_json::json!(&w[9..])); panel_press(&s, "plugCheck"); }
+                w if w.starts_with("ppress:") => { println!("selftest: press {} among {}", &w[7..], ui.get_pf_fields().iter().map(|f| format!("{}:{}", f.kind, f.key)).collect::<Vec<_>>().join(" ")); panel_press(&s, &w[7..]); println!("selftest: status {}", ui.get_status()); }
                 "pfclose" => { PF_EDIT.with(|e| e.borrow_mut().take()); ui.set_pf_open(false); }
                 "qopen" => ui.set_queue_open(true),
                 "dragq" => {
