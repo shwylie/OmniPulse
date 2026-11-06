@@ -5017,6 +5017,88 @@ component PaletteGrid inherits Rectangle {
     }
 }
 
+/// A number from 0 to 255 as hex ("ff"), for a colour's code
+global ColourHex {
+    pure function digit(n: int) -> string { return n < 10 ? "" + n : n == 10 ? "a" : n == 11 ? "b" : n == 12 ? "c" : n == 13 ? "d" : n == 14 ? "e" : "f"; }
+    public pure function of(n: int) -> string { return (n < 16 ? "" : self.digit(floor(n / 16))) + self.digit(mod(n, 16)); }
+}
+
+/// Choosing a colour, the same way everywhere in the app: the colour as a swatch, which opens a palette right
+/// there (twelve hues in four shades, and greys), with your theme's two accents, the theme's own (where a colour
+/// can be left to it), and More Colours for Windows' full picker. picked(hex) when one's clicked.
+component ColourPick inherits Rectangle {
+    in property <color> shown;
+    in property <bool> has-value: true;
+    in property <bool> can-clear;
+    in property <string> clear-label: "Use the Theme's Own";
+    in property <length> size: 36px;
+    callback picked(string);
+    callback more();
+    callback clear();
+    public function open() { pal.show(); }
+    property <[{ c: color, h: string }]> sw: [{ c: #fa9e9e, h: "#fa9e9e" }, { c: #fabd9e, h: "#fabd9e" }, { c: #fadb9e, h: "#fadb9e" }, { c: #faf29e, h: "#faf29e" }, { c: #ccfa9e, h: "#ccfa9e" }, { c: #9efabd, h: "#9efabd" }, { c: #9efaeb, h: "#9efaeb" }, { c: #9ee3fa, h: "#9ee3fa" }, { c: #9ebdfa, h: "#9ebdfa" }, { c: #b59efa, h: "#b59efa" }, { c: #e39efa, h: "#e39efa" }, { c: #fa9ed4, h: "#fa9ed4" }, { c: #fa4c4c, h: "#fa4c4c" }, { c: #fa864c, h: "#fa864c" }, { c: #fac04c, h: "#fac04c" }, { c: #faec4c, h: "#faec4c" }, { c: #a3fa4c, h: "#a3fa4c" }, { c: #4cfa86, h: "#4cfa86" }, { c: #4cfadd, h: "#4cfadd" }, { c: #4ccffa, h: "#4ccffa" }, { c: #4c86fa, h: "#4c86fa" }, { c: #784cfa, h: "#784cfa" }, { c: #cf4cfa, h: "#cf4cfa" }, { c: #fa4cb2, h: "#fa4cb2" }, { c: #f20d0d, h: "#f20d0d" }, { c: #f2590d, h: "#f2590d" }, { c: #f2a60d, h: "#f2a60d" }, { c: #f2df0d, h: "#f2df0d" }, { c: #80f20d, h: "#80f20d" }, { c: #0df259, h: "#0df259" }, { c: #0df2cc, h: "#0df2cc" }, { c: #0db9f2, h: "#0db9f2" }, { c: #0d59f2, h: "#0d59f2" }, { c: #460df2, h: "#460df2" }, { c: #b90df2, h: "#b90df2" }, { c: #f20d93, h: "#f20d93" }, { c: #9c1111, h: "#9c1111" }, { c: #9c4011, h: "#9c4011" }, { c: #9c6e11, h: "#9c6e11" }, { c: #9c9111, h: "#9c9111" }, { c: #579c11, h: "#579c11" }, { c: #119c40, h: "#119c40" }, { c: #119c85, h: "#119c85" }, { c: #11799c, h: "#11799c" }, { c: #11409c, h: "#11409c" }, { c: #34119c, h: "#34119c" }, { c: #79119c, h: "#79119c" }, { c: #9c1162, h: "#9c1162" }, { c: #ffffff, h: "#ffffff" }, { c: #e8e8e8, h: "#e8e8e8" }, { c: #d1d1d1, h: "#d1d1d1" }, { c: #b9b9b9, h: "#b9b9b9" }, { c: #a2a2a2, h: "#a2a2a2" }, { c: #8b8b8b, h: "#8b8b8b" }, { c: #747474, h: "#747474" }, { c: #5d5d5d, h: "#5d5d5d" }, { c: #464646, h: "#464646" }, { c: #2e2e2e, h: "#2e2e2e" }, { c: #171717, h: "#171717" }, { c: #000000, h: "#000000" }];
+    width: root.size;
+    height: root.size;
+    border-radius: 9px;
+    border-width: 1px;
+    border-color: cpa.has-hover ? Theme.text : Theme.line;
+    background: root.has-value ? root.shown : Theme.bg;
+    if !root.has-value: Text { text: "Auto"; color: Theme.muted; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
+    cpa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { pal.show(); } }
+    TipSpot { tip: "Choose a colour"; hover: cpa.has-hover; }
+    pal := PopupWindow {
+        PopBeat { }
+        x: 0px;
+        y: root.height + 6px;
+        width: 12 * 24px + 20px;
+        close-policy: close-on-click-outside;
+        Rectangle {
+            background: Theme.menu;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.line;
+            drop-shadow-blur: 18px;
+            drop-shadow-color: #00000070;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 8px;
+                Text { text: "Pick a Colour"; color: Theme.text; font-size: 12px; font-weight: 700; }
+                VerticalLayout {
+                    spacing: 2px;
+                    for r in 5: HorizontalLayout {
+                        spacing: 2px;
+                        for c in 12: Rectangle {
+                            width: 22px;
+                            height: 22px;
+                            border-radius: 5px;
+                            background: root.sw[r * 12 + c].c;
+                            border-width: sa.has-hover ? 2px : 0px;
+                            border-color: Theme.text;
+                            sa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.picked(root.sw[r * 12 + c].h); pal.close(); } }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    Text { text: "Your theme:"; color: Theme.muted; font-size: 11px; vertical-alignment: center; }
+                    for t in [Theme.accent-own, Theme.accent-2-own]: Rectangle {
+                        width: 22px; height: 22px; border-radius: 11px; background: t;
+                        border-width: ta.has-hover ? 2px : 0px; border-color: Theme.text;
+                        ta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.picked("#" + (t.red < 16 ? "0" : "") + ColourHex.of(t.red) + (t.green < 16 ? "0" : "") + ColourHex.of(t.green) + (t.blue < 16 ? "0" : "") + ColourHex.of(t.blue)); pal.close(); } }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    Pill { label: "More Colours..."; tip: "Windows' full colour picker"; clicked => { pal.close(); root.more(); } }
+                    if root.can-clear && root.has-value: Pill { label: root.clear-label; clicked => { pal.close(); root.clear(); } }
+                }
+            }
+        }
+    }
+}
+
 component BotFieldRow inherits VerticalLayout {
     in property <BotField> f;
     callback set(string, string);
@@ -5284,16 +5366,11 @@ component BotFieldRow inherits VerticalLayout {
         HorizontalLayout {
             spacing: 8px;
             alignment: start;
-            Rectangle {
-                width: 36px;
-                height: 36px;
-                border-radius: 9px;
-                border-width: 1px;
-                border-color: csa.has-hover ? Theme.muted : Theme.line;
-                background: root.f.value != "" ? root.f.c1 : Theme.bg;
-                if root.f.value == "": Text { text: "Auto"; color: Theme.muted; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
-                csa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("colour:" + root.f.key); } }
-                TipSpot { tip: "Choose a colour"; hover: csa.has-hover; }
+            ccp := ColourPick {
+                shown: root.f.c1; has-value: root.f.value != ""; can-clear: root.f.n == 1;
+                picked(h) => { root.set(root.f.key, h); }
+                more => { root.act("colour:" + root.f.key); }
+                clear => { root.act("colour:" + root.f.key + ":clear"); }
             }
             Rectangle {
                 width: 104px;
@@ -5306,7 +5383,7 @@ component BotFieldRow inherits VerticalLayout {
                 chex := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: root.f.value; accepted => { root.set(root.f.key, self.text); } }
                 if chex.text == "": Text { x: 10px; text: root.f.n == 1 ? "Theme's own" : root.f.extra; color: Theme.muted.with-alpha(0.6); font-size: 12px; vertical-alignment: center; }
             }
-            VerticalLayout { alignment: center; Pill { label: "Choose..."; clicked => { root.act("colour:" + root.f.key); } } }
+            VerticalLayout { alignment: center; Pill { label: "Choose..."; clicked => { ccp.open(); } } }
             if root.f.n == 1 && root.f.value != "": VerticalLayout { alignment: center; Pill { label: "Use the Theme's Own"; clicked => { root.act("colour:" + root.f.key + ":clear"); } } }
         }
     }
@@ -9510,8 +9587,12 @@ export component AppWindow inherits Window {
                               if f.kind == "color": HorizontalLayout {
                                   spacing: 8px;
                                   y: (parent.height - self.height) / 2;
-                                  Rectangle { width: 30px; height: 30px; border-radius: 6px; border-width: 1px; border-color: Theme.line; background: transparent;
-                                      Rectangle { x: 3px; y: 3px; width: parent.width - 6px; height: parent.height - 6px; border-radius: 4px; background: f.at >= 0 ? Colors.rgb(floor(f.at / 65536), mod(floor(f.at / 256), 256), mod(f.at, 256)) : transparent; } }
+                                  pcp := ColourPick {
+                                      size: 30px;
+                                      shown: f.at >= 0 ? Colors.rgb(floor(f.at / 65536), mod(floor(f.at / 256), 256), mod(f.at, 256)) : transparent; has-value: f.at >= 0;
+                                      picked(h) => { root.pf-set(i, h); }
+                                      more => { root.pf-set(i, "\u{3}pick"); }
+                                  }
                                   Rectangle {
                                       clip: true;
                                       width: 96px;
@@ -9522,7 +9603,7 @@ export component AppWindow inherits Window {
                                       border-color: Theme.line;
                                       TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 16px - 2px) { self.sx = parent.width - 16px - 2px - p.x; } }  x: 8px + min(0px, max(parent.width - 16px - self.width, self.sx)); width: max(parent.width - 16px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: f.value; accepted => { root.pf-set(i, self.text); keys.focus(); } }
                                   }
-                                  Pill { label: "Choose..."; clicked => { root.pf-set(i, "\u{3}pick"); } }
+                                  Pill { label: "Choose..."; clicked => { pcp.open(); } }
                               }
                               // a switch with its own settings beside it (Alerts: Configure, with it on)
                               if f.kind == "togglecfg" && f.value == "true": VerticalLayout { alignment: center; Pill { label: f.options.length > 0 ? f.options[0] : "Configure"; clicked => { root.pf-set(i, "btn:0"); } } }
