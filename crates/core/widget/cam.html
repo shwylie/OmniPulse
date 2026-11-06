@@ -19,7 +19,29 @@
   #frame { position: absolute; box-sizing: border-box; pointer-events: none; }
   #frame .edge { position: absolute; inset: 0; border-radius: var(--r, 1.4rem); }
   .s-square { --r: 0; } .s-rounded { --r: 1.4rem; } .s-circle { --r: 50%; } .s-arch { --r: 50% 50% 1.2rem 1.2rem / 40% 40% 1.2rem 1.2rem; }
-  .s-hex .edge { border-radius: 0 !important; clip-path: polygon(12% 0, 88% 0, 100% 50%, 88% 100%, 12% 100%, 0 50%); }
+  .s-hex .edge, .s-hex .sweep { display: none !important; }
+  #frame svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  #frame svg path { fill: none; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+  .hx { stroke: var(--c1); stroke-width: calc(0.3rem * var(--bw)); }
+  .hx2 { stroke: var(--c2); stroke-width: calc(0.2rem * var(--bw)); display: none; }
+  .b-thick .hx { stroke-width: calc(0.6rem * var(--bw)); }
+  .b-glow .hx, .b-neon .hx { filter: drop-shadow(0 0 0.5rem var(--c1)) drop-shadow(0 0 1.1rem var(--c1)); }
+  .b-double .hx2, .b-neon .hx2, .b-comic .hx2 { display: block; }
+  .b-neon .hx2 { filter: drop-shadow(0 0 0.4rem var(--c2)); }
+  .b-gradient .hx, .b-duo .hx, .b-edge .hx { stroke: url(#hxg); stroke-width: calc(0.4rem * var(--bw)); }
+  .b-dashed .hx { stroke-dasharray: 14 10; }
+  .b-dotted .hx { stroke: var(--c2); stroke-dasharray: 1 13; stroke-linecap: round; stroke-width: calc(0.45rem * var(--bw)); }
+  .b-comic .hx { stroke: #111; stroke-width: calc(0.5rem * var(--bw)); }
+  .b-comic .hx2 { stroke: var(--c1); stroke-width: calc(0.35rem * var(--bw)); }
+  .b-glass .hx { stroke: rgba(255, 255, 255, 0.8); stroke-width: calc(0.14rem * var(--bw)); }
+  .hxrun { stroke: #fff; stroke-width: calc(0.3rem * var(--bw)); stroke-dasharray: 10 90; stroke-linecap: round; filter: drop-shadow(0 0 0.4rem #fff); animation: hxrun 3.2s linear infinite; display: none; }
+  .a-light .hxrun, .b-edge .hxrun { display: block; }
+  @keyframes hxrun { to { stroke-dashoffset: -100; } }
+  .a-pulse svg { animation: fpulse 2.4s ease-in-out infinite; }
+  .a-hue svg { animation: fhue 9s linear infinite; }
+  .a-flash svg { animation: fflash 5s ease-in-out infinite; }
+  /* (the app's own preview: a live part as a labelled box, not its whole page, so the preview keeps up) */
+  .part.stand { display: flex; align-items: center; justify-content: center; border-radius: 0.8rem; border: 0.12rem dashed rgba(255, 255, 255, 0.5); background: rgba(255, 255, 255, 0.08); font-weight: 700; font-size: 1.3rem; color: rgba(255, 255, 255, 0.9); }
   /* (how heavy its lines are: each border's own widths, times this) */
   #frame { --bw: 1; } #frame.k-thin { --bw: 0.6; } #frame.k-thick { --bw: 1.6; } #frame.k-heavy { --bw: 2.4; }
   .b-thin .edge { box-shadow: inset 0 0 0 calc(0.25rem * var(--bw)) var(--c1); }
@@ -130,6 +152,7 @@
   // (each live part: its widget's page, and the shape of its slot as wide : tall)
   const LIVE = { now: ["/", 3.6], alerts: ["/alerts", 3.6], follow: ["/latest-follow", 4.6], sub: ["/latest-sub", 4.6], goals: ["/goals", 1.8], hype: ["/hype", 4.6], chat: ["/chat", 0.7], socials: ["/socials", 4.2] };
   const SIZES = { small: 0.6, medium: 0.85, large: 1.1 };
+  const NAMES = { now: "Now Playing", alerts: "Alerts", follow: "Latest Follow", sub: "Latest Sub", goals: "Goals", hype: "Hype Train", chat: "Chat", socials: "Social Plug" };
   let sig = "";
 
   function box(c) {
@@ -242,11 +265,21 @@
     [cam, fr].forEach((e) => Object.assign(e.style, { left: (b.x / 100) * W + "px", top: (b.y / 100) * H + "px", width: (b.w / 100) * W + "px", height: (b.h / 100) * H + "px" }));
     cam.style.borderRadius = getComputedStyle(document.body).getPropertyValue("--r") || "";
     fr.innerHTML = '<div class="edge"></div><div class="sweep"></div>';
+    if ((c.shape || "rounded") === "hex") {
+      // (its six sides, in the frame's own pixels; a second line a little inside it, for the borders with two)
+      const fw = (b.w / 100) * W, fh = (b.h / 100) * H, hex = [[0.12, 0], [0.88, 0], [1, 0.5], [0.88, 1], [0.12, 1], [0, 0.5]];
+      const d = (k) => "M" + hex.map(([x, y]) => ((0.5 + (x - 0.5) * k) * fw).toFixed(1) + " " + ((0.5 + (y - 0.5) * k) * fh).toFixed(1)).join(" L") + " Z";
+      fr.insertAdjacentHTML("beforeend", '<svg viewBox="0 0 ' + fw + " " + fh + '" preserveAspectRatio="none"><defs><linearGradient id="hxg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:var(--c1)"/><stop offset="1" style="stop-color:var(--c2)"/></linearGradient></defs><path class="hx" d="' + d(1) + '"/><path class="hx2" d="' + d(0.93) + '"/><path class="hxrun" pathLength="100" d="' + d(1) + '"/></svg>');
+      cam.style.clipPath = "polygon(12% 0, 88% 0, 100% 50%, 88% 100%, 12% 100%, 0 50%)";
+    }
     stage.append(cam, fr);
     for (const { p, box: r } of arrange(c, b, W, H)) {
       if (!r) continue;
       let el;
-      if (LIVE[p.type]) {
+      if (LIVE[p.type] && LIVEPREV) {
+        el = document.createElement("div"); el.className = "part stand"; el.textContent = NAMES[p.type] || p.type;
+        put(el, r);
+      } else if (LIVE[p.type]) {
         const src = LIVE[p.type][0] + (PREVIEW ? "?preview=1" : "");
         el = keep[src] || Object.assign(document.createElement("div"), { innerHTML: '<iframe src="' + src + '" allowtransparency="true"></iframe>' });
         el.className = "part live"; el.dataset.src = src;
@@ -285,12 +318,13 @@
   }
   setInterval(tick, 10000);
 
-  let last = null;
+  let last = null, base = null, baseAt = 0;
   // (switched off in OmniPulse (its Widgets page): nothing shown or animating, so OBS spends nothing on it)
   const offIn = (s, id) => { const off = !!(s && s.suite && Array.isArray(s.suite.off) && s.suite.off.includes(id)); document.documentElement.style.display = off ? "none" : ""; return off; };
   async function poll() {
     try {
-      const s = await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
+      const s = LIVEPREV && base && Date.now() - baseAt < 1000 ? Object.assign({}, base) : await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
+      if (LIVEPREV && !(base && Date.now() - baseAt < 1000)) { base = Object.assign({}, s); baseAt = Date.now(); }
       if (LIVEPREV) { try { const pv = await (await fetch("/creators-preview.json", { cache: "no-store" })).json(); if (Array.isArray(pv.list)) { s.suite = s.suite || {}; s.suite.creators = pv.list.map((c) => Object.assign({}, c, { colors: c.colors || { c1: s.accent, c2: s.accent2 || s.accent } })); } } catch (e) {} }
       if (s.accent) { document.body.style.setProperty("--c1", s.accent); document.body.style.setProperty("--c2", s.accent2 || s.accent); }
       if (!PREVIEW && offIn(s, "cam")) return;
@@ -298,7 +332,7 @@
       const c = all.find((x) => x.id === ID) || all.find((x) => x.kind === "cam") || null;
       if (c) { last = [c, s]; draw(c, s); }
     } catch (e) {}
-    setTimeout(poll, /[?&]preview=1/.test(location.search) ? 250 : 1500);
+    setTimeout(poll, LIVEPREV ? 80 : /[?&]preview=1/.test(location.search) ? 250 : 1500);
   }
   addEventListener("resize", () => { sig = ""; if (last) draw(last[0], last[1]); });
   poll();

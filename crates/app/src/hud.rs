@@ -98,7 +98,7 @@ pub fn shape_points(shape: &str, w: f32, h: f32) -> Vec<(f32, f32)> {
 
 /// The element inside a box you drew, wrapped: its outline found (what's unlike the colour round the box's edge,
 /// the biggest such patch near the middle), the convex shape round it, and that cut down to its few main corners
-/// (at most 8; fewer while that keeps nearly all of it). Its box (the screenshot's pixels) and its corners (as
+/// (at most 20; fewer while that keeps nearly all of it). Its box (the screenshot's pixels) and its corners (as
 /// fractions of the box); none if nothing stands out there
 pub fn wrap(img: &image::RgbImage, x: f32, y: f32, w: f32, h: f32) -> Option<(f32, f32, f32, f32, Vec<(f32, f32)>)> {
     let (iw, ih) = (img.width() as i64, img.height() as i64);
@@ -150,28 +150,56 @@ pub fn wrap(img: &image::RgbImage, x: f32, y: f32, w: f32, h: f32) -> Option<(f3
     }
     let (id, size) = best?;
     if (size as f32) < 0.03 * w * h { return None; }
-    // (its outline: each row's ends, as pixel corners, then the convex shape round them)
-    let mut pts: Vec<(f32, f32)> = Vec::new();
+    // (its outline: each row's own ends, down its left side and back up its right, so it steps in where the part
+    // does (a convex shape round it would bulge out past a stepped or slanted part's corners). Rows with nothing in
+    // them (a gap between two parts) take the row before's ends; each side evened out over five rows, so a stray
+    // pixel doesn't make a spike)
+    let ours = |v: &u32| *v == id || also.contains(v);
+    let mut rows: Vec<(f32, f32, f32)> = Vec::new();   // (row, left, right)
+    let (mut first, mut last_row) = (None, 0usize);
     for cy in 0..rh {
         let row = &label[cy * rw..(cy + 1) * rw];
-        let ours = |v: &u32| *v == id || also.contains(v);
         if let (Some(l), Some(r)) = (row.iter().position(|v| ours(v)), row.iter().rposition(|v| ours(v))) {
-            for (px, py) in [(l as f32, cy as f32), (r as f32 + 1.0, cy as f32), (l as f32, cy as f32 + 1.0), (r as f32 + 1.0, cy as f32 + 1.0)] { pts.push((px + x0 as f32, py + y0 as f32)); }
+            if first.is_none() { first = Some(cy); }
+            last_row = cy;
+            rows.push((cy as f32, l as f32, r as f32 + 1.0));
+        } else if first.is_some() {
+            if let Some(&(_, l, r)) = rows.last() { rows.push((cy as f32, l, r)); }
         }
     }
-    let mut hull = convex_hull(pts);
-    if hull.len() < 3 { return None; }
-    // (cut down to its main corners: the corner that adds least taken away, while it adds under 3% (or there
-    // are more than 8), keeping at least 3)
-    let area = |p: &[(f32, f32)]| (0..p.len()).map(|i| { let (a, b) = (p[i], p[(i + 1) % p.len()]); a.0 * b.1 - b.0 * a.1 }).sum::<f32>().abs() / 2.0;
-    let whole = area(&hull);
+    rows.retain(|r| r.0 <= last_row as f32);
+    if rows.len() < 3 { return None; }
+    let even = |k: usize| -> Vec<f32> {
+        (0..rows.len()).map(|i| {
+            // (as many rows each side as there are both sides, two at most: the ends themselves, not pulled in)
+            let half = 2.min(i).min(rows.len() - 1 - i);
+            let (a, z) = (i - half, i + half);
+            let mut v: Vec<f32> = rows[a..=z].iter().map(|r| if k == 1 { r.1 } else { r.2 }).collect();
+            v.sort_by(f32::total_cmp);
+            v[v.len() / 2]
+        }).collect()
+    };
+    let (ls, rs) = (even(1), even(2));
+    let mut hull: Vec<(f32, f32)> = Vec::new();
+    let (top, bottom) = (rows[0].0, rows[rows.len() - 1].0 + 1.0);
+    hull.push((ls[0] + x0 as f32, top + y0 as f32));
+    for (i, r) in rows.iter().enumerate() { hull.push((ls[i] + x0 as f32, r.0 + 0.5 + y0 as f32)); }
+    hull.push((ls[rows.len() - 1] + x0 as f32, bottom + y0 as f32));
+    hull.push((rs[rows.len() - 1] + x0 as f32, bottom + y0 as f32));
+    for (i, r) in rows.iter().enumerate().rev() { hull.push((rs[i] + x0 as f32, r.0 + 0.5 + y0 as f32)); }
+    hull.push((rs[0] + x0 as f32, top + y0 as f32));
+    // (cut down to its main corners: the corner that sticks out least from the line between its neighbours taken
+    // away, while that's by less than a couple of pixels (2% of its shorter side), or there are more than 20; at
+    // least 3 kept)
+    let tol = (0.02 * (rows.len() as f32).min(rs.iter().zip(&ls).map(|(r, l)| r - l).fold(0.0, f32::max))).max(1.6);
     loop {
         if hull.len() <= 3 { break; }
         let n = hull.len();
-        let tri = |i: usize| { let (a, b, c) = (hull[(i + n - 1) % n], hull[i], hull[(i + 1) % n]); ((b.0 - a.0) * (c.1 - a.1) - (c.0 - a.0) * (b.1 - a.1)).abs() / 2.0 };
-        let (i, least) = (0..n).map(|i| (i, tri(i))).min_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or((0, 0.0));
-        if n > 12 || least < whole * 0.012 && whole - area(&hull) + least < whole * 0.03 { hull.remove(i); } else { break; }
+        let off = |i: usize| { let (a, b, c) = (hull[(i + n - 1) % n], hull[i], hull[(i + 1) % n]); ((b.0 - a.0) * (c.1 - a.1) - (c.0 - a.0) * (b.1 - a.1)).abs() / ((c.0 - a.0).hypot(c.1 - a.1)).max(0.001) };
+        let (i, least) = (0..n).map(|i| (i, off(i))).min_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or((0, 0.0));
+        if n > 20 || least < tol { hull.remove(i); } else { break; }
     }
+    if hull.len() < 3 { return None; }
     let (bx0, by0) = hull.iter().fold((f32::MAX, f32::MAX), |a, p| (a.0.min(p.0), a.1.min(p.1)));
     let (bx1, by1) = hull.iter().fold((f32::MIN, f32::MIN), |a, p| (a.0.max(p.0), a.1.max(p.1)));
     let (bw, bh) = ((bx1 - bx0).max(1.0), (by1 - by0).max(1.0));

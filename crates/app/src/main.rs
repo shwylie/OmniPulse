@@ -9469,7 +9469,7 @@ fn bot_live(shared: &Shared) {
     let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(x as f64, y as f64).into(), size: wry::dpi::LogicalSize::new(w as f64, h as f64).into() };
     // (the page's settings as they are, given to the Suite for what the overlay would be: when they change)
     let tick = BLIVE_TICK.with(|t| { t.set(t.get().wrapping_add(1)); t.get() });
-    if tick % 5 == 0 {
+    if tick % 2 == 0 {
         let cur = bot_current(shared);
         let vals: serde_json::Map<String, serde_json::Value> = cur.into_iter().filter(|(k, _)| k.starts_with("cam") || k.starts_with("hud") || k.starts_with("suite") || k == "themeFonts" || k == "login").collect();
         let sig = serde_json::Value::Object(vals.clone()).to_string();
