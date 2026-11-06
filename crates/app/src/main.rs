@@ -9260,7 +9260,13 @@ fn live_path(ui: &AppWindow) -> Option<String> {
 fn live_widget(shared: &Shared) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     let g = ui.global::<WLive>();
-    let path = if ui.get_pf_open() { live_path(&ui) } else { None };
+    // (its spot still on the page: counting; stopped (the page left, another opened), there's none, and the preview
+    // goes, however it was left)
+    thread_local! { static PULSE: std::cell::Cell<(i32, Option<std::time::Instant>)> = const { std::cell::Cell::new((0, None)) }; static TICK: std::cell::Cell<u32> = const { std::cell::Cell::new(0) }; }
+    let now = g.get_pulse();
+    let alive = PULSE.with(|p| { let (last, at) = p.get(); if now != last { p.set((now, Some(std::time::Instant::now()))); true } else { at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(900)) } });
+    let tick = TICK.with(|t| { t.set(t.get().wrapping_add(1)); t.get() });
+    let path = if ui.get_pf_open() && alive { live_path(&ui) } else { None };
     let Some(path) = path else {
         if LIVE.with(|l| l.borrow_mut().take().is_some()) { g.set_live(false); repaint_all(&ui); }
         return;
@@ -9307,6 +9313,9 @@ fn live_widget(shared: &Shared) {
             let _ = view.load_url(&format!("http://127.0.0.1:{port}{path}"));
             *was = path;
         }
+        // (and put where it should be again now and then: a place set while the page was still settling (the queue
+        // opened and closed quickly) is put right)
+        if show && tick % 12 == 0 { let _ = view.set_bounds(rect); }
         if *last != at {
             if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: live {was} at {at:?}"); }
             if show { let _ = view.set_bounds(rect); }
@@ -9434,7 +9443,10 @@ fn bot_live(shared: &Shared) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     let sheet = BOT_SHEET.with(|b| b.borrow().clone());
     let g = ui.global::<BLive>();
-    let want = if ui.get_pf_open() && matches!(sheet.as_str(), "cam" | "hud" | "vis") && g.get_which() == sheet.as_str() { Some(sheet) } else { None };
+    thread_local! { static BPULSE: std::cell::Cell<(i32, Option<std::time::Instant>)> = const { std::cell::Cell::new((0, None)) }; }
+    let pulse = g.get_pulse();
+    let alive = BPULSE.with(|p| { let (last, at) = p.get(); if pulse != last { p.set((pulse, Some(std::time::Instant::now()))); true } else { at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(900)) } });
+    let want = if alive && ui.get_pf_open() && matches!(sheet.as_str(), "cam" | "hud" | "vis") && g.get_which() == sheet.as_str() { Some(sheet) } else { None };
     let Some(which) = want else {
         if BLIVE.with(|b| b.borrow_mut().take().is_some()) { omnipulse_core::widget::creators_preview_set(None); repaint_all(&ui); }
         // (the spot's gone with its page: forgotten, so the next page's is its own)
@@ -9492,6 +9504,7 @@ fn bot_live(shared: &Shared) {
         if show != last.4 { let _ = view.set_visible(show); if !show { repaint_all(&ui); } }
         *last = at;
     });
+    if show && tick % 12 == 0 { BLIVE.with(|b| if let Some(x) = b.borrow().as_ref() { let _ = x.1.set_bounds(rect); }); }
 }
 
 /// Moving between pages (another page, a settings screen, the Actions editor opened or closed): the whole window
@@ -13849,7 +13862,9 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
         }
         // (the Chat Dock's emote menu: Twitch's and Kick's own emotes, as the chatbot reads them)
         "dockEmotes" => {
-            if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
+            if plugin != "chatbot" && plugin != MOD { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
+            // (the Mod Suite's: only while the Stream Suite isn't running to give its own, which has Kick's too)
+            if plugin == MOD && plugrun::get(BOT).is_some() { return send(serde_json::json!({ "ok": true })); }
             let list: Vec<serde_json::Value> = args.first().and_then(|v| v.as_array()).cloned().unwrap_or_default().into_iter()
                 .filter(|e| e["c"].is_string() && e["u"].as_str().is_some_and(|u| u.starts_with("https://")) && matches!(e["f"].as_str(), Some("twitch" | "kick")))
                 .take(5000).collect();

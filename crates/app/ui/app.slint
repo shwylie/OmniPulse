@@ -130,6 +130,8 @@ export global WLive {
     in-out property <bool> seen;
     in-out property <int> beat;
     in-out property <bool> live;
+    /// (counted up a few times a second by the spot while it's there: stopped, there's no spot any more)
+    in-out property <int> pulse;
 }
 
 /// A channel panel's words being written (Panels): the dialog open, whose words, and where its editor goes (a web
@@ -152,10 +154,12 @@ export global BLive {
     in-out property <length> w;
     in-out property <length> h;
     in-out property <string> which;
+    in-out property <int> pulse;
 }
 
 component BotLiveSpot inherits Rectangle {
     in property <string> which;
+    Timer { interval: 200ms; running: true; triggered => { BLive.pulse += 1; BLive.which = root.which; } }
     property <length> lx: self.absolute-position.x;
     property <length> ly: self.absolute-position.y;
     changed lx => { BLive.x = self.lx; }
@@ -2793,6 +2797,8 @@ component StreamTile inherits Rectangle {
     // (its name here: the row's, unless it's called something else where it's shown)
     in property <string> name: root.r.label;
     in property <string> addr;
+    /// (its address's end ("/lyrics"), shown as the other widgets' tiles show theirs: none, its whole address)
+    in property <string> path;
     in property <string> d;
     callback toggle(string);
     callback more(string);
@@ -2818,7 +2824,8 @@ component StreamTile inherits Rectangle {
             Text { text: root.name; color: Theme.text; font-weight: 800; font-size: 14px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
         }
         Text { text: root.r.note; color: Theme.muted; font-size: 12px; overflow: elide; }
-        if root.r.on && root.addr != "": Text { text: root.addr; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
+        if root.path != "": Text { text: (root.r.on ? "On" : "Off") + " \u{b7} " + root.path; color: root.r.on ? root.tint.mix(Theme.text, 0.55) : Theme.muted; font-size: 11px; overflow: elide; }
+        if root.path == "" && root.r.on && root.addr != "": Text { text: root.addr; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
         Rectangle { vertical-stretch: 1; }
         HorizontalLayout {
             spacing: 2px;
@@ -3042,6 +3049,7 @@ component LiveSpot inherits Rectangle {
     changed width => { WLive.w = self.width; }
     changed height => { WLive.h = self.height; }
     changed lseen => { WLive.seen = self.lseen; }
+    Timer { interval: 200ms; running: true; triggered => { WLive.pulse += 1; } }
     init => { WLive.x = self.lx; WLive.y = self.ly; WLive.w = self.width; WLive.h = self.height; WLive.seen = self.lseen; }
 }
 
@@ -3130,6 +3138,7 @@ component WidgetPreview inherits Rectangle {
     changed cw => { WLive.w = self.cw; }
     changed ch => { WLive.h = self.ch; }
     changed lseen => { WLive.seen = self.lseen; }
+    Timer { interval: 200ms; running: true; triggered => { WLive.pulse += 1; } }
     init => { WLive.x = self.lx; WLive.y = self.ly; WLive.w = self.cw; WLive.h = self.ch; WLive.seen = self.lseen; }
     // (moving as the real one does: the progress, the record, the equaliser's bars; still with Reduce Motion)
     property <int> step;
@@ -6191,9 +6200,9 @@ component BotPage inherits Rectangle {
                         min-width: 0px;
                         padding-right: r.key == "widget" || r.key == "lyricsWidget" ? 10px : 0px;
                         // (in the Suite, the Stream Widget is its Now Playing)
-                        if r.key == "widget": StreamTile { tint: BotLook.tile(0); horizontal-stretch: 1; r: r; name: "Now Playing"; d: Icons.broadcast; addr: "http://127.0.0.1:" + root.port + "/"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
-                        if r.key == "lyricsWidget": StreamTile { tint: BotLook.tile(1); horizontal-stretch: 1; r: r; d: Icons.lyrics; addr: "http://127.0.0.1:" + root.port + "/lyrics"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
-                        if r.key == "socials": StreamTile { tint: BotLook.tile(2); horizontal-stretch: 1; r: r; d: Icons.link; addr: "http://127.0.0.1:" + root.port + "/socials"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
+                        if r.key == "widget": StreamTile { path: "/"; tint: BotLook.tile(0); horizontal-stretch: 1; r: r; name: "Now Playing"; d: Icons.broadcast; addr: "http://127.0.0.1:" + root.port + "/"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
+                        if r.key == "lyricsWidget": StreamTile { path: "/lyrics"; tint: BotLook.tile(1); horizontal-stretch: 1; r: r; d: Icons.lyrics; addr: "http://127.0.0.1:" + root.port + "/lyrics"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
+                        if r.key == "socials": StreamTile { path: "/socials"; tint: BotLook.tile(2); horizontal-stretch: 1; r: r; d: Icons.link; addr: "http://127.0.0.1:" + root.port + "/socials"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
                     }
                 }
                 if root.widgets-view == "docks": ArtHead { text: "In OBS, Just for You"; }

@@ -493,6 +493,13 @@
       if (at < text.length) out.push(document.createTextNode(text.slice(at)));
       return out;
     }
+    // (your own message as you sent it, which Twitch doesn't send back with its emotes' places: each word that's one
+    // of your Twitch emotes shown as it)
+    if (m.self && !m.emotes && ownEmotes.length) {
+      const mine = new Map(ownEmotes.filter((e) => e.f === "twitch").map((e) => [e.c, e.u]));
+      for (const part of text.split(/(\s+)/)) out.push(mine.has(part) ? emoteImg(mine.get(part), part) : document.createTextNode(part));
+      return out;
+    }
     // (Twitch's: "id:start-end,start-end/id:..." counted in characters, not UTF-16)
     const chars = Array.from(text), spots = [];
     String(m.emotes || "").split("/").filter(Boolean).forEach((part) => {

@@ -299,16 +299,33 @@ function isMod(platform) {
   push();
 }
 
+// The emotes you can use on Twitch, for the chat's emote menu and for showing them (the Stream Suite gives its own
+// list while it's running; this is for when only the Mod Suite is)
+async function emotesRead() {
+  if (!S().token || !S().userId) return;
+  const out = [];
+  try {
+    let after = "";
+    for (let i = 0; i < 20; i++) {
+      const r = await helix("GET", "chat/emotes/user?user_id=" + encodeURIComponent(S().userId) + (after ? "&after=" + encodeURIComponent(after) : ""));
+      for (const e of r.data || []) out.push({ c: e.name, u: "https://static-cdn.jtvnw.net/emoticons/v2/" + e.id + "/default/dark/2.0", f: "twitch", g: e.emote_type === "globals" || e.owner_id === "0" ? "Twitch" : "Twitch: Channels" });
+      after = (r.pagination && r.pagination.cursor) || "";
+      if (!after) break;
+    }
+  } catch (e) {}
+  if (out.length) OmniPulse.app.dockEmotes(out).catch(() => {});
+}
+
 // ---------- watching ----------
 const conn = {
-  twitch: { gen: 0, irc: null, events: null, timers: [], retry: 2000 },
+  twitch: { gen: 0, irc: null, reader: null, events: null, timers: [], retry: 2000 },
   kick: { gen: 0, sock: null, timers: [], retry: 2000, refresh: null },
 };
 
 function stopPlatform(platform) {
   const c = conn[platform];
   c.gen++;
-  for (const k of ["irc", "events", "sock"]) if (c[k]) { c[k].onclose = null; c[k].close(); c[k] = null; }
+  for (const k of ["irc", "reader", "events", "sock"]) if (c[k]) { c[k].onclose = null; c[k].close(); c[k] = null; }
   c.timers.forEach((t) => clearInterval(t));
   c.timers = [];
   if (c.refresh) { clearInterval(c.refresh); c.refresh = null; }
@@ -360,6 +377,7 @@ async function twitchWatch(p, my) {
   if (p.id === String(S().userId) || channels.some((c) => c.platform === "twitch" && c.id === p.id)) p.mod = true;
   badgesRead(u.id);
   ircConnect(p, my);
+  readerConnect(p, my);
   eventsConnect(p, my);
   liveRead(p);
   modesRead();
@@ -431,11 +449,36 @@ function ircConnect(p, my) {
       const b = String(m.tags.badges || "");
       if (m.tags.mod === "1" || /(^|,)(broadcaster|moderator|lead_moderator)\//.test(b)) isMod("twitch"); else notMod("twitch");
     }
-    else if (m.command === "PRIVMSG") onTwitch(m);
+    // (what you send that Twitch turns down: said)
+    else if (m.command === "NOTICE" && m.text) notice("Twitch: " + m.text);
+  });
+  s.onclose = () => {
+    if (c.irc !== s) return;
+    c.irc = null; p.up = false; push();
+    if (my === c.gen) { setTimeout(() => { if (my === c.gen && !c.irc) ircConnect(p, my); }, c.retry); c.retry = Math.min(c.retry * 2, 60000); }
+  };
+}
+
+// The chat itself, read on a connection of its own, signed in as no one: Twitch sends a connection everyone's
+// messages but its own, so on this one yours come back too, as they were delivered: with their emotes, their
+// badges, and an id to delete them by. (The other connection, signed in as you, sends, and says whether you're a
+// moderator.)
+function readerConnect(p, my) {
+  const c = conn.twitch;
+  const s = OmniPulse.socket("wss://irc-ws.chat.twitch.tv:443");
+  c.reader = s;
+  s.onopen = () => {
+    s.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
+    s.send("NICK justinfan" + (10000 + Math.floor(Math.random() * 80000)));
+    s.send("JOIN #" + p.login);
+  };
+  s.onmessage = (data) => String(data).split("\r\n").filter(Boolean).forEach((line) => {
+    if (line.startsWith("PING")) { s.send("PONG" + line.slice(4)); return; }
+    const m = parse(line);
+    if (m.command === "PRIVMSG") onTwitch(m);
     else if (m.command === "CLEARMSG") gone("twitch", m.tags["target-msg-id"] || "", "");
     else if (m.command === "CLEARCHAT") gone("twitch", "", m.text || "");
     else if (m.command === "USERNOTICE" && m.tags["system-msg"]) notice("Twitch: " + m.tags["system-msg"] + (m.text ? ": " + m.text : ""));
-    else if (m.command === "NOTICE" && m.text) notice("Twitch: " + m.text);
     else if (m.command === "ROOMSTATE") {
       const t = m.tags, ch = modes.chat;
       if ("slow" in t) { ch.slow = num(t.slow) > 0; if (ch.slow) ch.slowSecs = num(t.slow); }
@@ -447,9 +490,9 @@ function ircConnect(p, my) {
     }
   });
   s.onclose = () => {
-    if (c.irc !== s) return;
-    c.irc = null; p.up = false; push();
-    if (my === c.gen) { setTimeout(() => { if (my === c.gen && !c.irc) ircConnect(p, my); }, c.retry); c.retry = Math.min(c.retry * 2, 60000); }
+    if (c.reader !== s) return;
+    c.reader = null;
+    if (my === c.gen) setTimeout(() => { if (my === c.gen && !c.reader) readerConnect(p, my); }, c.retry);
   };
 }
 
@@ -701,9 +744,8 @@ async function act(cmd) {
           if (p === "kick") await kickApi("POST", "chat", { content: text, type: "user", broadcaster_user_id: Number(w.id) });
           else {
             if (!conn.twitch.irc || !w.up) throw new Error("not in the chat yet");
+            // (shown when Twitch sends it back, on the reading connection: delivered, with its emotes)
             conn.twitch.irc.send("PRIVMSG #" + w.login + " :" + text.slice(0, 480));
-            // (Twitch never sends your own message back: shown here as sent)
-            onTwitch({ nick: S().login, text, tags: { "display-name": S().login, badges: w.mod ? "moderator/1" : "", "user-id": String(S().userId || ""), id: "" } });
           }
         } catch (e) { failed.push(PNAME[p] + ": " + e.message); }
       }
@@ -801,6 +843,7 @@ async function start() {
     if (!(await validate(S().token)) && !(await renew())) { await keep({ token: "", refresh: "" }); note = "Your Twitch sign-in ran out. Sign in again."; }
   }
   await channelsRead();
+  emotesRead().catch(() => {});
   const last = S().watched;
   if (last && (last.twitch || last.kick)) act({ do: "watchboth", twitch: last.twitch || "", kick: last.kick || "" }).catch((e) => notice("Couldn't watch again: " + e.message));
 }
