@@ -131,6 +131,11 @@ pub fn load() -> WebState {
     if let (Some(mine), Some(all)) = (native_prefs().as_object().cloned(), s.prefs.as_object_mut()) {
         all.extend(mine);
     }
+    // (a self-test beside a running OmniPulse: its widgets' server on a port of its own (OMNIPULSE_SELFTEST_PORT),
+    // or the two answer each other's pages)
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() {
+        if let Some(port) = std::env::var("OMNIPULSE_SELFTEST_PORT").ok().and_then(|p| p.parse::<u16>().ok()) { s.prefs["widgetPort"] = serde_json::json!(port); }
+    }
     // (the Stream Widget's old designs, as a layout and a theme)
     crate::integrations::widget_split_all(&mut s.prefs);
     // (the Social Plug's platforms were kept under its switch's name, so saving them switched it off in OBS:

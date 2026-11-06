@@ -4635,7 +4635,7 @@ component DockPreview inherits Rectangle {
     border-color: Theme.line;
     clip: true;
     background: Theme.bg;
-    Text { text: root.name + ": the real dock shows here once the Stream Suite is running."; color: Theme.muted; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; width: parent.width - 40px; x: 20px; }
+    Text { text: root.name + ": the real dock shows here in a moment."; color: Theme.muted; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; width: parent.width - 40px; x: 20px; }
     LiveSpot { x: 1px; y: 1px; width: root.width - 2px; height: root.height - 2px; view-top: root.view-top; view-bottom: root.view-bottom; }
 }
 
@@ -6302,8 +6302,8 @@ component BotPage inherits Rectangle {
                         [{ n: "Chat Dock", t: "Twitch and Kick chat in OBS, with delete, time-out and ban on every message, and a box to chat back.", p: "/dock/chat", i: Icons.chat, k: "dockchat" },
                             { n: "Activity Feed", t: "Follows, subs, bits, raids, rewards and the rest in OBS, each alert replayed with a click.", p: "/dock/activity", i: Icons.bell, k: "dockfeed" },
                             { n: "Moderation Dock", t: "Pile-Up, Raid Lockdown, chat modes, Shield Mode and Auto-Ban on their own, beside your chat. You change it in the Chat Dock's settings.", p: "/dock/mod", i: Icons.shield, k: "dockchat" }],
-                        [{ n: "Stream Info", t: "Your title and category on Twitch and Kick, changed on both at once, without opening their dashboards.", p: "/dock/info", i: Icons.broadcast, k: "" },
-                            { n: "Viewer List", t: "Who's in your chat, with moderators, VIPs and subscribers first, and a time-out or ban a click away.", p: "/dock/viewers", i: Icons.person, k: "" }],
+                        [{ n: "Stream Info", t: "Your title and category on Twitch and Kick, changed on both at once, without opening their dashboards.", p: "/dock/info", i: Icons.broadcast, k: "dockinfo" },
+                            { n: "Viewer List", t: "Who's in your chat, with moderators, VIPs and subscribers first, and a time-out or ban a click away.", p: "/dock/viewers", i: Icons.person, k: "dockviewers" }],
                     ]: HorizontalLayout {
                         spacing: 10px;
                         for d[di] in row: WidgetTile {
@@ -7319,6 +7319,9 @@ export component AppWindow inherits Window {
     // (something over the page: the real Stream Widget's web view, which would draw over it, steps aside)
     // (Mod View's page: covered by the same, the queue aside (it sits beside the page, not over it))
     out property <bool> mod-covered: root.flow-open || root.setup-open || root.taste-open || root.ks-open || root.tp-open || root.la-open || root.name-open || root.ask-open || root.jam-open || root.viz-full || WEdit.open;
+    /// (a dock's settings page: its preview is the real dock)
+    property <bool> pf-dock: root.pf-preview == "dockchat" || root.pf-preview == "dockfeed" || root.pf-preview == "dockviewers" || root.pf-preview == "dockinfo";
+    property <string> pf-dock-name: root.pf-preview == "dockchat" ? "Chat Dock" : root.pf-preview == "dockfeed" ? "Activity Feed" : root.pf-preview == "dockviewers" ? "Viewer List" : "Stream Info";
     out property <bool> covered: root.setup-open || root.taste-open || root.ks-open || root.tp-open || root.la-open || root.name-open || root.ask-open || root.jam-open || root.viz-full || root.queue-open || WEdit.open;
     in property <int> setup-at;
     in property <bool> setup-web;
@@ -9758,7 +9761,7 @@ export component AppWindow inherits Window {
                             // (the preview, on a smaller window: first, above what it shows)
                             if root.width < 1440px && root.pf-preview == "lyrics": LyricsPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; look: root.pf-lyrics; }
                             if root.width < 1440px && root.pf-preview == "socials": SocialPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; items: root.pf-social-items; look: root.pf-social; }
-                            if root.width < 1440px && (root.pf-preview == "dockchat" || root.pf-preview == "dockfeed"): DockPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; name: root.pf-preview == "dockchat" ? "Chat Dock" : "Activity Feed"; }
+                            if root.width < 1440px && root.pf-dock: DockPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; name: root.pf-dock-name; }
                             if root.width < 1440px && root.pf-preview == "multichat": ChatPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; look: root.pf-chat; samples: root.pf-chat-samples; }
                             if root.width < 1440px && root.pf-preview == "alerts": AlertPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; look: root.pf-alert; }
                             if root.width < 1440px && root.pf-preview == "widget": WidgetPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; look: root.pf-widget; art: root.now-art; title: root.now-title == "Nothing playing" || root.now-title == "" ? "A Song You Love" : root.now-title; artist: root.now-artist == "" ? "Your Favourite Artist" : root.now-artist; }
@@ -9954,7 +9957,7 @@ export component AppWindow inherits Window {
                             if root.pf-preview == "lyrics": LyricsPreview { look: root.pf-lyrics; }
                             if root.pf-preview == "socials": SocialPreview { items: root.pf-social-items; look: root.pf-social; }
                             if root.pf-preview == "multichat": ChatPreview { look: root.pf-chat; samples: root.pf-chat-samples; }
-                            if root.pf-preview == "dockchat" || root.pf-preview == "dockfeed": DockPreview { name: root.pf-preview == "dockchat" ? "Chat Dock" : "Activity Feed"; }
+                            if root.pf-dock: DockPreview { name: root.pf-dock-name; }
                             if root.pf-preview == "alerts": AlertPreview { look: root.pf-alert; }
                             if root.pf-preview == "widget": WidgetPreview { look: root.pf-widget; art: root.now-art; title: root.now-title == "Nothing playing" || root.now-title == "" ? "A Song You Love" : root.now-title; artist: root.now-artist == "" ? "Your Favourite Artist" : root.now-artist; }
                           }

@@ -9,7 +9,7 @@
      and Kick, read from them, and changed on both at once */
   :root {
     --bg: #1b1d24; --panel: #23262f; --line: #2e323d; --text: #e6e8ee; --dim: #8b91a1; --accent: #7aa2ff;
-    --twitch: #a970ff; --kick: #53fc18; --danger: #ff5c6c; --fs: 13px;
+    --twitch: #a970ff; --kick: #53fc18; --danger: #ff5c6c; --fs: 13px; --accent2: #c08bff; --pad: 1;
   }
   * { box-sizing: border-box; }
   /* the scroll bars in the dock's colours, as the app's: OBS's browser draws its own light grey ones otherwise */
@@ -25,7 +25,7 @@
   header h1 { margin: 0 auto 0 2px; font-size: 13px; font-weight: 600; }
   .icon { border: 0; background: transparent; color: var(--dim); padding: 2px 6px; border-radius: 6px; cursor: pointer; font-size: 14px; }
   .icon:hover { color: var(--text); background: var(--line); }
-  main { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 12px; }
+  main { flex: 1; overflow-y: auto; padding: calc(10px * var(--pad)) 10px; display: flex; flex-direction: column; gap: calc(12px * var(--pad)); }
   label.f { display: flex; flex-direction: column; gap: 4px; color: var(--dim); font-size: 12px; }
   input[type=text] { width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; }
   input[type=text]:focus { outline: none; border-color: var(--accent); }
@@ -54,6 +54,30 @@
   .card b { font-size: 12px; }
   .card span { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
   .note { color: var(--dim); font-size: 11px; }
+  /* spacing */
+  body.d-compact { --pad: 0.6; } body.d-roomy { --pad: 1.6; }
+  /* Glass: soft colour behind, its panels see-through */
+  body.st-glass { background: radial-gradient(90% 60% at 0% 0%, color-mix(in srgb, var(--accent2) 22%, transparent), transparent 70%), radial-gradient(90% 60% at 100% 100%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%), var(--bg); }
+  body.st-glass header { background: color-mix(in srgb, var(--panel) 70%, transparent); border-color: #ffffff1c; }
+  body.st-glass header h1 { font-size: 15px; font-weight: 800; background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  /* Neon: lines of light in your accent */
+  body.st-neon header { border-bottom: 1px solid var(--accent); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 55%, transparent); }
+  body.st-neon header h1 { color: var(--accent); text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); letter-spacing: 0.08em; text-transform: uppercase; }
+  /* Cards: a heading in your accent */
+  body.st-cards header { border-bottom: 2px solid var(--accent); }
+  body.st-glass input[type=text], body.st-glass .card, body.st-glass .found { background: color-mix(in srgb, var(--panel) 60%, transparent); border-color: #ffffff1c; }
+  body.st-glass input[type=text] { border-radius: 999px; padding-left: 13px; }
+  body.st-glass .go { border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+  body.st-cards label.f, body.st-cards .now { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; }
+  body.st-cards label.f { color: var(--text); font-weight: 600; }
+  body.st-cards input[type=text] { background: var(--bg); font-weight: 400; }
+  body.st-cards .card { background: var(--bg); }
+  body.st-neon input[type=text]:focus { box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent); }
+  body.st-neon .go { background: transparent; color: var(--accent); border: 1px solid var(--accent); box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 50%, transparent), inset 0 0 8px color-mix(in srgb, var(--accent) 25%, transparent); text-transform: uppercase; letter-spacing: 0.08em; }
+  body.st-neon .now h2 { color: var(--accent); }
+  body.st-neon .card { background: transparent; box-shadow: -3px 0 8px -3px var(--c); }
+  /* what it shows */
+  body.no-now .now, body.no-count .count, body.no-art .found img, body.no-hint p.note { display: none; }
   body.sq *, body.sq *::after { border-radius: 0 !important; }
   /* the tip on hover: one for the whole dock, placed by its script so it always stays inside the dock */
   #tip { position: fixed; left: 0; top: 0; display: none; max-width: calc(100vw - 8px); box-sizing: border-box; background: #000c; color: #fff; font-size: 11px; font-weight: 400; line-height: 1.35; padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 1000; overflow-wrap: anywhere; }
@@ -85,7 +109,47 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const act = (cmd) => fetch("/dock/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cmd) }).then((r) => r.json()).catch(() => ({ ok: false, error: "OmniPulse isn't answering (is it open, with the Stream Suite on?)" }));
+  // (?preview=1: its settings page's preview in OmniPulse: it follows the page as it's changed, shows made-up
+  // stream details if there's nothing real yet, and its buttons do nothing)
+  const PV = /[?&]preview=1/.test(location.search);
+  // (its settings, kept by OmniPulse on its page in Settings > Streaming > Suite > Docks: these follow them)
+  const DEF = { now: true, count: true, art: true, hint: true, size: "13", look: "app", style: "plain", accent: "app", font: "app", corners: "app", density: "normal" };
+  let opt = Object.assign({}, DEF), appTheme = null, fontOn = "", setN = -1;
+  const CLASSIC = { bg: "#1b1d24", panel: "#23262f", line: "#2e323d", text: "#e6e8ee", muted: "#8b91a1", accent: "#7aa2ff", accent2: "#c08bff", light: false, rounded: true, font: "" };
+  const PALS = { sunset: ["#ff8a5c", "#ff5c8a"], ocean: ["#3ec7ff", "#5c7cff"], candy: ["#ff8fd8", "#a78bff"], mint: ["#5ef2b8", "#3ec7ff"], fire: ["#ffb03a", "#ff5c3a"], gold: ["#ffd76e", "#ffa53a"], mono: ["#f2f2f2", "#a8a8a8"] };
+  function applyLook() {
+    const t = opt.look === "classic" || !appTheme ? CLASSIC : appTheme, r = document.documentElement.style, pal = PALS[opt.accent];
+    r.setProperty("--bg", t.bg); r.setProperty("--panel", t.panel); r.setProperty("--line", t.line); r.setProperty("--text", t.text); r.setProperty("--dim", t.muted);
+    r.setProperty("--accent", pal ? pal[0] : t.accent); r.setProperty("--accent2", pal ? pal[1] : t.accent2 || t.accent);
+    r.setProperty("--fs", (Number(opt.size) || 13) + "px");
+    const c = document.body.classList;
+    c.toggle("light", !!t.light);
+    c.toggle("sq", opt.corners === "square" || (opt.corners !== "rounded" && !t.rounded));
+    ["compact", "roomy"].forEach((d) => c.toggle("d-" + d, opt.density === d));
+    ["glass", "cards", "neon"].forEach((s) => c.toggle("st-" + s, opt.style === s));
+    // (the theme's font: from Google Fonts, as OBS won't have it)
+    const f = opt.font === "theme" ? t.font || "" : "";
+    if (f && f !== fontOn) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(f).replace(/%20/g, "+") + ":wght@400;600;700&display=swap"; document.head.append(l); }
+    fontOn = f;
+    document.body.style.fontFamily = f ? '"' + f + '", "Segoe UI", system-ui, sans-serif' : "";
+    shows();
+  }
+  async function look() {
+    try {
+      const j = await (await fetch("/dock/settings.json?page=info" + (PV ? "&preview=1" : ""), { cache: "no-store" })).json();
+      const themed = JSON.stringify(j.theme || null) !== JSON.stringify(appTheme);
+      if (themed) appTheme = j.theme || null;
+      if (j.n !== setN) { setN = j.n; opt = Object.assign({}, DEF, j.opt && typeof j.opt === "object" ? j.opt : {}); applyLook(); redraw(); }
+      else if (themed) applyLook();
+    } catch (e) {}
+    setTimeout(look, PV ? 500 : 3000);
+  }
+  function shows() {
+    const c = document.body.classList;
+    c.toggle("no-now", !opt.now); c.toggle("no-count", !opt.count); c.toggle("no-art", !opt.art); c.toggle("no-hint", !opt.hint);
+  }
+  const redraw = () => {};
+  const act = (cmd) => PV ? Promise.resolve({ ok: false, error: "This is a preview. The dock in OBS updates your stream." }) : fetch("/dock/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cmd) }).then((r) => r.json()).catch(() => ({ ok: false, error: "OmniPulse isn't answering (is it open, with the Stream Suite on?)" }));
   const to = { twitch: true, kick: true };
   let can = { twitch: false, kick: false }, lastAt = -1, lastQ = "", lastSaid = "", filled = false;
   const pressed = () => { $("toTwitch").setAttribute("aria-pressed", String(to.twitch && can.twitch)); $("toKick").setAttribute("aria-pressed", String(to.kick && can.kick)); $("toTwitch").disabled = !can.twitch; $("toKick").disabled = !can.kick; };
@@ -134,23 +198,12 @@
     try {
       const s = await (await fetch("/now.json", { cache: "no-store" })).json();
       const info = s.suite && s.suite.info;
-      if (info) draw(info);
-    } catch (e) {}
+      // (the preview, with nothing read yet: made-up details, so the look can be seen)
+      const sample = PV && !(info && (info.twitch || info.kick));
+      if (sample) draw({ canTwitch: true, canKick: true, twitch: { title: "Ranked grind to Masters", category: "Apex Legends" }, kick: { title: "Ranked grind to Masters", category: "Apex Legends" } });
+      else if (info) draw(info);
+    } catch (e) { if (PV) draw({ canTwitch: true, canKick: true, twitch: { title: "Ranked grind to Masters", category: "Apex Legends" }, kick: { title: "Ranked grind to Masters", category: "Apex Legends" } }); }
     setTimeout(poll, 800);
-  }
-  // (the app theme's look, as the other docks follow it)
-  async function look() {
-    try {
-      const j = await (await fetch("/dock/settings.json?page=info", { cache: "no-store" })).json();
-      const t = j.theme;
-      if (t) {
-        const r = document.documentElement.style;
-        r.setProperty("--bg", t.bg); r.setProperty("--panel", t.panel); r.setProperty("--line", t.line); r.setProperty("--text", t.text); r.setProperty("--dim", t.muted); r.setProperty("--accent", t.accent);
-        document.body.classList.toggle("light", !!t.light);
-        document.body.classList.toggle("sq", !t.rounded);
-      }
-    } catch (e) {}
-    setTimeout(look, 5000);
   }
   look();
   act({ do: "info" });

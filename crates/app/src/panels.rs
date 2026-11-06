@@ -103,7 +103,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "offset" => vec![("out2Offset", json!(0)), ("out2Volume", json!(1))],
         "hidden" => vec![],
         "plugins" => vec![("plugSource", json!(""))],
-        "dockchat" | "dockfeed" | "multichat" => vec![],
+        "dockchat" | "dockfeed" | "dockviewers" | "dockinfo" | "multichat" => vec![],
         _ => vec![("recentWindow", json!("week"))],
     }
 }

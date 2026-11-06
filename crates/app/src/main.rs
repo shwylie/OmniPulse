@@ -8557,7 +8557,7 @@ fn panel_open(shared: &Shared, name: &str) {
         let output = panels::output_of(name).map(|(k, _)| k.to_string());
         let name = output.as_deref().unwrap_or(name);
         let cat = match name {
-            "requests" | "replies" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" | "lyricsw" | "socials" | "dockchat" | "dockfeed" | "multichat" => "Streaming",
+            "requests" | "replies" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" | "lyricsw" | "socials" | "dockchat" | "dockfeed" | "dockviewers" | "dockinfo" | "multichat" => "Streaming",
             n if n.starts_with("social:") => "Streaming",
             "youtube" => "Integrations",
             n if n.starts_with("alert:") => "Streaming",
@@ -8567,7 +8567,7 @@ fn panel_open(shared: &Shared, name: &str) {
             _ => "Library",
         };
         let mut path = vec![("Settings".to_string(), "root".to_string()), (cat.to_string(), format!("cat:{cat}"))];
-        let widgety = matches!(name, "widget" | "lyricsw" | "alerts" | "alertlist" | "requests" | "replies" | "socials" | "dockchat" | "dockfeed" | "multichat") || name.starts_with("alert:") || name.starts_with("social:");
+        let widgety = matches!(name, "widget" | "lyricsw" | "alerts" | "alertlist" | "requests" | "replies" | "socials" | "dockchat" | "dockfeed" | "dockviewers" | "dockinfo" | "multichat") || name.starts_with("alert:") || name.starts_with("social:");
         if widgety && plugin_on(&shared.borrow().web.prefs, botpage::BOT) {
             if let Some(m) = bot_manifest() { path.push((place_label(&m), format!("plugin:{}", botpage::BOT))); }
             let which = BOT_WIDGETS.with(|w| w.borrow().clone());
@@ -8741,6 +8741,12 @@ fn fonts_ready() {
 }
 
 fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde_json::Value>) {
+    // (a dock's page: its preview given the settings as they are now. They're left with it when the page is
+    // closed: only a preview asks for them, and the next page opened gives its own)
+    if let Some(page) = docksets::page_of(name).filter(|_| docksets::is_dock(name)) {
+        let all = docksets::saved(&shared.borrow().web.prefs, name, vals);
+        omnipulse_core::docks::page_preview_set(Some((page.to_string(), all[page].clone())));
+    }
     let fields = panels::fields(name, vals, &shared.borrow().web.prefs, &omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into()));
     let text = |v: &serde_json::Value| match v { serde_json::Value::String(s) => s.clone(), serde_json::Value::Null => String::new(), x => x.to_string() };
     let rows: Vec<PlugField> = fields.iter().map(|f| {
@@ -8776,7 +8782,7 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
     if let Some(ui) = shared.borrow().ui.upgrade() {
         ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows))));
         // (the Lyrics Widget's page: a preview of its look, as it's set)
-        ui.set_pf_preview(if name == "lyricsw" { "lyrics".into() } else if name == "socials" { "socials".into() } else if name == "multichat" { "multichat".into() } else if name == "alerts" { "alerts".into() } else if name == "widget" { "widget".into() } else if name == "dockchat" || name == "dockfeed" { name.into() } else { "".into() });
+        ui.set_pf_preview(if name == "lyricsw" { "lyrics".into() } else if name == "socials" { "socials".into() } else if name == "multichat" { "multichat".into() } else if name == "alerts" { "alerts".into() } else if name == "widget" { "widget".into() } else if docksets::is_dock(name) { name.into() } else { "".into() });
         if name == "lyricsw" { ui.set_pf_lyrics(lyrics_look(vals)); }
         if name == "socials" { social_preview(&ui, &shared.borrow().web.prefs, vals); }
         if name == "multichat" { chat_preview(&ui, vals); }
@@ -9458,9 +9464,11 @@ fn live_path(ui: &AppWindow) -> Option<String> {
         "widget" => format!("/?{q}"),
         "alerts" => format!("{}?{q}", if ui.get_pf_alert().in_widget { "/" } else { "/alerts" }),
         "lyrics" => format!("/lyrics?{q}"),
-        // (a dock's settings page: the real dock)
-        "dockchat" => "/dock/chat".to_string(),
-        "dockfeed" => "/dock/activity".to_string(),
+        // (a dock's settings page: the real dock, as the page has it now, saved or not)
+        "dockchat" => "/dock/chat?preview=1".to_string(),
+        "dockfeed" => "/dock/activity?preview=1".to_string(),
+        "dockviewers" => "/dock/viewers?preview=1".to_string(),
+        "dockinfo" => "/dock/info?preview=1".to_string(),
         // (with no platforms added, the drawing's sample ones: the real one would be empty)
         "socials" if !ui.get_pf_social().sample => format!("/socials?{q}"),
         // (its look is in its address, as an OBS source's is: the page's settings put there)
@@ -9476,6 +9484,16 @@ fn live_path(ui: &AppWindow) -> Option<String> {
         }
         _ => return None,
     })
+}
+
+/// Whether something's over a preview's web view (which draws over everything in the window): a dialog or a page
+/// opened over this one; or the queue, which opens beside the page, only if the page hasn't made room for it
+/// yet and the preview still reaches under it
+fn live_covered(ui: &AppWindow, x: f32, w: f32) -> bool {
+    if ui.get_mod_covered() { return true; }
+    if !ui.get_queue_open() { return false; }
+    let win_w = ui.window().size().width as f32 / ui.window().scale_factor();
+    x + w > win_w - 300.0 - 20.0
 }
 
 /// A widget page's preview: the real page (see live_path) in a web view sitting on the preview. It steps aside,
@@ -9502,7 +9520,7 @@ fn live_widget(shared: &Shared) {
         if beat != last { b.set((beat, Some(std::time::Instant::now()))); return true; }
         at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(400))
     });
-    let show = g.get_seen() && !menu && !ui.get_covered() && g.get_w() > 1.0 && !ui.window().is_minimized();
+    let show = g.get_seen() && !menu && !live_covered(&ui, g.get_x(), g.get_w()) && g.get_w() > 1.0 && !ui.window().is_minimized();
     let at = (g.get_x(), g.get_y(), g.get_w(), g.get_h(), show);
     let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(at.0 as f64, at.1 as f64).into(), size: wry::dpi::LogicalSize::new(at.2 as f64, at.3 as f64).into() };
     let made = LIVE.with(|l| l.borrow().is_some());
@@ -9688,7 +9706,7 @@ fn bot_live(shared: &Shared) {
     let (x, y, w, h) = (g.get_x(), g.get_y(), g.get_w(), g.get_h());
     // (all of it within the page's room: under the page's title, above the player)
     let seen = y >= 150.0 && y + h <= win_h - 96.0;
-    let show = seen && !menu && !ui.get_covered() && !ui.get_flow_open() && w > 8.0 && h > 8.0 && !ui.window().is_minimized();
+    let show = seen && !menu && !live_covered(&ui, x, w) && w > 8.0 && h > 8.0 && !ui.window().is_minimized();
     let at = (x, y, w, h, show);
     let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(x as f64, y as f64).into(), size: wry::dpi::LogicalSize::new(w as f64, h as f64).into() };
     // (the page's settings as they are, given to the Suite for what the overlay would be: when they change)

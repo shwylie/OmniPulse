@@ -371,7 +371,8 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                     "/dock/badges.json" => reply_own(&mut stream, "200 OK", "application/json", crate::badges::json().to_string().as_bytes()),
                     "/dock/settings.json" => {
                         let page = query_map(query).get("page").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
-                        reply_own(&mut stream, "200 OK", "application/json", crate::docks::page_settings(&page).to_string().as_bytes());
+                        let preview = query.split('&').any(|q| q == "preview=1");
+                        reply_own(&mut stream, "200 OK", "application/json", crate::docks::page_settings(&page, preview).to_string().as_bytes());
                     }
                     "/dock/do" => {
                         let body = req.split_once("\r\n\r\n").map(|x| x.1).unwrap_or("");

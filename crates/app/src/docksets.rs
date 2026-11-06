@@ -1,18 +1,22 @@
-// The Chat Dock's, the Activity Feed's and the Multichat Overlay's settings, on pages of their own (Settings >
-// Streaming > Suite, each one's gear). Kept in prefs.dockSet by page ("chat", "activity", "multichat"), handed
+// The Chat Dock's, the Activity Feed's, the Viewer List's, Stream Info's and the Multichat Overlay's settings, on
+// pages of their own (Settings > Streaming > Suite, each one's gear). Kept in prefs.dockSet by page ("chat",
+// "activity", "viewers", "info", "multichat"), handed
 // to the widget server for the pages to follow, and taken back when they're changed on the page itself (its
 // gear in OBS), so the two never differ.
 
 use serde_json::{json, Map, Value};
 
-/// A panel's page: dockchat, dockfeed, multichat
+/// A panel's page: dockchat, dockfeed, dockviewers, dockinfo, multichat
 pub fn page_of(panel: &str) -> Option<&'static str> {
-    Some(match panel { "dockchat" => "chat", "dockfeed" => "activity", "multichat" => "multichat", _ => return None })
+    Some(match panel { "dockchat" => "chat", "dockfeed" => "activity", "dockviewers" => "viewers", "dockinfo" => "info", "multichat" => "multichat", _ => return None })
 }
 
 pub fn title(panel: &str) -> &'static str {
-    match panel { "dockchat" => "Chat Dock", "dockfeed" => "Activity Feed", _ => "Multichat Overlay" }
+    match panel { "dockchat" => "Chat Dock", "dockfeed" => "Activity Feed", "dockviewers" => "Viewer List", "dockinfo" => "Stream Info", _ => "Multichat Overlay" }
 }
+
+/// Whether a panel is a dock with a preview of the real thing on its page
+pub fn is_dock(panel: &str) -> bool { matches!(panel, "dockchat" | "dockfeed" | "dockviewers" | "dockinfo") }
 
 /// Each page's settings as the page starts them
 fn defaults(page: &str) -> Map<String, Value> {
@@ -20,6 +24,9 @@ fn defaults(page: &str) -> Map<String, Value> {
         "chat" => json!({ "twitch": true, "kick": true, "time": false, "badges": true, "hover": false, "confirm": true, "secs": "600", "size": "13", "to": "all", "bttv": true, "ffz": true, "stv": true,
             "modPile": true, "lkPile": true, "pileMin": "3", "modLock": true, "modModes": true, "modShield": true, "modAb": true, "lkShield": true, "lkFollow": true, "lkSlow": true, "lkEmote": false, "lkSub": false,
             "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
+        "viewers" => json!({ "mods": true, "vips": true, "subs": true, "viewers": true, "counts": true, "search": true, "marks": true, "colors": true, "ago": true, "dot": true, "sort": "active", "size": "13",
+            "secs": "600", "hover": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
+        "info" => json!({ "now": true, "count": true, "art": true, "hint": true, "size": "13", "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         "activity" => json!({ "hidden": ["firstwords"], "newest": true, "compact": false, "platform": true, "msg": true, "cmds": false, "size": "13", "from": "all", "look": "app", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         _ => json!({ "from": "all", "cmds": false, "bot": true, "badges": true, "marks": true, "style": "plain", "size": 20, "bg": "0", "shadow": true, "dir": "bottom", "align": "left", "flow": "stack", "out": "fade", "speed": "normal", "rcol": "sunset", "ricon": "chat", "rdots": true, "rglow": false, "rshine": false, "fade": 0, "max": 30, "bttv": true, "ffz": true, "stv": true, "name": "beside", "anim": "rise", "events": false, "pronouns": false, "first": true }),
     };
@@ -73,7 +80,7 @@ pub fn saved(prefs: &Value, panel: &str, vals: &Map<String, Value>) -> Value {
 pub fn from_page(prefs: &Value, page: &str, opt: &Value) -> Value {
     let mut all = prefs["dockSet"].as_object().cloned().unwrap_or_default();
     let base = page.trim_end_matches(|c: char| c.is_ascii_digit());
-    if !matches!(base, "chat" | "activity" | "multichat") { return Value::Object(all); }
+    if !matches!(base, "chat" | "activity" | "viewers" | "info" | "multichat") { return Value::Object(all); }
     let mut m = defaults(base);
     if let Some(o) = opt.as_object() { for (k, v) in o { if m.contains_key(k) { m.insert(k.clone(), v.clone()); } } }
     all.insert(page.into(), Value::Object(m));
@@ -96,7 +103,7 @@ fn look(spacing: bool) -> Vec<Value> {
         sel("font", "Font", "Your Theme's uses your theme's heading font.", &[(json!("app"), "Standard"), (json!("theme"), "Your Theme's")]),
         sel("corners", "Corners", "As Set in App follows Rounded Corners in Settings > App.", &[(json!("app"), "As Set in App"), (json!("rounded"), "Rounded"), (json!("square"), "Square")]),
     ];
-    if spacing { v.push(sel("density", "Spacing", "How much room each message gets.", &[(json!("compact"), "Tight"), (json!("normal"), "Normal"), (json!("roomy"), "Roomy")])); }
+    if spacing { v.push(sel("density", "Spacing", "How much room each line gets.", &[(json!("compact"), "Tight"), (json!("normal"), "Normal"), (json!("roomy"), "Roomy")])); }
     v
 }
 
@@ -139,6 +146,41 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             note("In OBS"),
             info("Address", &format!("{base}/dock/chat"), "In OBS, open Docks > Custom Browser Docks, give it a name and paste this address. Changes here show there within a few seconds."),
             info("Moderation Dock", &format!("{base}/dock/mod"), "Moderation on its own: Pile-Up, Raid Lockdown, chat modes, Shield Mode and Auto-Ban, as a dock beside your chat. These settings are its too."),
+        ]).collect(),
+        "dockviewers" => vec![
+            note("Who It Lists"),
+            tog("mods", "Moderators", ""),
+            tog("vips", "VIPs", ""),
+            tog("subs", "Subscribers", ""),
+            tog("viewers", "Everyone Else", "Viewers who aren't moderators, VIPs or subscribers."),
+            sel("sort", "Order", "Within each group.", &[(json!("active"), "Chatting Now First"), (json!("name"), "A to Z")]),
+            note("What It Shows"),
+            tog("counts", "How Many Are Here", "The count for each platform, at the top."),
+            tog("search", "Search Box", "To find someone by name."),
+            tog("marks", "Platform Marks", "A small Twitch, Kick or YouTube mark before each name."),
+            tog("colors", "Names in Their Chat Colours", "Off, every name is the same colour, which is easier to read."),
+            tog("ago", "When They Last Chatted", ""),
+            tog("dot", "Chatting Now Dot", "A green dot beside anyone who chatted in the last ten minutes."),
+            sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large"), (json!("17"), "Larger")]),
+        ].into_iter().chain(look(true)).chain([
+            sel("style", "Design", "How the dock is drawn, in the colours above.", &[(json!("plain"), "Plain"), (json!("glass"), "Glass"), (json!("cards"), "Cards"), (json!("neon"), "Neon")]),
+            note("Moderating"),
+            sel("secs", "Time-Out Length", "How long the time-out button times someone out for.", &[(json!("60"), "1 minute"), (json!("300"), "5 minutes"), (json!("600"), "10 minutes"), (json!("3600"), "1 hour"), (json!("86400"), "1 day")]),
+            tog("hover", "Buttons Only on Hover", "Time-out and ban show when you point at someone. Off, they're always there."),
+            note("In OBS"),
+            info("Address", &format!("{base}/dock/viewers"), "In OBS, open Docks > Custom Browser Docks, give it a name and paste this address. Changes here show there within a few seconds."),
+        ]).collect(),
+        "dockinfo" => vec![
+            note("What It Shows"),
+            tog("now", "What's Set Now", "Your title and category on each platform as they are, under the boxes."),
+            tog("count", "Title Length", "How many of the title's 140 characters you've used."),
+            tog("art", "Category Pictures", "Each category's box art, as you search."),
+            tog("hint", "Help Note", "The short note at the foot of the dock."),
+            sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large"), (json!("17"), "Larger")]),
+        ].into_iter().chain(look(true)).chain([
+            sel("style", "Design", "How the dock is drawn, in the colours above.", &[(json!("plain"), "Plain"), (json!("glass"), "Glass"), (json!("cards"), "Cards"), (json!("neon"), "Neon")]),
+            note("In OBS"),
+            info("Address", &format!("{base}/dock/info"), "In OBS, open Docks > Custom Browser Docks, give it a name and paste this address. Changes here show there within a few seconds."),
         ]).collect(),
         "dockfeed" => {
             let mut f = vec![
@@ -240,6 +282,21 @@ mod tests {
         let all = saved(&prefs, "dockfeed", &v);
         assert_eq!(all["activity"]["hidden"], json!(["bits", "firstwords"]));
     }
+    #[test]
+    fn the_viewer_list_and_stream_info_have_pages_of_their_own() {
+        for (panel, page, key) in [("dockviewers", "viewers", "sort"), ("dockinfo", "info", "now")] {
+            assert_eq!(page_of(panel), Some(page));
+            let v = values(&json!({}), panel);
+            let f = fields(panel, &v, 7878);
+            // (every setting on the page is one that's kept, and it has a design and an address)
+            for x in f.iter().filter(|x| x["key"] != "") { assert!(v.contains_key(x["key"].as_str().unwrap()), "{panel}: {}", x["key"]); }
+            assert!(f.iter().any(|x| x["key"] == "style") && f.iter().any(|x| x["key"] == key) && f.iter().any(|x| x["type"] == "info"));
+            let mut changed = v.clone();
+            changed.insert("style".into(), json!("neon"));
+            assert_eq!(saved(&json!({}), panel, &changed)[page]["style"], json!("neon"));
+        }
+    }
+
     #[test]
     fn a_pages_own_change_is_kept_by_its_name() {
         let all = from_page(&json!({}), "multichat2", &json!({ "size": 30, "nonsense": 1 }));

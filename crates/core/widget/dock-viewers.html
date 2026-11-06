@@ -9,7 +9,7 @@
      list), and who's chatted on Kick and YouTube this stream, by role, each a time-out or ban a click away */
   :root {
     --bg: #1b1d24; --panel: #23262f; --line: #2e323d; --text: #e6e8ee; --dim: #8b91a1; --accent: #7aa2ff;
-    --twitch: #a970ff; --kick: #53fc18; --youtube: #ff3b3b; --danger: #ff5c6c; --fs: 13px;
+    --twitch: #a970ff; --kick: #53fc18; --youtube: #ff3b3b; --danger: #ff5c6c; --fs: 13px; --accent2: #c08bff; --pad: 1;
   }
   * { box-sizing: border-box; }
   * { scrollbar-width: thin; scrollbar-color: var(--dim) transparent; }
@@ -42,7 +42,7 @@
   .grp.shut > h2::before { transform: rotate(-90deg); }
   .grp.shut > .list { display: none; }
   .grp > h2 b { color: var(--text); font-weight: 600; }
-  .row { display: flex; align-items: center; gap: 7px; padding: 3px 4px; border-radius: 6px; min-height: 26px; }
+  .row { display: flex; align-items: center; gap: 7px; padding: calc(3px * var(--pad)) 4px; border-radius: 6px; min-height: calc(18px + 8px * var(--pad)); }
   .row:hover { background: var(--panel); }
   .row svg.p { width: 12px; height: 12px; flex: none; }
   .row .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -57,6 +57,33 @@
   .more { color: var(--dim); font-size: 11px; padding: 4px; }
   .said { position: fixed; left: 8px; right: 8px; bottom: 8px; background: #000d; color: #fff; font-size: 12px; padding: 6px 10px; border-radius: 8px; display: none; }
   .said.show { display: block; }
+  /* spacing */
+  body.d-compact { --pad: 0.6; } body.d-roomy { --pad: 1.6; }
+  /* Glass: soft colour behind, its panels see-through */
+  body.st-glass { background: radial-gradient(90% 60% at 0% 0%, color-mix(in srgb, var(--accent2) 22%, transparent), transparent 70%), radial-gradient(90% 60% at 100% 100%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%), var(--bg); }
+  body.st-glass header { background: color-mix(in srgb, var(--panel) 70%, transparent); border-color: #ffffff1c; }
+  body.st-glass header h1 { font-size: 15px; font-weight: 800; background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  /* Neon: lines of light in your accent */
+  body.st-neon header { border-bottom: 1px solid var(--accent); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 55%, transparent); }
+  body.st-neon header h1 { color: var(--accent); text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); letter-spacing: 0.08em; text-transform: uppercase; }
+  /* Cards: a heading in your accent */
+  body.st-cards header { border-bottom: 2px solid var(--accent); }
+  body.st-glass .grp > h2 { background: transparent; backdrop-filter: blur(6px); }
+  body.st-glass .row { background: color-mix(in srgb, var(--panel) 50%, transparent); margin-bottom: 2px; border-radius: 10px; padding-left: 8px; padding-right: 6px; }
+  body.st-glass .row:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent); }
+  body.st-glass input[type=search] { border-radius: 999px; background: color-mix(in srgb, var(--bg) 70%, transparent); padding-left: 12px; }
+  body.st-cards .row { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line); margin-bottom: 4px; border-radius: 8px; padding-left: 8px; padding-right: 6px; }
+  body.st-cards .row.live { border-left-color: #4ad295; }
+  body.st-cards .grp > h2 { color: var(--text); }
+  body.st-neon .grp > h2 { color: var(--accent); }
+  body.st-neon .row { border-left: 2px solid transparent; border-radius: 0 6px 6px 0; }
+  body.st-neon .row:hover { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  body.st-neon .row.live { border-left-color: var(--accent); }
+  body.st-neon input[type=search]:focus { box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent); }
+  /* what it shows */
+  body.no-marks .row svg.p, body.no-ago .row .ago, body.no-dot .row .on, body.no-counts .sum, body.no-search #q { display: none; }
+  body.acts-on .row .acts { opacity: 1; }
+  body.light .row .on { background: #17965f; }
   body.sq *, body.sq *::after { border-radius: 0 !important; }
   #tip { position: fixed; left: 0; top: 0; display: none; max-width: calc(100vw - 8px); box-sizing: border-box; background: #000c; color: #fff; font-size: 11px; line-height: 1.35; padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 1000; overflow-wrap: anywhere; }
   #tip.show { display: block; }
@@ -84,9 +111,58 @@
   const NAMES = { twitch: "Twitch", kick: "Kick", youtube: "YouTube" };
   const ROLES = [["broadcaster", "You"], ["moderator", "Moderators"], ["vip", "VIPs"], ["subscriber", "Subscribers"], ["viewer", "Viewers"]];
   const SHOWN = 400;
+  const ROLE_ON = { moderator: "mods", vip: "vips", subscriber: "subs", viewer: "viewers" };
+  // (?preview=1: its settings page's preview in OmniPulse: it follows the page as it's changed, shows made-up
+  // viewers if there's nothing real yet, and its buttons do nothing)
+  const PV = /[?&]preview=1/.test(location.search);
+  // (its settings, kept by OmniPulse on its page in Settings > Streaming > Suite > Docks: these follow them)
+  const DEF = { mods: true, vips: true, subs: true, viewers: true, counts: true, search: true, marks: true, colors: true, ago: true, dot: true, sort: "active", size: "13", secs: "600", hover: true, look: "app", style: "plain", accent: "app", font: "app", corners: "app", density: "normal" };
+  let opt = Object.assign({}, DEF), appTheme = null, fontOn = "", setN = -1;
+  const CLASSIC = { bg: "#1b1d24", panel: "#23262f", line: "#2e323d", text: "#e6e8ee", muted: "#8b91a1", accent: "#7aa2ff", accent2: "#c08bff", light: false, rounded: true, font: "" };
+  const PALS = { sunset: ["#ff8a5c", "#ff5c8a"], ocean: ["#3ec7ff", "#5c7cff"], candy: ["#ff8fd8", "#a78bff"], mint: ["#5ef2b8", "#3ec7ff"], fire: ["#ffb03a", "#ff5c3a"], gold: ["#ffd76e", "#ffa53a"], mono: ["#f2f2f2", "#a8a8a8"] };
+  function applyLook() {
+    const t = opt.look === "classic" || !appTheme ? CLASSIC : appTheme, r = document.documentElement.style, pal = PALS[opt.accent];
+    r.setProperty("--bg", t.bg); r.setProperty("--panel", t.panel); r.setProperty("--line", t.line); r.setProperty("--text", t.text); r.setProperty("--dim", t.muted);
+    r.setProperty("--accent", pal ? pal[0] : t.accent); r.setProperty("--accent2", pal ? pal[1] : t.accent2 || t.accent);
+    r.setProperty("--fs", (Number(opt.size) || 13) + "px");
+    const c = document.body.classList;
+    c.toggle("light", !!t.light);
+    c.toggle("sq", opt.corners === "square" || (opt.corners !== "rounded" && !t.rounded));
+    ["compact", "roomy"].forEach((d) => c.toggle("d-" + d, opt.density === d));
+    ["glass", "cards", "neon"].forEach((s) => c.toggle("st-" + s, opt.style === s));
+    // (the theme's font: from Google Fonts, as OBS won't have it)
+    const f = opt.font === "theme" ? t.font || "" : "";
+    if (f && f !== fontOn) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(f).replace(/%20/g, "+") + ":wght@400;600;700&display=swap"; document.head.append(l); }
+    fontOn = f;
+    document.body.style.fontFamily = f ? '"' + f + '", "Segoe UI", system-ui, sans-serif' : "";
+    shows();
+  }
+  async function look() {
+    try {
+      const j = await (await fetch("/dock/settings.json?page=viewers" + (PV ? "&preview=1" : ""), { cache: "no-store" })).json();
+      const themed = JSON.stringify(j.theme || null) !== JSON.stringify(appTheme);
+      if (themed) appTheme = j.theme || null;
+      if (j.n !== setN) { setN = j.n; opt = Object.assign({}, DEF, j.opt && typeof j.opt === "object" ? j.opt : {}); applyLook(); redraw(); }
+      else if (themed) applyLook();
+    } catch (e) {}
+    setTimeout(look, PV ? 500 : 3000);
+  }
+  function shows() {
+    const c = document.body.classList;
+    c.toggle("no-marks", !opt.marks); c.toggle("no-ago", !opt.ago); c.toggle("no-dot", !opt.dot); c.toggle("no-counts", !opt.counts); c.toggle("no-search", !opt.search); c.toggle("acts-on", !opt.hover);
+    if (!opt.search && $("q").value) $("q").value = "";
+  }
+  const redraw = () => draw(true);
+  // (the preview's made-up viewers, while no one real is listed)
+  const SAMPLE = { at: 1, platforms: { twitch: { on: true, inChat: 9, full: true }, kick: { on: true, watching: 14, chatted: 2 } }, rows: [
+    ["twitch", "YourChannel", "broadcaster", "#ffb03a", 1], ["twitch", "NightOwl", "moderator", "#5ef2b8", 2], ["kick", "ModMaya", "moderator", "#ff8fd8", 0],
+    ["twitch", "PixelPete", "vip", "#3ec7ff", 4], ["twitch", "luna_plays", "subscriber", "#c08bff", 1], ["twitch", "DriftKing", "subscriber", "#ff8a5c", 38],
+    ["twitch", "sam_the_viewer", "viewer", "", 3], ["kick", "kickfan22", "viewer", "#53fc18", 0], ["twitch", "quietlurker", "viewer", "", 0], ["twitch", "ella_b", "viewer", "#ffd76e", 12],
+  ].map(([p, name, role, color, mins]) => ({ p, name, login: name.toLowerCase(), role, color, at: mins ? Date.now() - mins * 60000 : 0 })) };
+  const secsText = () => ({ 60: "1 minute", 300: "5 minutes", 600: "10 minutes", 3600: "1 hour", 86400: "1 day" })[Number(opt.secs)] || "10 minutes";
   const NS = "http://www.w3.org/2000/svg";
   const mark = (p) => { const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 24 24"); s.classList.add("p"); s.style.fill = "var(--" + p + ")"; const x = document.createElementNS(NS, "path"); x.setAttribute("d", MARK[p] || MARK.twitch); s.append(x); return s; };
-  const act = (cmd) => fetch("/dock/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cmd) }).then((r) => r.json()).catch(() => ({ ok: false, error: "OmniPulse isn't answering (is it open, with the Stream Suite on?)" }));
+  const act = (cmd) => PV ? Promise.resolve({ ok: false, error: "This is a preview. The dock in OBS does it for real." }) : fetch("/dock/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cmd) }).then((r) => r.json()).catch(() => ({ ok: false, error: "OmniPulse isn't answering (is it open, with the Stream Suite on?)" }));
   let data = { rows: [], platforms: {}, at: 0 }, from = "all", drawnAt = -1, drawnKey = "";
   const shut = new Set();
   try { for (const k of JSON.parse(localStorage.getItem("viewersShut") || "[]")) shut.add(k); } catch (e) {}
@@ -104,9 +180,9 @@
     return b;
   }
   function row(r) {
-    const d = document.createElement("div"); d.className = "row";
+    const d = document.createElement("div"); d.className = "row" + (r.at && Date.now() - r.at < 10 * 60000 ? " live" : "");
     d.append(mark(r.p));
-    const n = document.createElement("span"); n.className = "n"; n.textContent = r.name; if (/^#[0-9a-f]{6}$/i.test(r.color || "")) n.style.color = r.color; d.append(n);
+    const n = document.createElement("span"); n.className = "n"; n.textContent = r.name; if (opt.colors && /^#[0-9a-f]{6}$/i.test(r.color || "")) n.style.color = r.color; d.append(n);
     // (chatted in the last ten minutes: a green dot; when they last did)
     if (r.at && Date.now() - r.at < 10 * 60000) { const o = document.createElement("span"); o.className = "on"; o.dataset.tip = "Chatting now"; d.append(o); }
     if (r.at) { const a = document.createElement("span"); a.className = "ago"; a.textContent = ago(r.at); d.append(a); }
@@ -114,7 +190,7 @@
     if (r.role !== "broadcaster" && r.p !== "youtube") {
       const acts = document.createElement("span"); acts.className = "acts";
       const who = { platform: r.p, user: r.name, login: r.login, userId: r.userId };
-      acts.append(btn("timeout", "Time out for 10 minutes", async () => { const x = await act(Object.assign({ do: "timeout", seconds: 600 }, who)); say(x.ok === false ? x.error || "Couldn't." : "Timing out " + r.name + " for 10 minutes."); }));
+      acts.append(btn("timeout", "Time out for " + secsText(), async () => { const x = await act(Object.assign({ do: "timeout", seconds: Number(opt.secs) || 600 }, who)); say(x.ok === false ? x.error || "Couldn't." : "Timing out " + r.name + " for " + secsText() + "."); }));
       acts.append(btn("ban", "Ban", async (b) => {
         if (!b.classList.contains("arm")) { b.classList.add("arm"); b.dataset.tip = "Click again to ban " + r.name; setTimeout(() => { b.classList.remove("arm"); b.dataset.tip = "Ban"; }, 3000); return; }
         const x = await act(Object.assign({ do: "ban" }, who)); say(x.ok === false ? x.error || "Couldn't." : "Banning " + r.name + ".");
@@ -125,11 +201,13 @@
   }
   function draw(force) {
     const q = $("q").value.trim().toLowerCase();
-    const key = data.at + "|" + q + "|" + from + "|" + Array.from(shut).join(",");
+    // (the preview, with no one real to list: made-up viewers, so the look can be seen)
+    const D = PV && !(data.rows || []).length ? SAMPLE : data;
+    const key = D.at + "|" + q + "|" + from + "|" + Array.from(shut).join(",");
     if (!force && key === drawnKey) return;
     drawnKey = key;
     // (how many on each)
-    const pf = data.platforms || {}, sum = $("sum");
+    const pf = D.platforms || {}, sum = $("sum");
     sum.textContent = "";
     const part = (p, text) => { const s = document.createElement("span"); s.append(mark(p), document.createTextNode(text)); sum.append(s); };
     if (pf.twitch && pf.twitch.on) part("twitch", (pf.twitch.inChat || 0) + (pf.twitch.full ? " in chat" : " chatted"));
@@ -144,12 +222,14 @@
       b.onclick = () => { from = p; draw(true); }; fb.append(b);
     }
     if (from !== "all" && !on.includes(from)) from = "all";
-    $("note").textContent = !data.at ? "Waiting for the chatbot. It needs to be on (Settings > Streaming > Suite), signed in to Twitch or Kick." : (pf.twitch && pf.twitch.note) || "";
-    const rows = (data.rows || []).filter((r) => (from === "all" || r.p === from) && (!q || String(r.name).toLowerCase().includes(q) || String(r.login).includes(q)));
+    $("note").textContent = !D.at ? "Waiting for the chatbot. It needs to be on (Settings > Streaming > Suite), signed in to Twitch or Kick." : (pf.twitch && pf.twitch.note) || "";
+    const rows = (D.rows || []).filter((r) => (from === "all" || r.p === from) && (!q || String(r.name).toLowerCase().includes(q) || String(r.login).includes(q)));
     const box = $("groups");
     box.textContent = "";
     for (const [role, title] of ROLES) {
-      const list = rows.filter((r) => (r.role || "viewer") === role).sort((a, b) => (b.at && Date.now() - b.at < 600000 ? 1 : 0) - (a.at && Date.now() - a.at < 600000 ? 1 : 0) || String(a.name).localeCompare(String(b.name)));
+      if (ROLE_ON[role] && !opt[ROLE_ON[role]]) continue;
+      const now = (r) => (opt.sort === "active" && r.at && Date.now() - r.at < 600000 ? 1 : 0);
+      const list = rows.filter((r) => (r.role || "viewer") === role).sort((a, b) => now(b) - now(a) || String(a.name).localeCompare(String(b.name)));
       if (!list.length) continue;
       const g = document.createElement("section"); g.className = "grp" + (shut.has(role) ? " shut" : "");
       const h = document.createElement("h2"); h.append(document.createTextNode(title + " "), Object.assign(document.createElement("b"), { textContent: String(list.length) }));
@@ -160,7 +240,7 @@
       g.append(h, l);
       box.append(g);
     }
-    if (data.at && !rows.length) { const m = document.createElement("div"); m.className = "note"; m.textContent = q ? "No one by that name." : "No one yet. Chatters show here as they chat."; box.append(m); }
+    if (D.at && !rows.length) { const m = document.createElement("div"); m.className = "note"; m.textContent = q ? "No one by that name." : "No one yet. Chatters show here as they chat."; box.append(m); }
   }
   $("q").oninput = () => draw();
   async function poll() {
@@ -173,19 +253,6 @@
   }
   // (the "ago"s kept true, a minute at a time)
   setInterval(() => draw(true), 60000);
-  async function look() {
-    try {
-      const j = await (await fetch("/dock/settings.json?page=viewers", { cache: "no-store" })).json();
-      const t = j.theme;
-      if (t) {
-        const r = document.documentElement.style;
-        r.setProperty("--bg", t.bg); r.setProperty("--panel", t.panel); r.setProperty("--line", t.line); r.setProperty("--text", t.text); r.setProperty("--dim", t.muted); r.setProperty("--accent", t.accent);
-        document.body.classList.toggle("light", !!t.light);
-        document.body.classList.toggle("sq", !t.rounded);
-      }
-    } catch (e) {}
-    setTimeout(look, 5000);
-  }
   look();
   poll();
 })();

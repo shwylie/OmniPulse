@@ -143,8 +143,24 @@ static APP_THEME: Mutex<Value> = Mutex::new(Value::Null);
 
 pub fn app_theme_set(t: Value) { *APP_THEME.lock().unwrap() = t; }
 
-/// One page's: { n, opt, theme } (opt null: none kept yet, the page's own are sent to be kept)
-pub fn page_settings(page: &str) -> Value {
+/// A page's settings as they're being changed on its settings page, not saved yet: for the preview there
+/// (the page asked for with ?preview=1), never for the dock in OBS
+static PAGE_PREVIEW: Mutex<Option<(String, Value)>> = Mutex::new(None);
+static PAGE_PREVIEW_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1_000_000);
+
+pub fn page_preview_set(v: Option<(String, Value)>) {
+    let mut g = PAGE_PREVIEW.lock().unwrap();
+    if *g != v { *g = v; PAGE_PREVIEW_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
+}
+
+/// One page's: { n, opt, theme } (opt null: none kept yet, the page's own are sent to be kept). A preview gets
+/// what's being changed, if it's this page's
+pub fn page_settings(page: &str, preview: bool) -> Value {
+    if preview {
+        if let Some((_, opt)) = PAGE_PREVIEW.lock().unwrap().as_ref().filter(|x| x.0 == page) {
+            return json!({ "n": PAGE_PREVIEW_N.load(std::sync::atomic::Ordering::Relaxed), "opt": opt, "theme": APP_THEME.lock().unwrap().clone() });
+        }
+    }
     let opt = PAGE_SETTINGS.lock().unwrap().as_ref().map(|a| a[page].clone()).unwrap_or(Value::Null);
     json!({ "n": PAGE_SETTINGS_N.load(std::sync::atomic::Ordering::Relaxed), "opt": opt, "theme": APP_THEME.lock().unwrap().clone() })
 }

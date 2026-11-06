@@ -178,24 +178,27 @@
   let last = 0, paused = false, waiting = [];
 
   function setOpt(k, v) { opt[k] = v; store.set(k, v); render(); sendSettings(); }
+  // (?preview=1: its settings page's preview: it follows the page as it's changed, and keeps nothing itself)
+  const PV = /[?&]preview=1/.test(location.search);
   const PAGE = "activity";
   const SENT = () => opt;
   const TAKE = (o) => { Object.keys(opt).forEach((k) => { if (k in o) { opt[k] = o[k]; store.set(k, o[k]); } }); render(); };
   // (its settings kept by OmniPulse, on its Suite page: these follow them, and a change made here goes back)
   let setN = -1;
   function sendSettings() {
+    if (PV) return;
     fetch("/dock/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ do: "settings", page: PAGE, opt: SENT() }) }).catch(() => {});
   }
   async function pullSettings() {
     try {
-      const j = await (await fetch("/dock/settings.json?page=" + PAGE, { cache: "no-store" })).json();
+      const j = await (await fetch("/dock/settings.json?page=" + PAGE + (PV ? "&preview=1" : ""), { cache: "no-store" })).json();
       if (JSON.stringify(j.theme || null) !== JSON.stringify(appTheme)) { appTheme = j.theme || null; applyLook(); }
       if (j.n === setN) return;
       setN = j.n;
       if (j.opt && typeof j.opt === "object") { TAKE(j.opt); } else { sendSettings(); }
     } catch (e) {}
   }
-  setInterval(pullSettings, 3000);
+  setInterval(pullSettings, PV ? 500 : 3000);
   pullSettings();
   const shown = (e) => (e.type === "command" ? opt.cmds : !opt.hidden.includes(e.type)) && (opt.from === "all" || (e.platform || "twitch") === opt.from);
 
