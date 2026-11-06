@@ -4766,6 +4766,7 @@ fn flows_open(shared: &Shared) {
     ui.set_flow_trigger_menu(ModelRc::from(Rc::new(VecModel::from(menu_entries(&flows::trigger_menu(), "")))));
     ui.set_flow_step_menu(ModelRc::from(Rc::new(VecModel::from(menu_entries(&flows::step_menu(), "")))));
     ui.set_flow_templates(strs(flows::templates().into_iter().map(|t| t.0).collect()));
+    flow_gallery_paint(&ui, "");
     ui.set_flow_req(false);
     flows_paint(shared);
     ui.set_flow_open(true);
@@ -5484,9 +5485,11 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
     let s = shared.clone();
     ui.on_flow_group_set(move |g| { flow_change(&s, |a| a["group"] = serde_json::json!(g.trim())); flows_paint(&s); flows_save(&s); });
     ui.on_reward_make({ let s = shared.clone(); move |f| reward_make(&s, f) });
+    ui.on_flow_gallery_find({ let w = ui.as_weak(); move |t| { if let Some(ui) = w.upgrade() { flow_gallery_paint(&ui, t.as_str()); } } });
     let s = shared.clone();
     ui.on_flow_new(move |k| {
-        let Some((_, mut a)) = flows::templates().into_iter().nth(k.max(0) as usize) else { return };
+        // (1000 and up: a blank one, by what sets it off)
+        let Some(mut a) = (if k >= 1000 { flows::starter(k as usize - 1000) } else { flows::templates().into_iter().nth(k.max(0) as usize).map(|t| t.1) }) else { return };
         if let Some(ui) = s.borrow().ui.upgrade() { ui.set_flow_req(false); }
         flow_snap();
         FLOW.with(|f| {
@@ -7393,6 +7396,33 @@ fn bot_current(shared: &Shared) -> serde_json::Map<String, serde_json::Value> {
     // (Song Requests' own: the app's settings for which songs and how many, shown on its page with the rest)
     for k in REQ_PREFS { let v = shared.borrow().web.prefs[k].clone(); if !v.is_null() { cur.insert(format!("pref_{k}"), v); } else { cur.remove(&format!("pref_{k}")); } }
     cur
+}
+
+/// New Action's page: the blank starts, then the templates under their headings, three to a row; only
+/// those with the words typed, if any are
+fn flow_gallery_paint(ui: &AppWindow, find: &str) {
+    let q = find.trim().to_lowercase();
+    let has = |name: &str, note: &str| q.is_empty() || q.split_whitespace().all(|w| name.to_lowercase().contains(w) || note.to_lowercase().contains(w));
+    let mut all: Vec<(&str, FlowTpl)> = Vec::new();
+    for (i, (_, name, note)) in flows::STARTERS.iter().enumerate() {
+        if has(name, note) { all.push(("Start From Scratch: What Sets It Off?", FlowTpl { k: 1000 + i as i32, name: (*name).into(), note: (*note).into(), g: "Start".into() })); }
+    }
+    for (i, g, name, note) in flows::gallery() {
+        if has(name, &note) || (!q.is_empty() && g.to_lowercase().contains(&q)) { all.push((g, FlowTpl { k: i as i32, name: name.into(), note: note.into(), g: g.into() })); }
+    }
+    let none = || FlowTpl { k: -1, ..Default::default() };
+    let mut rows: Vec<FlowTplRow> = Vec::new();
+    let mut i = 0;
+    while i < all.len() {
+        let g = all[i].0;
+        let n = all[i..].iter().take_while(|x| x.0 == g).count();
+        rows.push(FlowTplRow { head: g.into(), a: none(), b: none(), c: none() });
+        for ch in all[i..i + n].chunks(3) {
+            rows.push(FlowTplRow { head: "".into(), a: ch[0].1.clone(), b: ch.get(1).map(|x| x.1.clone()).unwrap_or_else(none), c: ch.get(2).map(|x| x.1.clone()).unwrap_or_else(none) });
+        }
+        i += n;
+    }
+    ui.set_flow_gallery(ModelRc::from(Rc::new(VecModel::from(rows))));
 }
 
 /// The app's own settings shown on Song Requests' page in the Suite (as "pref_<name>")

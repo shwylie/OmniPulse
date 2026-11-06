@@ -58,6 +58,9 @@ export global Theme {
 }
 
 /// A theme, to pick: its name and colours (Custom's: the step and tint as they're set)
+// (New Action's page: a starting point (k: which, -1 none), and a row of them, or a heading)
+export struct FlowTpl { k: int, name: string, note: string, g: string }
+export struct FlowTplRow { head: string, a: FlowTpl, b: FlowTpl, c: FlowTpl }
 export struct ThemeOpt { id: string, name: string, bg: color, panel: color, text: color, a: color, b: color }
 export struct ThemeRow { items: [ThemeOpt] }
 
@@ -6942,6 +6945,13 @@ export component AppWindow inherits Window {
     in property <[MenuEntry]> flow-step-menu;
     callback flow-menu-query(bool, string);
     in property <[string]> flow-templates;
+    // (New Action's page: its rows, whether it's open, and its search)
+    in property <[FlowTplRow]> flow-gallery;
+    in-out property <bool> flow-new-open;
+    callback flow-gallery-find(string);
+    pure function tpl-icon(g: string) -> string {
+        return g == "Start" ? Icons.add : g == "Chat and Commands" ? Icons.chat : g == "Thank-Yous and Welcomes" ? Icons.bell : g == "Keeping Chat Clean" ? Icons.shield : g == "Points and Games" ? Icons.dice : g == "Your Stream" ? Icons.broadcast : Icons.actions;
+    }
     callback flow-act(string);
     callback flow-pick(int);
     callback flow-new(int);
@@ -10042,7 +10052,21 @@ export component AppWindow inherits Window {
                             VerticalLayout {
                                 width: 270px;
                                 spacing: 8px;
-                                Dropdown { width: 270px; options: root.flow-templates; current: -1; placeholder: "+ New Action"; picked(k) => { root.flow-new(k); } }
+                                // (New Action: its page of starting points, on the right)
+                                Rectangle {
+                                    height: 40px;
+                                    border-radius: 20px;
+                                    background: root.flow-new-open ? Theme.accent.with-alpha(0.22) : nwa.has-hover ? Theme.accent.brighter(0.12) : Theme.accent;
+                                    border-width: root.flow-new-open ? 1px : 0px;
+                                    border-color: Theme.accent;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 8px;
+                                        VerticalLayout { alignment: center; Glyph { d: Icons.add; width: 16px; height: 16px; fill: root.flow-new-open ? Theme.text : Theme.on-accent; } }
+                                        Text { text: "New Action"; color: root.flow-new-open ? Theme.text : Theme.on-accent; font-size: 14px; font-weight: 800; vertical-alignment: center; }
+                                    }
+                                    nwa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.flow-gallery-find(""); root.flow-new-open = !root.flow-new-open; } }
+                                }
                                 // (a backup: OmniPulse's own, or Streamer.bot's or Mix It Up's, as if it were)
                                 HorizontalLayout {
                                     spacing: 6px;
@@ -10124,7 +10148,7 @@ export component AppWindow inherits Window {
                                             background: root.flow-req ? Theme.accent.with-alpha(0.16) : sra.has-hover ? Theme.elevated : transparent;
                                             border-width: 1px;
                                             border-color: root.flow-req ? Theme.accent.with-alpha(0.6) : Theme.line;
-                                            sra := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.flow-req-open(); } }
+                                            sra := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.flow-new-open = false; root.flow-req-open(); } }
                                             VerticalLayout {
                                                 padding-left: 12px;
                                                 padding-right: 12px;
@@ -10180,7 +10204,7 @@ export component AppWindow inherits Window {
                                                     if (e.kind == PointerEventKind.down) { self.ctl = e.modifiers.control; }
                                                     if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { rowmenu.show(); }
                                                 }
-                                                clicked => { flkeys.focus(); if (self.ctl) { root.flow-mark(i); } else { root.flow-pick(i); } }
+                                                clicked => { flkeys.focus(); if (self.ctl) { root.flow-mark(i); } else { root.flow-new-open = false; root.flow-pick(i); } }
                                             }
                                             rowmenu := PopupWindow {
                                                 PopBeat { }
@@ -10214,7 +10238,7 @@ export component AppWindow inherits Window {
                                             }
                                           }
                                         }
-                                        if root.flow-items.length == 0: Text { text: "No actions yet. Choose one to start from in New Action above, like a command, a thank-you for follows, or a timer."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        if root.flow-items.length == 0: Text { text: "No actions yet. Pick a starting point on the right, like a command, a thank-you for follows, or a timer."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         Rectangle { height: 76px; }
                                     }
                                 }
@@ -10223,7 +10247,88 @@ export component AppWindow inherits Window {
                             }
                             // the one picked: its flow
                             // (Song Requests picked: their settings)
-                            if root.flow-req: ScrollView {
+                            // (New Action, or nothing picked: the starting points, by what they do)
+                            if root.flow-new-open || (!root.flow-req && root.flow-sel < 0): VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 12px;
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 2px;
+                                        Text { text: "Start a New Action"; color: Theme.text; font-size: 20px; font-weight: 800; font-family: Theme.head-font; }
+                                        Text { text: "Click a starting point. You can change every part of it after."; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            clip: true;
+                                            width: 230px;
+                                            height: 34px;
+                                            border-radius: 17px;
+                                            background: Theme.panel;
+                                            border-width: 1px;
+                                            border-color: gfi.has-focus ? Theme.accent : Theme.line;
+                                            Glyph { d: Icons.search; x: 12px; width: 14px; height: 14px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
+                                            if gfi.text == "": Text { x: 34px; height: parent.height; vertical-alignment: center; text: "Find a starting point"; color: Theme.muted; font-size: 12px; }
+                                            gfi := TextInput { x: 34px; width: parent.width - 46px; height: parent.height; vertical-alignment: center; single-line: true; color: Theme.text; font-size: 12px; edited => { root.flow-gallery-find(self.text); } }
+                                        }
+                                    }
+                                    if root.flow-new-open && (root.flow-req || root.flow-sel >= 0): VerticalLayout { alignment: center; Pill { label: "Cancel"; clicked => { root.flow-new-open = false; } } }
+                                }
+                                ScrollView {
+                                    vertical-stretch: 1;
+                                    horizontal-scrollbar-policy: always-off;
+                                    VerticalLayout {
+                                        alignment: start;
+                                        spacing: 8px;
+                                        padding-right: 14px;
+                                        for r in root.flow-gallery: VerticalLayout {
+                                            if r.head != "": Rectangle {
+                                                height: 30px;
+                                                Text { x: 0; y: 8px; text: r.head; color: Theme.text; font-size: 13px; font-weight: 800; }
+                                            }
+                                            if r.head == "": HorizontalLayout {
+                                                spacing: 8px;
+                                                for c in [r.a, r.b, r.c]: Rectangle {
+                                                    horizontal-stretch: 1;
+                                                    min-width: 0px;
+                                                    height: c.g == "Start" ? 62px : 74px;
+                                                    border-radius: 12px;
+                                                    opacity: c.k < 0 ? 0 : 1;
+                                                    background: tca.has-hover ? Theme.panel.mix(Theme.accent, 0.86) : Theme.panel;
+                                                    border-width: 1px;
+                                                    border-color: tca.has-hover ? Theme.accent : Theme.line;
+                                                    Rectangle {
+                                                        x: 12px; y: (parent.height - self.height) / 2; width: 34px; height: 34px; border-radius: 17px;
+                                                        background: c.g == "Start" ? Theme.accent.with-alpha(0.2) : Theme.accent-2.with-alpha(0.2);
+                                                        Glyph { d: root.tpl-icon(c.g); width: 17px; height: 17px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; fill: c.g == "Start" ? Theme.accent : Theme.accent-2; }
+                                                    }
+                                                    VerticalLayout {
+                                                        x: 56px;
+                                                        width: parent.width - 66px;
+                                                        alignment: center;
+                                                        spacing: 2px;
+                                                        Text { text: c.name; color: Theme.text; font-size: 13px; font-weight: 700; overflow: elide; }
+                                                        Text { text: c.note; color: Theme.muted; font-size: 11px; wrap: word-wrap; overflow: elide; max-height: 30px; }
+                                                    }
+                                                    tca := TouchArea { enabled: c.k >= 0; mouse-cursor: MouseCursor.pointer; clicked => { root.flow-new-open = false; root.flow-new(c.k); } }
+                                                }
+                                            }
+                                        }
+                                        // (and the ones you have elsewhere)
+                                        Rectangle { height: 30px; Text { x: 0; y: 8px; text: "Bring Them From Somewhere Else"; color: Theme.text; font-size: 13px; font-weight: 800; } }
+                                        HorizontalLayout {
+                                            alignment: start;
+                                            spacing: 8px;
+                                            Pill { label: "Restore a Backup or Import"; d: Icons.restore; tip: "Choose a backup from OmniPulse, Streamer.bot (an export, .sb file or backup zip) or Mix It Up (.miubackup or .miucommand)"; clicked => { root.flow-act("restore"); } }
+                                            Pill { label: "Paste a Streamer.bot Code"; d: Icons.copy; tip: "A Streamer.bot import code, as Streamer.bot's Export copies it"; clicked => { root.flow-act("paste"); } }
+                                        }
+                                        Rectangle { height: 20px; }
+                                    }
+                                }
+                            }
+                            if root.flow-req && !root.flow-new-open: ScrollView {
                                 horizontal-stretch: 1;
                                 horizontal-scrollbar-policy: always-off;
                                 VerticalLayout {
@@ -10245,8 +10350,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
-                            if !root.flow-req && root.flow-sel < 0: Text { horizontal-stretch: 1; text: "Pick an action, or start a new one."; color: Theme.muted; vertical-alignment: center; horizontal-alignment: center; }
-                            if !root.flow-req && root.flow-sel >= 0: ScrollView {
+                            if !root.flow-req && !root.flow-new-open && root.flow-sel >= 0: ScrollView {
                                 horizontal-stretch: 1;
                                 horizontal-scrollbar-policy: always-off;
                                 VerticalLayout {

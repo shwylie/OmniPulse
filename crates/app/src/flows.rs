@@ -570,6 +570,66 @@ pub fn defaults(list: &'static [Kind], id: &str) -> Value {
     Value::Object(m)
 }
 
+/// New Action's blank starts, by what sets the action off: (the trigger, its name, what it's for)
+pub const STARTERS: &[(&str, &str, &str)] = &[
+    ("command", "A Chat Command", "Someone types !something in chat."),
+    ("event", "A Channel Event", "A follow, sub, bits, raid, reward or donation."),
+    ("timer", "Every Few Minutes", "It runs by itself, on a timer."),
+    ("message", "A Chat Message", "A message with a word or phrase in it."),
+    ("hotkey", "A Hotkey", "A keyboard shortcut, from anywhere."),
+    ("process", "A Program Starting", "A game or app opens on this PC."),
+    ("song", "The Music", "A song starts, or one is requested."),
+    ("obs", "Streaming Software", "A scene changes, or you go live."),
+    ("manual", "Only When Run", "From Run Now, or from another action."),
+];
+
+/// A blank action that one of them starts
+pub fn starter(i: usize) -> Option<Value> {
+    let id = STARTERS.get(i)?.0;
+    Some(json!({ "name": "New Action", "on": true, "trigger": defaults(TRIGGERS, id), "steps": [] }))
+}
+
+/// New Action's page: each template under its heading, in plain words: (its number in templates(), heading, name, what it does)
+pub fn gallery() -> Vec<(usize, &'static str, &'static str, String)> {
+    let told: &[(&str, &str, &str)] = &[
+        ("A Command That Answers", "Chat and Commands", "Someone types !hello, and the bot replies."),
+        ("A Counter (!deaths)", "Chat and Commands", "Your mods type !deaths, and it counts up and says the total."),
+        ("A !clip Command", "Chat and Commands", "Chat types !clip, and it makes a clip and posts its link."),
+        ("Quotes (!quote and !addquote)", "Chat and Commands", "!quote says one of your saved quotes."),
+        ("Add Quotes (!addquote)", "Chat and Commands", "Your mods save a new quote with !addquote."),
+        ("Shout Out on !so", "Chat and Commands", "!so and a name gives that streamer a shout-out."),
+        ("A Reminder Every 15 Minutes", "Chat and Commands", "Posts a message in chat by itself, every so often."),
+        ("Thank New Followers", "Thank-Yous and Welcomes", "Says thanks in chat when someone follows."),
+        ("Thank Subs", "Thank-Yous and Welcomes", "Says thanks in chat when someone subscribes."),
+        ("Thank Bits", "Thank-Yous and Welcomes", "Says thanks in chat for bits, with how many."),
+        ("Thank Donations", "Thank-Yous and Welcomes", "Says thanks in chat for a tip or donation."),
+        ("Welcome Raiders", "Thank-Yous and Welcomes", "Welcomes a raid and shouts out who brought it."),
+        ("Greet First-Time Chatters", "Thank-Yous and Welcomes", "Welcomes someone the first time they ever chat."),
+        ("Entrance Greeting", "Thank-Yous and Welcomes", "Greets your regulars the first time they chat each stream."),
+        ("Thank Whoever Requests a Song", "Thank-Yous and Welcomes", "Tells a viewer their song is in the queue."),
+        ("No Links in Chat", "Keeping Chat Clean", "Deletes messages with links, and says why."),
+        ("No Banned Words", "Keeping Chat Clean", "Deletes messages with words you choose, with a short time-out."),
+        ("Points (!points)", "Points and Games", "Viewers check how many points they have."),
+        ("A Giveaway (!enter)", "Points and Games", "Viewers type !enter to join your giveaway."),
+        ("Pick a Giveaway Winner (!winner)", "Points and Games", "You type !winner, and it draws one."),
+        ("Slots", "Points and Games", "Viewers bet points on a spin."),
+        ("Gamble", "Points and Games", "Viewers bet points on a roll."),
+        ("Duel", "Points and Games", "Two viewers bet points against each other."),
+        ("Heist", "Points and Games", "Chat pools its points for a heist."),
+        ("Trivia", "Points and Games", "A question in chat, with points for the first right answer."),
+        ("Show a Camera on a Reward", "Your Stream", "A channel reward shows a source in OBS for 30 seconds."),
+        ("Automatic Category Switching", "Your Stream", "Opening a game sets your stream's category to it."),
+    ];
+    let mut v: Vec<(usize, &'static str, &'static str, String)> = templates().into_iter().enumerate().skip(1).map(|(i, (name, a))| match told.iter().find(|t| t.0 == name) {
+        Some(t) => (i, t.1, name, t.2.to_string()),
+        None => (i, "More", name, summary(&a)),
+    }).collect();
+    // (in the headings' order above, each heading's as templates() has them)
+    let at = |g: &str| told.iter().position(|t| t.1 == g).unwrap_or(usize::MAX);
+    v.sort_by_key(|x| (at(x.1), x.0));
+    v
+}
+
 /// A new action from a template: (its label in New Action's list, the action)
 pub fn templates() -> Vec<(&'static str, Value)> {
     let step = |id: &str, set: Value| { let mut d = defaults(STEPS, id); if let (Some(o), Some(s)) = (d.as_object_mut(), set.as_object()) { for (k, v) in s { o.insert(k.clone(), v.clone()); } } d };
@@ -667,6 +727,15 @@ pub fn summary(a: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_actions_page_has_every_template_under_a_heading() {
+        let g = gallery();
+        assert_eq!(g.len(), templates().len() - 1);
+        assert!(g.iter().all(|x| x.1 != "More" && !x.3.is_empty()), "{:?}", g.iter().filter(|x| x.1 == "More").map(|x| x.2).collect::<Vec<_>>());
+        assert_eq!(g[0].1, "Chat and Commands");
+        for i in 0..STARTERS.len() { assert_eq!(starter(i).unwrap()["trigger"]["type"], STARTERS[i].0); }
+    }
 
     #[test]
     fn every_kind_has_its_defaults() {
