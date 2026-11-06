@@ -5330,7 +5330,7 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
     ui.on_flow_act(move |act| {
         // (from an action's right-click menu, "copy-at:3": that action picked first, then as its key does)
         let mut act = act.to_string();
-        for (from, to) in [("copy-at:", "clip-copy"), ("cut-at:", "clip-cut"), ("dup-at:", "copy"), ("paste-at:", "clip-paste")] {
+        for (from, to) in [("copy-at:", "clip-copy"), ("cut-at:", "clip-cut"), ("dup-at:", "copy"), ("paste-at:", "clip-paste"), ("del-at:", "key-delete")] {
             if let Some(i) = act.strip_prefix(from).and_then(|n| n.parse::<i32>().ok()) {
                 FLOW.with(|f| { let mut f = f.borrow_mut(); if i >= 0 && (i as usize) < f.0.len() { f.1 = i; } });
                 act = to.to_string();
@@ -6521,7 +6521,17 @@ fn setup_go(shared: &Shared, how: &str) {
             ui.set_set_cat("Streaming".into());
             pf_open(shared, botpage::BOT);
         }
-        "stream-no" => setup_show(shared, 6),
+        "stream-no" | "stream-go:00" => setup_show(shared, 6),
+        // (ticked: streaming, moderating, or both: each switched on; the Suite's own setup opened if you stream,
+        // else Mod View)
+        "stream-go:10" => setup_go(shared, "stream-yes"),
+        "stream-go:01" => setup_go(shared, "stream-mod"),
+        "stream-go:11" => {
+            if !plugin_on(&shared.borrow().web.prefs, MOD) { set_toggle(shared, &format!("plugOn_{MOD}")); }
+            if !plugin_runs(&shared.borrow().web.prefs, MOD) { set_toggle(shared, &format!("plugRun_{MOD}")); }
+            nav_paint(shared);
+            setup_go(shared, "stream-yes");
+        }
         // (moderating: Mod View switched on, first in the sidebar and where the app opens, and opened now)
         "stream-mod" => {
             setup_done(shared);
@@ -10768,7 +10778,7 @@ fn loud_pick(shared: &Shared, step: &str) {
     };
     let ver = what.as_ref().is_some_and(|(k, _)| *k == "youtube") && !matches!(t.src, track::Src::YouTube(_));
     let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
-    { let a = shared.borrow(); let db = sound::loud_db(&a.web.prefs, &t, known, ver); if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: loudness {step}: {db:+.1} dB ({:?}, measured {known:?})", what); } a.engine.set_match_db(db, false); }
+    { let a = shared.borrow(); let db = sound::loud_db(&a.web.prefs, &t, known, ver); if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: loudness {step}: {db:+.1} dB ({:?}, measured {known:?})", what); } a.engine.set_match_db(db, true); }
     // (and Spotify's own levelling, for its songs it plays: from the next one)
     let (on, target) = sound::spotify_norm(&shared.borrow().web.prefs);
     omnipulse_core::spotify_engine::spe_set_normalisation(on, target);
@@ -16477,6 +16487,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 w if w.starts_with("sd_") => { ui.invoke_stats_open(w[3..].into()); println!("selftest: stats detail \"{}\": \"{}\", {} blocks", &w[3..], ui.get_st_detail_head(), ui.get_st_blocks().row_count()); }
                 "queue" => { ui.set_queue_open(true); }
                 w if w.starts_with("nav:") => { ui.invoke_nav(w[4..].into()); }
+                // ("setupat:3": the first-run setup opened at that step, to picture it)
+                w if w.starts_with("setupat:") => { setup_show(&s, w[8..].parse().unwrap_or(0)); }
                 // (Game HUD Frames with a made-up game's screenshot (a minimap, a health bar, ammo), drawn here: never
                 // saved, as nothing in a self-test is)
                 // (the panel words editor: everything selected and made bold, as Ctrl+A, Ctrl+B would; then what

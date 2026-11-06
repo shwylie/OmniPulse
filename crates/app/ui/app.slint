@@ -7115,6 +7115,9 @@ export component AppWindow inherits Window {
     in property <bool> widget-on;
     // (the chatbot on: the widgets and docks are in its page, not Streaming's)
     in property <bool> bot-on;
+    // (the setup's Do You Stream: what's ticked)
+    in-out property <bool> want-stream;
+    in-out property <bool> want-mod;
     // (signed in to Twitch, to Kick: Mod View's card lit in their colours)
     in property <bool> mod-tw;
     in property <bool> mod-kk;
@@ -8889,7 +8892,7 @@ export component AppWindow inherits Window {
                                             StyleSketch { horizontal-stretch: 1; name: "Classic Bar"; style: "bar"; on: root.player-style == "bar"; tip: "One full-width bar (the window must be at least 1000 px wide)"; clicked => { root.player-style-picked("bar"); } }
                                             StyleSketch { horizontal-stretch: 1; name: "Floating"; style: "float"; on: root.player-style == "float"; tip: "One floating bar with rounded ends (the window must be at least 1040 px wide)"; clicked => { root.player-style-picked("float"); } }
                                             StyleSketch { horizontal-stretch: 1; name: "Minimal"; style: "minimal"; on: root.player-style == "minimal"; tip: "A slim row with the progress as a thin line (the window must be at least 1000 px wide)"; clicked => { root.player-style-picked("minimal"); } }
-                                            Rectangle { horizontal-stretch: 1; }
+                                            StyleSketch { horizontal-stretch: 1; name: "Cover Strip"; style: "strip"; on: root.player-style == "strip"; tip: "The bar filled with a blurred copy of the cover"; clicked => { root.player-style-picked("strip"); } }
                                         }
                                         HorizontalLayout {
                                             spacing: 10px;
@@ -8898,11 +8901,6 @@ export component AppWindow inherits Window {
                                             StyleSketch { horizontal-stretch: 1; name: "Sidebar"; style: "sidebar"; on: root.player-style == "sidebar"; tip: "The player in the sidebar's foot, leaving the whole width for your music (a full-size sidebar only)"; clicked => { root.player-style-picked("sidebar"); } }
                                             StyleSketch { horizontal-stretch: 1; name: "DJ Decks"; style: "decks"; on: root.player-style == "decks"; tip: "This song and the next side by side, with a crossfader that moves during a Seamless Mix"; clicked => { root.player-style-picked("decks"); } }
                                             StyleSketch { horizontal-stretch: 1; name: "Waveform"; style: "waveform"; on: root.player-style == "waveform"; tip: "The progress as the song's own shape (once Seamless Mix has measured it)"; clicked => { root.player-style-picked("waveform"); } }
-                                        }
-                                        HorizontalLayout {
-                                            spacing: 10px;
-                                            StyleSketch { horizontal-stretch: 1; name: "Cover Strip"; style: "strip"; on: root.player-style == "strip"; tip: "The bar filled with a blurred copy of the cover"; clicked => { root.player-style-picked("strip"); } }
-                                            Rectangle { horizontal-stretch: 4; }
                                         }
                                         GroupLine { }
                                         HorizontalLayout {
@@ -10196,10 +10194,8 @@ export component AppWindow inherits Window {
                                     border-color: Theme.line;
                                     VerticalLayout {
                                         padding: 6px;
-                                                        MenuRow { label: "Copy"; clicked => { root.flow-act("copy-at:" + i); } }
-                                                        MenuRow { label: "Cut"; clicked => { root.flow-act("cut-at:" + i); } }
-                                                        MenuRow { label: "Paste After It"; clicked => { root.flow-act("paste-at:" + i); } }
-                                                        MenuRow { label: "Duplicate"; clicked => { root.flow-act("dup-at:" + i); } }
+                                                        MenuRow { label: "Copy"; clicked => { root.flow-act("dup-at:" + i); } }
+                                                        MenuRow { label: "Delete"; clicked => { root.flow-act("del-at:" + i); } }
                                                         Rectangle { height: 1px; background: Theme.line; }
                                                         MenuRow { label: it.marked && root.flow-marked > 1 ? "Group the " + root.flow-marked + " Picked..." : "Put It in a Group..."; clicked => { root.flow-act("group-marked:" + i); } }
                                                         MenuRow { label: "New Group..."; clicked => { root.flow-act("group-new"); } }
@@ -11040,13 +11036,6 @@ export component AppWindow inherits Window {
                             alignment: start;
                             Text { text: "Welcome to OmniPulse"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
                             Text { text: "All your music in one place: SoundCloud, Spotify, YouTube Music and the files on this PC. First, make it yours."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
-                            // (here to moderate: straight to Mod View)
-                            HorizontalLayout {
-                                alignment: start;
-                                spacing: 10px;
-                                Text { text: "Here to moderate someone's stream?"; color: Theme.muted; font-size: 13px; vertical-alignment: center; }
-                                Pill { label: "Set Up for Moderating"; d: Icons.sword; clicked => { root.setup-go("stream-mod"); } }
-                            }
                             Text { text: "Your Name"; color: Theme.text; font-weight: 700; }
                             Text { text: "Friends see it when you listen along or Jam. Leave it empty to use your account's name."; color: Theme.muted; font-size: 12px; }
                             Rectangle {
@@ -11095,6 +11084,21 @@ export component AppWindow inherits Window {
                                     keys => { root.account-keys(i); }
                                     settings => { root.account-settings(acc.settings); }
                                     manage => { root.open-web(acc.manage); }
+                                    }
+                                }
+                            }
+                            Text { text: "Keep a Record of What You Play"; color: Theme.text; font-weight: 700; }
+                            Text { text: "Last.fm keeps a history of every song you play here, from every platform, in one place. It turns that into your own charts and recommendations, and Discover uses it too. Optional."; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                            HorizontalLayout {
+                                alignment: start;
+                                for acc[i] in root.accounts: HorizontalLayout {
+                                    if i == 3: AccountTile {
+                                        width: 380px;
+                                        acc: acc;
+                                        act => { root.account-act(i); }
+                                        keys => { root.account-keys(i); }
+                                        settings => { root.account-settings(acc.settings); }
+                                        manage => { root.open-web(acc.manage); }
                                     }
                                 }
                             }
@@ -11154,9 +11158,10 @@ export component AppWindow inherits Window {
                             }
                             Rectangle {
                                 border-radius: 16px;
-                                background: Theme.panel;
-                                border-width: 1px;
-                                border-color: Theme.line;
+                                // (a tip, not a setting: lit, so it's read)
+                                background: Theme.panel.mix(Theme.accent, 0.86);
+                                border-width: 2px;
+                                border-color: Theme.accent;
                                 HorizontalLayout {
                                     padding: 20px;
                                     spacing: 16px;
@@ -11164,7 +11169,7 @@ export component AppWindow inherits Window {
                                     VerticalLayout {
                                         horizontal-stretch: 1;
                                         spacing: 8px;
-                                        Text { text: "It learns as you go"; color: Theme.text; font-size: 17px; font-weight: 800; }
+                                        HorizontalLayout { spacing: 8px; alignment: start; Rectangle { height: 20px; width: gtk.preferred-width + 16px; border-radius: 10px; background: Theme.accent; gtk := Text { x: 8px; height: parent.height; vertical-alignment: center; text: "Good to Know"; color: Theme.on-accent; font-size: 11px; font-weight: 800; } } Text { text: "It Learns as You Go"; color: Theme.text; font-size: 17px; font-weight: 800; } }
                                         Text { text: "Click the heart on songs you love, and the star to add them to your favourites. Discover and Rediscover build around them. To hide a song you don't want to hear, right-click it."; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
                                     }
                                 }
@@ -11229,24 +11234,40 @@ export component AppWindow inherits Window {
                             HorizontalLayout {
                                 spacing: 14px;
                                 alignment: start;
-                                for c in [{ id: "yes", n: "Yes, I stream", t: "Turns on the Stream Suite, and sets up its chatbot next. Coming from Streamer.bot or Mix It Up? You can bring your commands with you.", d: Icons.broadcast }, { id: "no", n: "No, just listening", t: "Nothing to set up. Streaming stays in Settings if you ever want it.", d: Icons.library }, { id: "mod", n: "I moderate", t: "Opens Mod View: a channel you moderate, with its stream, chat and your mod tools side by side. Your music stays here too.", d: Icons.sword }]: Rectangle {
-                                    // (wide enough for its words, which fit in five lines)
-                                    width: 250px;
-                                    height: 200px;
+                                for c in [{ id: "yes", n: "I Stream", t: "Turns on the Stream Suite, and sets up its chatbot next. Coming from Streamer.bot or Mix It Up? You can bring your commands with you.", d: Icons.broadcast }, { id: "mod", n: "I Moderate", t: "Turns on Mod View: a channel you moderate, with its stream, chat and your mod tools side by side.", d: Icons.sword }]: Rectangle {
+                                    property <bool> on: c.id == "yes" ? root.want-stream : root.want-mod;
+                                    width: 290px;
+                                    height: 190px;
                                     border-radius: 16px;
-                                    background: sca.has-hover ? Theme.elevated : Theme.panel;
-                                    border-width: 1px;
-                                    border-color: sca.has-hover ? Theme.accent : Theme.line;
+                                    background: self.on ? Theme.panel.mix(Theme.accent, 0.84) : sca.has-hover ? Theme.elevated : Theme.panel;
+                                    border-width: self.on ? 2px : 1px;
+                                    border-color: self.on || sca.has-hover ? Theme.accent : Theme.line;
                                     VerticalLayout {
                                         padding: 18px;
                                         spacing: 8px;
                                         alignment: start;
-                                        Glyph { d: c.d; width: 26px; height: 26px; fill: Theme.accent; }
+                                        HorizontalLayout {
+                                            Glyph { d: c.d; width: 26px; height: 26px; fill: Theme.accent; }
+                                            Rectangle { horizontal-stretch: 1; }
+                                            // (its tick)
+                                            Rectangle {
+                                                width: 24px; height: 24px; border-radius: 7px;
+                                                background: (c.id == "yes" ? root.want-stream : root.want-mod) ? Theme.accent : transparent;
+                                                border-width: 2px; border-color: (c.id == "yes" ? root.want-stream : root.want-mod) ? Theme.accent : Theme.muted;
+                                                if (c.id == "yes" ? root.want-stream : root.want-mod): Glyph { d: Icons.check; width: 16px; height: 16px; x: 4px; y: 4px; fill: Theme.on-accent; }
+                                            }
+                                        }
                                         Text { text: c.n; color: Theme.text; font-size: 17px; font-weight: 800; }
                                         Text { text: c.t; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
                                     }
-                                    sca := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.setup-go("stream-" + c.id); } }
+                                    sca := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { if (c.id == "yes") { root.want-stream = !root.want-stream; } else { root.want-mod = !root.want-mod; } } }
                                 }
+                            }
+                            Text { text: "Tick either, or both: plenty of streamers moderate for others too. Leave both empty if you're just here for the music."; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: 10px;
+                                Pill { label: root.want-stream || root.want-mod ? "Continue" : "Neither, Just Listening"; on: true; clicked => { root.setup-go("stream-go:" + (root.want-stream ? "1" : "0") + (root.want-mod ? "1" : "0")); } }
                             }
                         }
                         // 7. all set: where things are
