@@ -551,6 +551,12 @@ fn expiry(url: &str) -> u64 {
         .unwrap_or_else(|| crate::now_secs() + 3600)
 }
 
+/// Whether a video's address is in hand already, good for a while yet (it would start without asking YouTube)
+pub fn stream_known(video_id: &str) -> bool {
+    let now = crate::now_secs();
+    STREAMS.lock().map(|g| g.iter().any(|(id, _, exp)| id == video_id && *exp > now + 600)).unwrap_or(false)
+}
+
 /// A direct audio URL for a video, from yt-dlp (kept until shortly before it expires)
 #[cfg(feature = "desktop")]
 pub async fn stream_url(video_id: &str, fresh: bool) -> Result<String, String> {

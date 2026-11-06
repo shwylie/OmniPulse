@@ -3602,6 +3602,27 @@ fn start(shared: &Shared) {
                         // stops here, saying when YouTube's back, instead of going through them)
                         if let Some(wait) = omnipulse_core::yt_stream::bot_wait() {
                             START_FAILS.with(|f| f.set(0));
+                            // (a song that doesn't need YouTube, or is looked up already: played in its place,
+                            // this one straight after it)
+                            let moved = if PULLS.with(|p| p.get()) < 8 {
+                                let mut a = shared.borrow_mut();
+                                let at = a.queue.qi.filter(|&i| a.queue.items.get(i).is_some_and(|q| q.t.key == t.key));
+                                let m = at.and_then(|i| pull_ready(&mut a, i));
+                                if m.is_some() { paint_queue(&mut a); save_session(&a); }
+                                m
+                            } else { None };
+                            if let Some((title, was)) = moved {
+                                PULLS.with(|p| p.set(p.get() + 1));
+                                omnipulse_core::diag::note(&format!("youtube paused: \"{title}\" played in place of \"{was}\""));
+                                let note = format!("YouTube is paused for {} min, so \"{title}\" plays now. \"{was}\" comes after it.", wait.div_ceil(60).max(1));
+                                let s2 = shared.clone();
+                                slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
+                                    start(&s2);
+                                    let (s3, n) = (s2.clone(), note.clone());
+                                    slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || { if let Some(ui) = s3.borrow().ui.upgrade() { ui.set_status(n.into()); } });
+                                });
+                                return;
+                            }
                             ui.set_status(format!("Couldn't play \"{}\": YouTube asked OmniPulse to prove it isn't a bot, so it's paused for {} min. It carries on by itself after that.", t.title, wait.div_ceil(60).max(1)).into());
                             // (carried on with once the pause is over: this song again, if it's still the one and
                             // nothing's been played since)
@@ -4597,6 +4618,80 @@ thread_local! {
     static BOT_RESUME: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
+/// Whether a song is played from YouTube here (its own video, or its YouTube Music version: a catalogue song, a
+/// Go+ track, a Spotify song with a free account or Seamless Mix on)
+fn needs_youtube(prefs: &serde_json::Value, t: &Track) -> bool {
+    let sp_yt = matches!(t.src, track::Src::Spotify(_)) && (!sp_plays_here() || smart_on(prefs));
+    matches!(t.src, track::Src::YouTube(_)) || t.go_plus || matches!(t.src, track::Src::Catalog(_)) || listen_needs_version(t) || sp_yt
+}
+
+/// Whether a song would start without asking YouTube anything: it isn't played from there, or its address is
+/// in hand already (looked up ahead)
+fn ready_now(prefs: &serde_json::Value, t: &Track) -> bool {
+    if !needs_youtube(prefs, t) { return true; }
+    let id = if let track::Src::YouTube(id) = &t.src { Some(id.clone()) } else { versions::saved_id(&t.key) };
+    id.is_some_and(|id| omnipulse_core::youtube::stream_known(&id))
+}
+
+/// YouTube's paused and the song at `at` needs it: the first one after it that doesn't is moved there, to play
+/// in its place (the one that was there comes straight after, by when YouTube may be back). The two's titles
+fn pull_ready(a: &mut App, at: usize) -> Option<(String, String)> {
+    let was = a.queue.items.get(at)?.t.title.clone();
+    let j = (at + 1..a.queue.items.len().min(at + 1 + PULL_REACH)).find(|&j| ready_now(&a.web.prefs, &a.queue.items[j].t))?;
+    let q = a.queue.items.remove(j);
+    let title = q.t.title.clone();
+    a.queue.items.insert(at, q);
+    Some((title, was))
+}
+
+/// How far down the queue it looks for one
+const PULL_REACH: usize = 300;
+/// Songs looked up ahead of the one playing, so a pause of YouTube's a few minutes long isn't heard; and the
+/// gap between two of those lookups
+const AHEAD_SONGS: usize = 5;
+const AHEAD_GAP_SECS: u64 = 25;
+
+thread_local! {
+    /// looking ahead: which round it is (a newer one ends the one before), and the song it was started for
+    static AHEAD: RefCell<(u64, String)> = const { RefCell::new((0, String::new())) };
+    /// songs in a row moved up to play in a paused one's place (so one that won't start can't go round for ever)
+    static PULLS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// The next few songs' addresses asked for while YouTube's answering, one at a time with a gap between: once
+/// for each song that's playing (those in hand already cost nothing)
+fn look_ahead(shared: &Shared) {
+    let (list, rt) = {
+        let a = shared.borrow();
+        let Some(i) = a.queue.qi else { return };
+        let Some(cur) = a.queue.current() else { return };
+        if AHEAD.with(|x| x.borrow().1 == cur.key) { return; }
+        AHEAD.with(|x| { let mut x = x.borrow_mut(); x.0 += 1; x.1 = cur.key.clone(); });
+        AHEAD_ROUND.with(|r| r.borrow().store(u64::MAX, std::sync::atomic::Ordering::SeqCst));
+        if a.repeat == "one" { return; }
+        let list: Vec<Track> = a.queue.items.iter().skip(i + 1).take(AHEAD_SONGS).map(|q| q.t.clone()).filter(|t| needs_youtube(&a.web.prefs, t) && !ready_now(&a.web.prefs, t)).collect();
+        (list, a.rt.clone())
+    };
+    if list.is_empty() { return; }
+    let round = AHEAD.with(|x| x.borrow().0);
+    let now_round = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(round));
+    AHEAD_ROUND.with(|r| *r.borrow_mut() = now_round.clone());
+    rt.spawn(async move {
+        for (n, t) in list.into_iter().enumerate() {
+            if n > 0 { tokio::time::sleep(std::time::Duration::from_secs(AHEAD_GAP_SECS)).await; }
+            // (another song's playing by now, or YouTube's paused: this round is over)
+            if now_round.load(std::sync::atomic::Ordering::SeqCst) != round || omnipulse_core::yt_stream::bot_wait().is_some() { return; }
+            let id = if let track::Src::YouTube(id) = &t.src { Some(id.clone()) } else { versions::find(&t).await.map(|v| v.yt.id) };
+            if let Some(id) = id { let _ = omnipulse_core::youtube::stream_url(&id, false).await; }
+        }
+    });
+}
+
+thread_local! {
+    /// the round the running look-ahead is for: set past it to end it
+    static AHEAD_ROUND: RefCell<std::sync::Arc<std::sync::atomic::AtomicU64>> = RefCell::new(Default::default());
+}
+
 fn preload_next(shared: &Shared) {
     let next = {
         let a = shared.borrow();
@@ -4627,13 +4722,33 @@ fn preload_next(shared: &Shared) {
         let id = if via_yt { versions::find(&next).await.map(|v| v.yt.id) } else { yt_id(&next) };
         // (no version to play it from: it would be silence when it came up (a mix fading the one playing out
         // into nothing, then nothing); left out now, the one after it got ready instead)
+        let mut paused = false;
         let why = match &id {
             None if via_yt && !spotify_after => Some("there's no version of it on YouTube Music".to_string()),
-            Some(id) => { let _ = omnipulse_core::youtube::stream_url(id, false).await; None }
+            Some(id) => { paused = omnipulse_core::youtube::stream_url(id, false).await.is_err() && omnipulse_core::yt_stream::bot_wait().is_some(); None }
             None => None,
         };
         let _ = weak.upgrade_in_event_loop(move |ui| {
             ui.set_preloading(false);
+            // (YouTube's paused, so it wouldn't start: one that would is moved up to play before it)
+            if paused {
+                SHARED.with(|s| {
+                    let Some(shared) = s.borrow().clone() else { return };
+                    let moved = {
+                        let mut a = shared.borrow_mut();
+                        let Some(i) = a.queue.qi.map(|i| i + 1).filter(|&i| a.queue.items.get(i).is_some_and(|q| q.t.key == next.key)) else { return };
+                        let m = pull_ready(&mut a, i);
+                        if m.is_some() { paint_queue(&mut a); save_session(&a); }
+                        m
+                    };
+                    let Some((title, was)) = moved else { return };
+                    omnipulse_core::diag::note(&format!("youtube paused: \"{title}\" moved up to play before \"{was}\""));
+                    ui.set_status(format!("YouTube is paused for a few minutes, so \"{title}\" plays next. \"{was}\" comes after it.").into());
+                    PRELOADED.with(|p| p.borrow_mut().clear());
+                    preload_next(&shared);
+                });
+                return;
+            }
             let Some(why) = why else { return };
             SHARED.with(|s| {
                 let Some(shared) = s.borrow().clone() else { return };
@@ -6744,6 +6859,11 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     let live = !engine.is_paused() && shared.borrow().loaded && !ui.get_track_loading();
     if live && dur > 0 && preload_due(pos, dur) {
         preload_next(shared);
+    }
+    // (a few seconds in: the songs after it looked up ahead)
+    if live && pos > 8_000 {
+        PULLS.with(|p| p.set(0));
+        look_ahead(shared);
     }
     let dbg = std::env::var_os("OMNIPULSE_MIX_DEBUG").is_some() && pos % 1000 < 260;
     if live && fade_and_silences(shared, pos, dur) {
