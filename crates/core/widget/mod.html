@@ -295,6 +295,21 @@
         f.onsubmit = (e) => { e.preventDefault(); const n = name.value.trim(); if (n) ask({ do: "watch", platform: other, channel: n, also: true }); };
         p.append(el("p", "say", "Multi-streaming? Add their " + PNAME[other] + " channel: both chats show as one, with a tab for each stream."), f);
       }
+      // (the stream's player is OmniPulse's built-in browser, signed in to nothing: a stream that asks you to sign in
+      // (a mature one, or subscribers only) needs it signed in, on the platform's own page)
+      const pl = el("div", "row");
+      pl.append(el("span", "say", "Stream asking you to sign in?"));
+      for (const k of ["twitch", "kick"]) {
+        if (!w[k]) continue;
+        const b = el("button", "b", "Sign In for the Player (" + PNAME[k] + ")");
+        b.title = "Opens " + PNAME[k] + "'s own sign-in page in a window. The player here is signed in from then on.";
+        b.onclick = () => ask({ do: "playersignin", platform: k });
+        pl.append(b);
+      }
+      const rl = el("button", "b", "Reload the Stream");
+      rl.onclick = () => { playing = ""; drawStream(w); };
+      pl.append(rl);
+      p.append(pl);
       const all = el("div", "row");
       const stop = el("button", "b", "Stop Watching");
       stop.onclick = () => ask({ do: "stop" });

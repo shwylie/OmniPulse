@@ -9338,6 +9338,17 @@ fn accounts_shared(shared: &Shared, from: &str, acct: serde_json::Map<String, se
 /// in the page's chat
 fn mod_do(shared: &Shared, mut cmd: serde_json::Value) {
     if cmd["do"] == "jam" { return jam_mod(shared, &cmd); }
+    // (the stream's player signed in: Twitch's or Kick's own sign-in page, in a window of OmniPulse's built-in
+    // browser, which the player on the Mod Suite's page shares; nothing of it is seen or kept by OmniPulse)
+    if cmd["do"] == "playersignin" {
+        let kick = cmd["platform"] == "kick";
+        let (url, title) = if kick { ("https://kick.com/", "Sign In to Kick for the Player") } else { ("https://www.twitch.tv/login", "Sign In to Twitch for the Player") };
+        match web_preview(if kick { "player-kick" } else { "player-twitch" }, title, url, 560, 780) {
+            Ok(()) => omnipulse_core::modsuite::notice(if kick { "Kick is open in a window. Sign in there (Log In, top right), close the window, then click Reload the Stream." } else { "Twitch's sign-in is open in a window. Sign in there, close the window, then click Reload the Stream." }),
+            Err(e) => omnipulse_core::modsuite::notice(&format!("Couldn't open the sign-in window: {e}")),
+        }
+        return;
+    }
     // (a sign-in: OmniPulse's apps, finished by the relay, as the Stream Suite's)
     if cmd["do"] == "signin" {
         let mut vals = serde_json::Map::new();
@@ -9377,7 +9388,10 @@ fn mod_view(shared: &Shared) {
         at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(400))
     });
     let show = !menu && !ui.get_mod_covered() && g.get_w() > 1.0 && g.get_h() > 1.0 && !ui.window().is_minimized();
-    let at = (g.get_x(), g.get_y(), g.get_w(), g.get_h(), show);
+    // (the queue open beside the page: never past its left edge, whatever the page's spot says)
+    let win_w = ui.window().size().width as f32 / ui.window().scale_factor();
+    let w = if ui.get_queue_open() { g.get_w().min(win_w - 300.0 - 28.0 - g.get_x()).max(2.0) } else { g.get_w() };
+    let at = (g.get_x(), g.get_y(), w, g.get_h(), show);
     let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(at.0 as f64, at.1 as f64).into(), size: wry::dpi::LogicalSize::new(at.2 as f64, at.3 as f64).into() };
     if MODV.with(|m| m.borrow().is_none()) {
         if !show { return; }
