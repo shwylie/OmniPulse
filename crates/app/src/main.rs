@@ -565,13 +565,19 @@ fn open_page_now(shared: &Shared, page: &str) {
             ui.set_page_kind("now".into());
             ui.set_chips(ModelRc::default());
         }
-        // (the Mod Suite: its page, a web view the 40 ms timer puts on its spot: see mod_view)
+        // (the Stream Suite, from the sidebar: its page in Settings > Streaming)
+        "suite" => {
+            open_page_now(shared, "settings");
+            ui.set_set_cat("Streaming".into());
+            pf_open(shared, botpage::BOT);
+        }
+        // (Mod View: its page, a web view the 40 ms timer puts on its spot: see mod_view)
         "mod" => {
             let mut a = shared.borrow_mut();
             a.page = "mod".into();
             ui.set_page("mod".into());
             ui.set_page_kind("mod".into());
-            ui.set_page_title("Mod Suite".into());
+            ui.set_page_title("Mod View".into());
             ui.set_page_sub("".into());
             ui.set_chips(ModelRc::default());
         }
@@ -4731,7 +4737,7 @@ thread_local! {
 }
 
 const BOT: &str = "chatbot";
-/// The Mod Suite (plugins/modsuite): for moderators, its page in the sidebar while it's switched on
+/// Mod View (plugins/modsuite): for moderators, its page in the sidebar while it's switched on
 const MOD: &str = "modsuite";
 /// One sign-in for both suites: these are kept with the Stream Suite's settings, whichever signed in, and each
 /// suite is told when the other changes them
@@ -6516,7 +6522,7 @@ fn setup_go(shared: &Shared, how: &str) {
             pf_open(shared, botpage::BOT);
         }
         "stream-no" => setup_show(shared, 6),
-        // (moderating: the Mod Suite switched on, first in the sidebar and where the app opens, and opened now)
+        // (moderating: Mod View switched on, first in the sidebar and where the app opens, and opened now)
         "stream-mod" => {
             setup_done(shared);
             pref_put(shared, "modOnly", serde_json::json!(true));
@@ -6571,7 +6577,9 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
         }
     }
     // a mix playing: the title bar's button and the progress bar show it
-    let mixing = shared.borrow().engine.mixing();
+    // (not while paused: its shimmer redraws every frame, which is a good part of a core's work for a mix that's
+    // standing still)
+    let mixing = { let e = &shared.borrow().engine; e.mixing() && !e.is_paused() };
     if ui.get_mixing() != mixing { ui.set_mixing(mixing); }
     xf_tick(shared, &ui);
     plugins_app_events(shared);
@@ -7186,6 +7194,9 @@ fn paint_settings(a: &App) {
     ui.set_set_rows_plugins(rows("Plugins"));
     ui.set_widget_on(set_row_on(&a.web.prefs, "widget", false));
     ui.set_bot_on(plugin_on(&a.web.prefs, botpage::BOT));
+    let signed = |k: &str| a.web.prefs["pluginSettings"][BOT][k].as_str().is_some_and(|v| !v.is_empty());
+    ui.set_mod_tw(signed("token") && signed("login"));
+    ui.set_mod_kk(signed("kickToken"));
     ui.set_widget_port(a.web.prefs["widgetPort"].as_i64().filter(|p| (1024..65536).contains(p)).unwrap_or(7878) as i32);
     ui.set_set_rows_streaming(rows("Streaming"));
     // the closed categories (the web app's setting too: by their titles)
@@ -7504,6 +7515,10 @@ fn bot_paint(shared: &Shared) {
         // (the picked one's box, to move or size it by dragging)
         let picked = usize::try_from(sel).ok().and_then(|i| rects.get(i).cloned());
         g.set_has_sel(picked.is_some());
+        // (its corners, to fine-tune: as fractions of the screenshot)
+        let sel_pts: Vec<HudPt> = usize::try_from(sel).ok().and_then(|i| hud::frames(cur.get("hudFrames").and_then(|v| v.as_str()).unwrap_or("[]")).get(i).cloned())
+            .map(|f| hud::corners_px(&f).iter().map(|p| HudPt { x: p.0 / iw.max(1.0), y: p.1 / ih.max(1.0) }).collect()).unwrap_or_default();
+        g.set_sel_pts(ModelRc::from(Rc::new(VecModel::from(sel_pts))));
         if let Some(r) = picked { g.set_sel_x(r.x); g.set_sel_y(r.y); g.set_sel_w(r.w); g.set_sel_h(r.h); }
         g.set_frames(ModelRc::from(Rc::new(VecModel::from(rects))));
         let t = ui.global::<Theme>();
@@ -7918,6 +7933,19 @@ fn bot_act(shared: &Shared, act: &str) {
                 f["pts"] = serde_json::json!(pts.iter().map(|p| [(((p.0 - x0) / w) * 1000.0).round() / 1000.0, (((p.1 - y0) / h) * 1000.0).round() / 1000.0]).collect::<Vec<_>>());
                 frames.push(f);
                 bot_set(shared, "hudSel", &(frames.len() - 1).to_string());
+            }
+        } else if let Some(r) = rest.strip_prefix("pt:").or_else(|| rest.strip_prefix("ptadd:")).or_else(|| rest.strip_prefix("ptdel:")) {
+            // (fine-tuning the picked frame: a corner moved ("pt:i:x,y", as fractions of the screenshot), one added in
+            // the middle of the edge after corner i, or one taken away (never under three))
+            if let Some(f) = (sel >= 0.0).then(|| frames.get_mut(sel as usize)).flatten() {
+                let mut pts = hud::corners_px(f);
+                let (i, to) = r.split_once(':').map(|(i, to)| (i, nums(to))).unwrap_or((r, Vec::new()));
+                if let Some(i) = i.parse::<usize>().ok().filter(|i| *i < pts.len()) {
+                    if rest.starts_with("ptadd:") { let n = pts[(i + 1) % pts.len()]; pts.insert(i + 1, ((pts[i].0 + n.0) / 2.0, (pts[i].1 + n.1) / 2.0)); }
+                    else if rest.starts_with("ptdel:") { if pts.len() > 3 { pts.remove(i); } else { say("A frame needs at least three corners."); } }
+                    else if to.len() == 2 { pts[i] = (to[0].clamp(0.0, 1.0) * iw, to[1].clamp(0.0, 1.0) * ih); }
+                    hud::set_corners(f, &pts);
+                }
             }
         } else if let Some(r) = rest.strip_prefix("pick:") {
             let n = nums(r);
@@ -9327,7 +9355,7 @@ fn live_widget(shared: &Shared) {
     });
 }
 
-// ---------- the Mod Suite (plugins/modsuite, its page /mod) ----------
+// ---------- Mod View (plugins/modsuite, its page /mod) ----------
 /// One sign-in for both suites: the other suite told of what changed. The chatbot signed in or out from the Mod
 /// Suite is started again (as its own sign-in does); a renewal is only handed to it
 fn accounts_shared(shared: &Shared, from: &str, acct: serde_json::Map<String, serde_json::Value>) {
@@ -9343,12 +9371,12 @@ fn accounts_shared(shared: &Shared, from: &str, acct: serde_json::Map<String, se
     }
 }
 
-/// What the Mod Suite's page asks: the Jam's here (the music), the rest the Mod Suite plugin's; its answer said
+/// What Mod View's page asks: the Jam's here (the music), the rest Mod View plugin's; its answer said
 /// in the page's chat
 fn mod_do(shared: &Shared, mut cmd: serde_json::Value) {
     if cmd["do"] == "jam" { return jam_mod(shared, &cmd); }
     // (the stream's player signed in: Twitch's or Kick's own sign-in page, in a window of OmniPulse's built-in
-    // browser, which the player on the Mod Suite's page shares; nothing of it is seen or kept by OmniPulse)
+    // browser, which the player on Mod View's page shares; nothing of it is seen or kept by OmniPulse)
     if cmd["do"] == "playersignin" {
         let kick = cmd["platform"] == "kick";
         let (url, title) = if kick { ("https://kick.com/", "Sign In to Kick for the Player") } else { ("https://www.twitch.tv/login", "Sign In to Twitch for the Player") };
@@ -9364,7 +9392,7 @@ fn mod_do(shared: &Shared, mut cmd: serde_json::Value) {
         botpage::sign_in_extras(&mut vals, share::RELAY_URL);
         cmd["values"] = serde_json::Value::Object(vals);
     }
-    let Some(p) = plugrun::get(MOD) else { return omnipulse_core::modsuite::notice("The Mod Suite isn't running. Switch it on in Settings > Streaming.") };
+    let Some(p) = plugrun::get(MOD) else { return omnipulse_core::modsuite::notice("Mod View isn't running. Switch it on in Settings > Streaming.") };
     let rt = shared.borrow().rt.clone();
     rt.spawn(async move {
         match p.call("do", vec![cmd]).await {
@@ -9375,12 +9403,12 @@ fn mod_do(shared: &Shared, mut cmd: serde_json::Value) {
 }
 
 thread_local! {
-    /// the Mod Suite page's web view, and where it was last put (and whether it was showing)
+    /// Mod View page's web view, and where it was last put (and whether it was showing)
     static MODV: RefCell<Option<(wry::WebView, (f32, f32, f32, f32, bool))>> = const { RefCell::new(None) };
     static MOD_BEAT: std::cell::Cell<(i32, Option<std::time::Instant>)> = const { std::cell::Cell::new((0, None)) };
 }
 
-/// The Mod Suite's page, in a web view on its spot (from the window's 40 ms timer): made when you open the page,
+/// Mod View's page, in a web view on its spot (from the window's 40 ms timer): made when you open the page,
 /// stepping aside while a menu or dialog is over it, and let go when you leave (its stream stops with it). It's
 /// the widgets' server's page, at localhost (Twitch's player plays only on a site it's told: this one)
 fn mod_view(shared: &Shared) {
@@ -9908,7 +9936,7 @@ fn plugin_on(prefs: &serde_json::Value, id: &str) -> bool {
 /// A plugin running: on (its master switch), and, for one whose settings live in a category of their own
 /// (the chatbot's in Streaming), switched on there too (prefs.plugRun_<id>). Off there, its settings stay
 fn plugin_runs(prefs: &serde_json::Value, id: &str) -> bool {
-    // (the Mod Suite: off until you switch it on, or pick "I moderate" when setting up)
+    // (Mod View: off until you switch it on, or pick "I moderate" when setting up)
     if id == MOD { return plugin_on(prefs, id) && prefs[format!("plugRun_{id}")].as_bool() == Some(true); }
     plugin_on(prefs, id) && prefs[format!("plugRun_{id}")].as_bool() != Some(false)
 }
@@ -9945,7 +9973,7 @@ fn plugins_start(shared: &Shared) {
         // (a self-test's: never your accounts: their sign-ins left out and every connection off, so a test never
         // reaches Twitch, Kick, OBS or the tip services as you)
         let mut set = plugrun::settings_of(&p.manifest, &prefs);
-        // (the Mod Suite: the Stream Suite's sign-in, as one)
+        // (Mod View: the Stream Suite's sign-in, as one)
         if id == MOD {
             if let Some(o) = set.as_object_mut() {
                 for k in ACCOUNT_KEYS { if let Some(v) = prefs["pluginSettings"][BOT].get(k) { o.insert(k.into(), v.clone()); } }
@@ -9979,6 +10007,8 @@ fn nav_ids(prefs: &serde_json::Value) -> Vec<String> {
     // (Stream-Safe Music on: the Streamer Mode page stands in for Discover, Rediscover, the Library,
     // Favourites, Sets & Podcasts and Artists, which are hidden meanwhile, as the web app's)
     if streamsafe::on(prefs) { ids.retain(|id| id == "navDiscover" || id == "navStats"); }
+    // (the Stream Suite, while it's on: its page a click away)
+    if plugin_runs(prefs, BOT) { ids.push("navSuite".into()); }
     if plugin_runs(prefs, MOD) { if prefs["modOnly"].as_bool() == Some(true) { ids.insert(0, "navMod".into()); } else { ids.push("navMod".into()); } }
     ids
 }
@@ -10017,7 +10047,7 @@ fn set_toggle(shared: &Shared, key: &str) {
         paint_plats(&shared.borrow());
         if id == MOD {
             nav_paint(shared);
-            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if on { "The Mod Suite is on. Open it from the sidebar." } else { "The Mod Suite is off." }.into()); }
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if on { "Mod View is on. Open it from the sidebar." } else { "Mod View is off." }.into()); }
             if !on && shared.borrow().page == "mod" { go(shared, Place::Page("library".into())); }
         }
         return;
@@ -10161,7 +10191,7 @@ fn library_load(shared: &Shared) {
                     // (where you left off last time, once: unless you've gone somewhere since it started)
                     let last = LAST_PLACE_DONE.with(|d| !d.replace(true)).then(|| webstate::native_pref("lastPlace")).flatten();
                     let untouched = shared.borrow().page == "library" && shared.borrow().history.is_empty();
-                    // (set up for moderating: the Mod Suite, every time)
+                    // (set up for moderating: Mod View, every time)
                     let mod_first = { let p = &shared.borrow().web.prefs; p["modOnly"].as_bool() == Some(true) && plugin_runs(p, MOD) };
                     let back_to = if mod_first && untouched { Some(Place::Page("mod".into())) } else { last.filter(|_| untouched).and_then(|v| {
                         if let Some(id) = v["playlist"].as_str() { return shared.borrow().playlists.iter().any(|p| p.id == id).then(|| Place::Playlist(id.to_string())); }
@@ -12246,7 +12276,7 @@ fn flows_open_remote(shared: &Shared, list: Vec<serde_json::Value>, host: &str) 
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("You're editing {host}'s chatbot actions. Your changes go to them as you make them.").into()); }
 }
 
-/// The Mod Suite's Music tab: the Jam you're in, as it is now
+/// Mod View's Music tab: the Jam you're in, as it is now
 fn mod_jam_paint() {
     let v = LISTEN.with(|l| l.borrow().as_ref().filter(|l| l.kind == "jam").map(|l| {
         let st = l.state.clone().unwrap_or(serde_json::Value::Null);
@@ -12260,7 +12290,7 @@ fn mod_jam_paint() {
     omnipulse_core::modsuite::jam_set(v);
 }
 
-/// The Mod Suite's Music tab: joining (control only), leaving, and the queue
+/// Mod View's Music tab: joining (control only), leaving, and the queue
 fn jam_mod(shared: &Shared, cmd: &serde_json::Value) {
     let say = |t: &str| omnipulse_core::modsuite::notice(t);
     match cmd["op"].as_str().unwrap_or("") {
@@ -12398,7 +12428,7 @@ struct Listening {
     /// the track lined up with the host's already (left alone after), and whether something moved since
     synced: Option<String>,
     resync: bool,
-    /// joined from the Mod Suite: nothing plays here (you hear it on stream), the queue only followed
+    /// joined from Mod View: nothing plays here (you hear it on stream), the queue only followed
     quiet: bool,
     /// the host made you one of their Jam moderators (songs taken out, their chatbot's actions edited)
     is_mod: bool,
@@ -12406,7 +12436,7 @@ struct Listening {
 
 thread_local! {
     static LISTEN: RefCell<Option<Listening>> = const { RefCell::new(None) };
-    /// the next join's from the Mod Suite (control only)
+    /// the next join's from Mod View (control only)
     static LISTEN_QUIET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -12963,7 +12993,7 @@ fn listen_follow(shared: &Shared, st: serde_json::Value) {
     });
     let quiet = LISTEN.with(|l| l.borrow().as_ref().is_some_and(|l| l.quiet));
     if quiet {
-        // (from the Mod Suite: the queue as the host has it, shown; nothing played here)
+        // (from Mod View: the queue as the host has it, shown; nothing played here)
         let mut a = shared.borrow_mut();
         a.queue.items = Track::from_snapshot(&st["track"]).into_iter().chain(st["next"].as_array().into_iter().flatten().filter_map(Track::from_snapshot)).map(queue::QItem::mine).collect();
         a.queue.qi = if a.queue.items.is_empty() { None } else { Some(0) };
@@ -13863,7 +13893,7 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
         // (the Chat Dock's emote menu: Twitch's and Kick's own emotes, as the chatbot reads them)
         "dockEmotes" => {
             if plugin != "chatbot" && plugin != MOD { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
-            // (the Mod Suite's: only while the Stream Suite isn't running to give its own, which has Kick's too)
+            // (Mod View's: only while the Stream Suite isn't running to give its own, which has Kick's too)
             if plugin == MOD && plugrun::get(BOT).is_some() { return send(serde_json::json!({ "ok": true })); }
             let list: Vec<serde_json::Value> = args.first().and_then(|v| v.as_array()).cloned().unwrap_or_default().into_iter()
                 .filter(|e| e["c"].is_string() && e["u"].as_str().is_some_and(|u| u.starts_with("https://")) && matches!(e["f"].as_str(), Some("twitch" | "kick")))
@@ -13871,9 +13901,9 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             omnipulse_core::emotes::own_set(list);
             send(serde_json::json!({ "ok": true }));
         }
-        // (the Mod Suite's page: its chat, messages taken down, the chat let go for another channel, and its state)
+        // (Mod View's page: its chat, messages taken down, the chat let go for another channel, and its state)
         "modChat" | "modGone" | "modClear" | "modState" => {
-            if plugin != MOD { return send(serde_json::json!({ "error": "only OmniPulse's Mod Suite can" })); }
+            if plugin != MOD { return send(serde_json::json!({ "error": "only OmniPulse's Mod View can" })); }
             let v = args.first().cloned().unwrap_or(serde_json::Value::Null);
             let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
             match ask["op"].as_str().unwrap_or("") {
@@ -14605,7 +14635,7 @@ fn apply_look(shared: &Shared) {
         let mine = look::Rgb::parse(prefs["accent"].as_str().unwrap_or(ACCENTS[0]));
         (mine, prefs["accent2"].as_str().and_then(look::Rgb::parse).or(mine))
     };
-    // (the Mod Suite's page, in the app: the accents as they are on screen now)
+    // (Mod View's page, in the app: the accents as they are on screen now)
     if let Some(c) = c1 { omnipulse_core::modsuite::look_set(serde_json::json!({ "accent": c.hex(), "accent2": c2.unwrap_or(c).hex() })); }
     let c1 = c1.unwrap_or(look::Rgb(0x8e, 0x9b, 0xff));
     // (the docks in OBS follow it: its colours, font and corners; the theme's accent or yours, never the album art's)
@@ -16258,7 +16288,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // Overlay, Game HUD Frames)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("previews") { vec![(6, "size:1500:950"), (8, "openpanel:widget"), (12, "scroll:500"), (14, "openpanel:multichat"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panelpv") { vec![(6, "size:1500:2300"), (7, "bot:sheet:panels"), (10, "end")] }
-            // (OMNIPULSE_SELFTEST_PLAN=modpage: the Mod Suite switched on (for this run only), made-up channels and chat
+            // (OMNIPULSE_SELFTEST_PLAN=modpage: Mod View switched on (for this run only), made-up channels and chat
             // given to its page, and the page opened; it stays up a while for a look at http://localhost:7979/mod)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("modpage") { vec![(6, "size:1500:950"), (7, "modon"), (8, "nav:settings"), (9, "cat:Streaming"), (30, "modfake"), (31, "nav:mod"), (70, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dockspage") { vec![(6, "size:1500:950"), (7, "bot:docks"), (10, "end")] }
@@ -16879,7 +16909,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         "twitch": { "login": "testmod" }, "kick": { "login": "testmod" },
                         "channels": [{ "platform": "twitch", "login": "testmod", "name": "testmod", "own": true }, { "platform": "twitch", "login": ch, "name": "TestStreamer" }],
                         "recent": [{ "name": "TestStreamer", "twitch": ch, "kick": ch }],
-                        "watching": { "name": "TestStreamer", "twitch": { "login": ch, "name": "TestStreamer", "live": true, "up": true, "title": "Testing the Mod Suite", "viewers": 12, "mod": false }, "kick": { "login": ch, "name": "TestStreamer", "live": true, "up": true, "mod": true } },
+                        "watching": { "name": "TestStreamer", "twitch": { "login": ch, "name": "TestStreamer", "live": true, "up": true, "title": "Testing Mod View", "viewers": 12, "mod": false }, "kick": { "login": ch, "name": "TestStreamer", "live": true, "up": true, "mod": true } },
                         "up": true, "modes": { "chat": { "slow": true, "slowSecs": 10 }, "shield": false, "twitch": false }, "can": { "twitch": false, "kick": true },
                         "automod": [{ "id": "a1", "user": "Spammer", "login": "spammer", "userId": "3", "text": "buy cheap followers here", "reason": "AutoMod: aggression (level 2)" }],
                     }));

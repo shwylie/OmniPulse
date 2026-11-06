@@ -381,7 +381,7 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                         let (status, v) = match answer { Ok(m) => ("200 OK", json!({ "ok": true, "message": m })), Err(e) => ("400 Bad Request", json!({ "ok": false, "error": e })) };
                         reply_own(&mut stream, status, "application/json", v.to_string().as_bytes());
                     }
-                    // (the Mod Suite: its page, its state, its chat, and what it asks)
+                    // (Mod View: its page, its state, its chat, and what it asks)
                     "/mod" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::modsuite::MOD_HTML.as_bytes()),
                     "/creators-preview.json" => reply_own(&mut stream, "200 OK", "application/json", CREATORS_PREVIEW.lock().unwrap().clone().unwrap_or(json!({})).to_string().as_bytes()),
                     "/mod/state.json" => reply_own(&mut stream, "200 OK", "application/json", crate::modsuite::state_json().to_string().as_bytes()),

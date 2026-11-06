@@ -169,7 +169,7 @@ component BotLiveSpot inherits Rectangle {
     init => { BLive.x = self.lx; BLive.y = self.ly; BLive.w = self.width; BLive.h = self.height; BLive.which = self.which; }
 }
 
-/// The Mod Suite's page (its web view, as the app places it on this spot): where it is
+/// Mod View's page (its web view, as the app places it on this spot): where it is
 export global ModView {
     in-out property <length> x;
     in-out property <length> y;
@@ -210,6 +210,7 @@ export global RainPics {
     in property <[image]> list;
 }
 
+export struct HudPt { x: float, y: float }
 export global HudLook {
     in-out property <image> shot;
     in-out property <float> ratio: 0.5625;
@@ -222,6 +223,8 @@ export global HudLook {
     in-out property <float> sel-y;
     in-out property <float> sel-w;
     in-out property <float> sel-h;
+    // (the picked frame's corners, as fractions of the screenshot, to fine-tune: each dragged, added to or taken away)
+    in-out property <[HudPt]> sel-pts;
 }
 /// A channel panel, for the Panels' preview
 export struct PanelItem { title: string, line: string, body: bool, lines: int, icon: string, img: image, has-img: bool, tint: bool }
@@ -2505,13 +2508,26 @@ component SuiteHero inherits Rectangle {
     in property <[string]> tags: ["Chatbot", "Song Requests", "Alerts", "Goals and Timers", "Widgets", "Docks"];
     in property <string> d: Icons.robot;
     in property <string> open-label: "Open the Suite";
-    property <color> c-left: root.flip ? Theme.accent-2.mix(Theme.bg, 0.5) : Theme.accent.mix(Theme.bg, 0.42);
-    property <color> c-right: root.flip ? Theme.accent.mix(Theme.bg, 0.42) : Theme.accent-2.mix(Theme.bg, 0.5);
+    /// (Mod View's: signed in to Twitch, to Kick: its edge and its two platform chips lit in their colours)
+    in property <bool> tw;
+    in property <bool> kk;
+    property <color> c-tw: #a970ff;
+    property <color> c-kk: #53fc18;
+    // (Mod View's ("flip"): a dark card with a bright edge and its marks in the second accent, so the two never
+    // look alike, even when your accents are one colour)
+    property <color> dark: Theme.panel.mix(Theme.accent-2, 0.9);
+    property <color> c-left: root.flip ? root.dark : Theme.accent.mix(Theme.bg, 0.42);
+    property <color> c-right: root.flip ? root.dark : Theme.accent-2.mix(Theme.bg, 0.5);
+    property <color> ink: root.flip ? Theme.text : #ffffff;
+    property <color> ink2: root.flip ? Theme.muted : #ffffffd8;
+    property <color> mark: root.flip ? (root.tw ? root.c-tw : root.kk ? root.c-kk : Theme.muted) : #ffffff;
+    border-width: root.flip ? 1px : 0px;
+    border-color: Theme.line;
     // (the page's colour behind it: its corners rounded over the gradient, which some renderers draw square)
     in property <color> outside: Theme.panel;
     callback toggle(string);
     callback open(string);
-    height: 196px;
+    height: 132px;
     border-radius: Theme.card-radius;
     clip: true;
     background: @linear-gradient(120deg, root.c-left 0%, root.c-right 100%);
@@ -2521,20 +2537,26 @@ component SuiteHero inherits Rectangle {
     property <int> step;
     Timer { interval: 100ms; running: root.r.on && Theme.motion; triggered => { root.step = mod(root.step + 1, 200); } }
     property <float> ph: root.r.on && Theme.motion ? root.step / 200 : 0.3;
-    Rectangle { x: root.width * (0.1 + 0.7 * root.ph) - 160px; y: -120px; width: 380px; height: 380px; background: @radial-gradient(circle, #ffffff30 0%, transparent 65%); }
-    Rectangle { x: root.width - 230px; y: 40px; width: 300px; height: 300px; background: @radial-gradient(circle, (root.flip ? Theme.accent : Theme.accent-2).with-alpha(0.45) 0%, transparent 70%); }
+    if !root.flip: Rectangle { x: root.width * (0.1 + 0.7 * root.ph) - 160px; y: -150px; width: 380px; height: 380px; background: @radial-gradient(circle, #ffffff30 0%, transparent 65%); }
+    if !root.flip: Rectangle { x: root.width - 230px; y: 10px; width: 300px; height: 300px; background: @radial-gradient(circle, Theme.accent-2.with-alpha(0.45) 0%, transparent 70%); }
+    // (Mod View's: a bar of its colour down its left edge)
+    if root.flip: Rectangle { x: 0; y: 0; width: 6px; height: parent.height / 2; background: root.tw ? root.c-tw : Theme.muted.with-alpha(0.35); }
+    if root.flip: Rectangle { x: 0; y: parent.height / 2; width: 6px; height: parent.height / 2; background: root.kk ? root.c-kk : Theme.muted.with-alpha(0.35); }
+    // (and along its top: a line of each, half and half)
+    if root.flip: Rectangle { x: 6px; y: 0; width: (parent.width - 6px) / 2; height: 3px; background: root.tw ? root.c-tw : Theme.muted.with-alpha(0.25); }
+    if root.flip: Rectangle { x: 6px + (parent.width - 6px) / 2; y: 0; width: (parent.width - 6px) / 2; height: 3px; background: root.kk ? root.c-kk : Theme.muted.with-alpha(0.25); }
     // (rings behind its icon)
     // (centred on the icon: its middle is the padding (26) and half its width (38) in)
-    for k in 3: Rectangle { x: 64px - self.width / 2; y: (root.height - self.height) / 2; width: 76px + (k + 1) * 44px; height: self.width; border-radius: self.width / 2; border-width: 1px; border-color: #ffffff18; }
+    for k in 3: Rectangle { x: 47px - self.width / 2; y: (root.height - self.height) / 2; width: 54px + (k + 1) * 34px; height: self.width; border-radius: self.width / 2; border-width: 1px; border-color: root.mark.with-alpha(0.1); }
     HorizontalLayout {
-        padding: 26px;
-        spacing: 22px;
+        padding: 20px;
+        spacing: 18px;
         VerticalLayout { alignment: center; Rectangle {
-            width: 76px; height: 76px; border-radius: 38px;
+            width: 54px; height: 54px; border-radius: root.flip ? 14px : 27px;
             // (solid, not a gradient: the software renderer draws a gradient square, a square behind the circle)
-            background: #ffffff26;
-            border-width: 1px; border-color: #ffffff50;
-            Glyph { d: root.d; width: 40px; height: 40px; x: 18px; y: 18px; fill: #ffffff; }
+            background: root.mark.with-alpha(0.15);
+            border-width: 1px; border-color: root.mark.with-alpha(0.4);
+            Glyph { d: root.d; width: 28px; height: 28px; x: 13px; y: 13px; fill: root.mark; }
         } }
         VerticalLayout {
             horizontal-stretch: 1;
@@ -2543,42 +2565,56 @@ component SuiteHero inherits Rectangle {
             HorizontalLayout {
                 spacing: 10px;
                 alignment: start;
-                Text { text: root.name; color: #ffffff; font-size: 30px; font-weight: 800; font-family: Theme.head-font; }
+                Text { text: root.name; color: root.ink; font-size: 22px; font-weight: 800; font-family: Theme.head-font; }
                 VerticalLayout { alignment: center; Rectangle {
                     height: 22px; width: st.preferred-width + 18px; border-radius: 11px;
-                    background: root.r.on ? #3ddc8440 : #ffffff20;
-                    st := Text { x: 9px; height: parent.height; vertical-alignment: center; text: root.r.on ? "Running" : "Off"; color: #ffffff; font-size: 11px; font-weight: 700; }
+                    background: root.r.on ? #3ddc8440 : root.ink.with-alpha(0.12);
+                    st := Text { x: 9px; height: parent.height; vertical-alignment: center; text: root.r.on ? "Running" : "Off"; color: root.ink; font-size: 11px; font-weight: 700; }
                 } }
             }
-            Text { text: root.blurb; color: #ffffffd8; font-size: 13px; wrap: word-wrap; }
+            Text { text: root.blurb; color: root.ink2; font-size: 12px; overflow: elide; }
             HorizontalLayout {
                 spacing: 6px;
                 alignment: start;
+                // (Mod View's platforms, each in its colour: lit and "Signed In" while you are)
+                if root.flip: Rectangle {
+                    height: 22px; width: ptw.preferred-width + 30px; border-radius: 11px;
+                    background: root.tw ? root.c-tw.with-alpha(0.22) : transparent; border-width: 1px; border-color: root.tw ? root.c-tw : Theme.muted.with-alpha(0.5);
+                    Rectangle { x: 8px; y: 7px; width: 8px; height: 8px; border-radius: 4px; background: root.tw ? root.c-tw : Theme.muted; }
+                    ptw := Text { x: 21px; height: parent.height; vertical-alignment: center; text: root.tw ? "Twitch: Signed In" : "Twitch"; color: root.tw ? Theme.text : Theme.muted; font-size: 11px; font-weight: 700; }
+                }
+                if root.flip: Rectangle {
+                    height: 22px; width: pkk.preferred-width + 30px; border-radius: 11px;
+                    background: root.kk ? root.c-kk.with-alpha(0.18) : transparent; border-width: 1px; border-color: root.kk ? root.c-kk : Theme.muted.with-alpha(0.5);
+                    Rectangle { x: 8px; y: 7px; width: 8px; height: 8px; border-radius: 4px; background: root.kk ? root.c-kk : Theme.muted; }
+                    pkk := Text { x: 21px; height: parent.height; vertical-alignment: center; text: root.kk ? "Kick: Signed In" : "Kick"; color: root.kk ? Theme.text : Theme.muted; font-size: 11px; font-weight: 700; }
+                }
                 for t in root.tags: Rectangle {
-                    height: 24px; width: tt.preferred-width + 20px; border-radius: 12px;
-                    background: #00000030; border-width: 1px; border-color: #ffffff30;
-                    tt := Text { x: 10px; height: parent.height; vertical-alignment: center; text: t; color: #ffffff; font-size: 11px; font-weight: 600; }
+                    height: 22px; width: tt.preferred-width + 18px; border-radius: 11px;
+                    background: #00000030; border-width: 1px; border-color: root.ink.with-alpha(0.2);
+                    tt := Text { x: 9px; height: parent.height; vertical-alignment: center; text: t; color: root.ink; font-size: 11px; font-weight: 600; }
                 }
             }
         }
         VerticalLayout {
             alignment: center;
-            spacing: 12px;
+            spacing: 8px;
             HorizontalLayout { alignment: end; CenterToggle { checked: root.r.on; toggled => { root.toggle(root.r.key); } } }
             Rectangle {
-                width: 170px; height: 42px; border-radius: 21px;
-                background: oa.has-hover ? #ffffff : #ffffffe6;
+                width: 150px; height: 36px; border-radius: 18px;
+                background: root.flip ? (oa.has-hover ? Theme.text : Theme.text.with-alpha(0.9)) : oa.has-hover ? #ffffff : #ffffffe6;
                 drop-shadow-blur: 14px; drop-shadow-color: #00000050;
                 HorizontalLayout {
                     alignment: center;
                     spacing: 8px;
-                    VerticalLayout { alignment: center; Text { text: root.open-label; color: (root.flip ? Theme.accent-2 : Theme.accent).mix(#000000, 0.45); font-size: 14px; font-weight: 800; } }
+                    VerticalLayout { alignment: center; Text { text: root.open-label; color: root.flip ? Theme.bg : Theme.accent.mix(#000000, 0.45); font-size: 13px; font-weight: 800; } }
                 }
                 oa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.open(root.r.key); } }
             }
         }
     }
-    Caps { r: Theme.card-radius; outside: root.outside; tl: root.c-left; bl: root.c-left; tr: root.c-right; br: root.c-right; bottom: true; }
+    // (Mod View's is one colour with an edge of its own: its corners round by themselves)
+    if !root.flip: Caps { r: Theme.card-radius; outside: root.outside; tl: root.c-left; bl: root.c-left; tr: root.c-right; br: root.c-right; bottom: true; }
 }
 
 /// A theme, as a little app to pick: its sidebar, its text, its accents
@@ -3630,6 +3666,11 @@ component HudEditor inherits Rectangle {
     // (how a part is marked: a box dragged round it ("box": wrapped round what's inside), or its corners clicked
     // one by one ("corners": any shape, however odd, round one part or several)
     property <string> tool: "box";
+    // (fine-tuning the picked frame's outline: its corners shown as handles; which one's being dragged, and to where)
+    property <bool> tune;
+    property <int> drag: -1;
+    property <length> drag-x;
+    property <length> drag-y;
     property <int> count;
     property <string> poly;
     property <string> path-d;
@@ -3666,7 +3707,8 @@ component HudEditor inherits Rectangle {
         spacing: 8px;
         Text {
             horizontal-stretch: 1;
-            text: root.tool == "corners" ? (root.count == 0 ? "Click each corner of the part, going round it. It can be any shape, round one part or several."
+            text: root.tune && HudLook.has-sel ? "Drag a corner to move it. Click a small dot on an edge to add a corner there. Right-click a corner to take it away. Click Fine-Tune again when you're done."
+                : root.tool == "corners" ? (root.count == 0 ? "Click each corner of the part, going round it. It can be any shape, round one part or several."
                     : root.count < 3 ? "Keep going round it: click the next corner."
                     : "Click the first corner again (or press Enter) to finish. Esc starts over.")
                 : HudLook.frames.length == 0 ? "Drag a box round a part of your HUD, like the minimap, health or ammo. It wraps round what's inside."
@@ -3678,6 +3720,7 @@ component HudEditor inherits Rectangle {
             vertical-alignment: center;
             overflow: elide;
         }
+        if HudLook.has-sel: VerticalLayout { alignment: center; Pill { label: "Fine-Tune"; on: root.tune; tip: "Move the picked frame's corners yourself: drag a corner, click a small dot on an edge to add one there, right-click a corner to take it away"; clicked => { root.tune = !root.tune; root.tool = "box"; root.drop-outline(); } } }
         VerticalLayout { alignment: center; Pill { label: "Drag a Box"; on: root.tool == "box"; tip: "Drag a box round a part: the frame wraps round what's inside it"; clicked => { root.tool = "box"; root.drop-outline(); } } }
         VerticalLayout { alignment: center; Pill { label: "Click Its Corners"; on: root.tool == "corners"; tip: "Click round a part's corners yourself: for odd shapes, or a frame round several parts"; clicked => { root.tool = "corners"; root.drop-outline(); } } }
         if root.tool == "corners" && root.count >= 3: VerticalLayout { alignment: center; Pill { label: "Finish"; clicked => { root.finish-outline(); } } }
@@ -3778,6 +3821,50 @@ component HudEditor inherits Rectangle {
                         root.act("hud:set:" + (root.gx / self.width) + "," + (root.gy / self.height) + "," + (root.gw / self.width) + "," + (root.gh / self.height));
                     }
                     root.mode = "";
+                }
+            }
+        }
+        // (fine-tuning: an edge's middle, to add a corner there; each corner, to drag or (right-click) take away)
+        if root.tune && HudLook.has-sel: Rectangle {
+            width: parent.width;
+            height: parent.height;
+            for p[i] in HudLook.sel-pts: Rectangle {
+                property <HudPt> n: HudLook.sel-pts[mod(i + 1, HudLook.sel-pts.length)];
+                x: parent.width * (p.x + self.n.x) / 2 - 4px;
+                y: parent.height * (p.y + self.n.y) / 2 - 4px;
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: mta.has-hover ? #ffffff : #ffffff90;
+                border-width: 1px;
+                border-color: #000000a0;
+                mta := TouchArea { mouse-cursor: MouseCursor.copy; clicked => { root.act("hud:ptadd:" + i); } }
+            }
+            for p[i] in HudLook.sel-pts: Rectangle {
+                x: (root.drag == i ? root.drag-x : parent.width * p.x) - 7px;
+                y: (root.drag == i ? root.drag-y : parent.height * p.y) - 7px;
+                width: 14px;
+                height: 14px;
+                border-radius: 3px;
+                background: root.drag == i || hta.has-hover ? Theme.accent : #ffffff;
+                border-width: 2px;
+                border-color: #000000c0;
+                hta := TouchArea {
+                    mouse-cursor: MouseCursor.move;
+                    pointer-event(e) => {
+                        if e.kind == PointerEventKind.down && e.button == PointerEventButton.right { root.act("hud:ptdel:" + i); }
+                        if e.kind == PointerEventKind.down && e.button == PointerEventButton.left { root.drag = i; root.drag-x = parent.x + 7px; root.drag-y = parent.y + 7px; }
+                        if e.kind == PointerEventKind.up && e.button == PointerEventButton.left && root.drag == i {
+                            root.act("hud:pt:" + i + ":" + (clamp(root.drag-x, 0px, stage.width) / stage.width) + "," + (clamp(root.drag-y, 0px, stage.height) / stage.height));
+                            root.drag = -1;
+                        }
+                    }
+                    moved => {
+                        if root.drag == i {
+                            root.drag-x = parent.x + self.mouse-x;
+                            root.drag-y = parent.y + self.mouse-y;
+                        }
+                    }
                 }
             }
         }
@@ -7028,6 +7115,9 @@ export component AppWindow inherits Window {
     in property <bool> widget-on;
     // (the chatbot on: the widgets and docks are in its page, not Streaming's)
     in property <bool> bot-on;
+    // (signed in to Twitch, to Kick: Mod View's card lit in their colours)
+    in property <bool> mod-tw;
+    in property <bool> mod-kk;
     callback copy-text(string);
     callback like-toggle();
     callback fav-toggle();
@@ -7159,16 +7249,16 @@ export component AppWindow inherits Window {
     in property <[string]> nav-ids: ["navDiscover", "navRediscover", "navLikes", "navFavourites", "navSets", "navArtists", "navStats"];
     callback nav-hide(string);
     pure function nav-page(id: string) -> string {
-        return id == "navMod" ? "mod" : id == "navDiscover" ? "discover" : id == "navRediscover" ? "rediscover" : id == "navLikes" ? "library" : id == "navFavourites" ? "favourites" : id == "navSets" ? "sets" : id == "navArtists" ? "artists" : "stats";
+        return id == "navSuite" ? "suite" : id == "navMod" ? "mod" : id == "navDiscover" ? "discover" : id == "navRediscover" ? "rediscover" : id == "navLikes" ? "library" : id == "navFavourites" ? "favourites" : id == "navSets" ? "sets" : id == "navArtists" ? "artists" : "stats";
     }
     pure function nav-label(id: string) -> string {
-        return id == "navMod" ? "Mod Suite" : id == "navDiscover" ? (root.stream-safe ? "Streamer Mode" : "Discover") : id == "navRediscover" ? "Rediscover" : id == "navLikes" ? "Library" : id == "navFavourites" ? "Favourites" : id == "navSets" ? "Sets & Podcasts" : id == "navArtists" ? "Artists" : "Stats";
+        return id == "navSuite" ? "Stream Suite" : id == "navMod" ? "Mod View" : id == "navDiscover" ? (root.stream-safe ? "Streamer Mode" : "Discover") : id == "navRediscover" ? "Rediscover" : id == "navLikes" ? "Library" : id == "navFavourites" ? "Favourites" : id == "navSets" ? "Sets & Podcasts" : id == "navArtists" ? "Artists" : "Stats";
     }
     pure function nav-icon(id: string) -> string {
-        return id == "navMod" ? Icons.sword : id == "navDiscover" ? Icons.discover : id == "navRediscover" ? Icons.rediscover : id == "navLikes" ? Icons.library : id == "navFavourites" ? Icons.star : id == "navSets" ? Icons.sets : id == "navArtists" ? Icons.person : Icons.stats;
+        return id == "navSuite" ? Icons.robot : id == "navMod" ? Icons.sword : id == "navDiscover" ? Icons.discover : id == "navRediscover" ? Icons.rediscover : id == "navLikes" ? Icons.library : id == "navFavourites" ? Icons.star : id == "navSets" ? Icons.sets : id == "navArtists" ? Icons.person : Icons.stats;
     }
     pure function nav-active(id: string) -> bool {
-        return root.page == root.nav-page(id) || (id == "navDiscover" && root.page == "streamer") || (id == "navArtists" && root.page == "artist");
+        return (id == "navSuite" && root.bot-page) || (id != "navSuite" && root.page == root.nav-page(id)) || (id == "navDiscover" && root.page == "streamer") || (id == "navArtists" && root.page == "artist");
     }
     in property <string> jam-ring;
     in-out property <bool> jam-open;
@@ -7214,7 +7304,7 @@ export component AppWindow inherits Window {
     // the first-run setup: shown once, the first time OmniPulse opens (Settings > App & Look > Run Setup Again)
     in-out property <bool> setup-open;
     // (something over the page: the real Stream Widget's web view, which would draw over it, steps aside)
-    // (the Mod Suite's page: covered by the same, the queue aside (it sits beside the page, not over it))
+    // (Mod View's page: covered by the same, the queue aside (it sits beside the page, not over it))
     out property <bool> mod-covered: root.flow-open || root.setup-open || root.taste-open || root.ks-open || root.tp-open || root.la-open || root.name-open || root.ask-open || root.jam-open || root.viz-full || WEdit.open;
     out property <bool> covered: root.setup-open || root.taste-open || root.ks-open || root.tp-open || root.la-open || root.name-open || root.ask-open || root.jam-open || root.viz-full || root.queue-open || WEdit.open;
     in property <int> setup-at;
@@ -7780,7 +7870,7 @@ export component AppWindow inherits Window {
                         spacing: 12px;
                         RoundButton { tip: root.page == "now" && !root.can-back ? "Close Now Playing" : "Back"; d: Icons.back; enabled: root.can-back || root.page == "now" || (root.page == "settings" && root.set-cat != ""); clicked => { if (root.page == "settings" && root.set-cat != "") { root.set-cat = ""; } else if (root.page == "now" && !root.can-back) { root.nav("library"); } else { root.back(); } } }
                         Rectangle { horizontal-stretch: 1; }
-                        // the search bar: a pill in the middle (not on the Mod Suite's page: nothing there to search)
+                        // the search bar: a pill in the middle (not on Mod View's page: nothing there to search)
                         Rectangle {
                             visible: root.page-kind != "mod";
                             clip: true;
@@ -9327,14 +9417,15 @@ export component AppWindow inherits Window {
                                         if r.key == "plugRun_chatbot": SuiteHero { r: r; outside: root.settings-look ? root.settings-panel : Theme.panel; toggle(k) => { root.set-toggle(k); } open(k) => { root.set-more(k); } }
                                     }
                                 }
-                                // ---- the Mod Suite: the same card, under it, its gradient the other way ----
+                                // ---- Mod View: the same card, under it, its gradient the other way ----
                                 VerticalLayout { for r in root.set-rows-streaming: VerticalLayout {
                                     if r.key == "plugRun_modsuite": VerticalLayout {
                                         padding-top: 2px;
                                         SuiteHero {
-                                            r: r; flip: true; name: "Mod Suite"; d: Icons.sword; open-label: "Open the Mod Suite";
+                                            r: r; flip: true; name: "Mod View"; d: Icons.sword; open-label: "Open Mod View";
                                             blurb: "For moderating someone's stream: their stream, their chat and your mod tools, side by side.";
-                                            tags: ["Twitch and Kick", "Stream", "Chat", "Mod Tools", "AutoMod", "Music by Jam"];
+                                            tags: ["Stream", "Chat", "Mod Tools", "AutoMod", "Music by Jam"];
+                                            tw: root.mod-tw; kk: root.mod-kk;
                                             outside: root.settings-look ? root.settings-panel : Theme.panel;
                                             toggle(k) => { root.set-toggle(k); } open(k) => { root.set-more(k); }
                                         }
@@ -9392,14 +9483,14 @@ export component AppWindow inherits Window {
                             Rectangle { height: 76px; }
                         }
                     }
-                    // The Mod Suite: its page (a web view the app puts on this spot), and what shows till it's there
+                    // Mod View: its page (a web view the app puts on this spot), and what shows till it's there
                     if root.page-kind == "mod": ModSpot {
                         vertical-stretch: 1;
                         min-height: 300px;
                         // (see-through, as its page is: the app's own page shows behind it)
                     }
                     // (clear of the player's tab, laid over the page's foot: a web view draws over everything, so the
-                    // Mod Suite's stops above it)
+                    // Mod View's stops above it)
                     if root.page-kind == "mod" && root.over-foot: Rectangle { height: 64px; }
                     // Now Playing: the cover, and the lyrics as they're sung
                     if root.page-kind == "now": npl := HorizontalLayout {
@@ -10949,7 +11040,7 @@ export component AppWindow inherits Window {
                             alignment: start;
                             Text { text: "Welcome to OmniPulse"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
                             Text { text: "All your music in one place: SoundCloud, Spotify, YouTube Music and the files on this PC. First, make it yours."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
-                            // (here to moderate: straight to the Mod Suite)
+                            // (here to moderate: straight to Mod View)
                             HorizontalLayout {
                                 alignment: start;
                                 spacing: 10px;
@@ -11138,7 +11229,7 @@ export component AppWindow inherits Window {
                             HorizontalLayout {
                                 spacing: 14px;
                                 alignment: start;
-                                for c in [{ id: "yes", n: "Yes, I stream", t: "Turns on the Stream Suite, and sets up its chatbot next. Coming from Streamer.bot or Mix It Up? You can bring your commands with you.", d: Icons.broadcast }, { id: "no", n: "No, just listening", t: "Nothing to set up. Streaming stays in Settings if you ever want it.", d: Icons.library }, { id: "mod", n: "I moderate", t: "Opens the Mod Suite: a channel you moderate, with its stream, chat and your mod tools side by side. Your music stays here too.", d: Icons.sword }]: Rectangle {
+                                for c in [{ id: "yes", n: "Yes, I stream", t: "Turns on the Stream Suite, and sets up its chatbot next. Coming from Streamer.bot or Mix It Up? You can bring your commands with you.", d: Icons.broadcast }, { id: "no", n: "No, just listening", t: "Nothing to set up. Streaming stays in Settings if you ever want it.", d: Icons.library }, { id: "mod", n: "I moderate", t: "Opens Mod View: a channel you moderate, with its stream, chat and your mod tools side by side. Your music stays here too.", d: Icons.sword }]: Rectangle {
                                     // (wide enough for its words, which fit in five lines)
                                     width: 250px;
                                     height: 200px;

@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OmniPulse Mod Suite</title>
+<title>OmniPulse Mod View</title>
 <!--
-  The Mod Suite, in quarters: the channel's stream top left, your controls bottom left (the channel, its
+  Mod View, in quarters: the channel's stream top left, your controls bottom left (the channel, its
   moderation, AutoMod's held messages, and the music through the streamer's Jam), and its chat the whole right
-  half (the Chat Dock, in the Mod Suite's own chat). What it shows comes from /mod/state.json; what you ask goes
+  half (the Chat Dock, in Mod View's own chat). What it shows comes from /mod/state.json; what you ask goes
   to /mod/do.
 -->
 <style>
   :root { --bg: #1b1d24; --panel: #23262f; --line: #2e323d; --text: #e6e8ee; --dim: #8b91a1; --accent: #7aa2ff; --accent2: #b07aff; --red: #ff5c6c; --ok: #4fd18b; --r: 12px;
-    /* the Mod Suite's own gradient: the Stream Suite's, the other way round */
+    /* Mod View's own gradient: the Stream Suite's, the other way round */
     --grad: linear-gradient(120deg, var(--accent2), var(--accent)); }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: transparent; color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
@@ -103,7 +103,7 @@
 </head>
 <body>
 <div id="grid">
-  <div class="q" id="stream"><div class="none" id="noStream"><div class="emblem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 2l2.4.1.1 2.4-11.4 11.4 2.1 2.1-1.4 1.4-2.4-2.4-2.5 2.5.6.6-1.4 1.4-3.1-3.1 1.4-1.4.6.6 2.5-2.5-2.4-2.4 1.4-1.4 2.1 2.1z"/></svg></div><h1>Mod Suite</h1><p>Pick a channel in Channel, below, to watch its stream here.</p></div><div class="bar" id="sBar"></div><div id="sTabs" hidden></div></div>
+  <div class="q" id="stream"><div class="none" id="noStream"><div class="emblem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 2l2.4.1.1 2.4-11.4 11.4 2.1 2.1-1.4 1.4-2.4-2.4-2.5 2.5.6.6-1.4 1.4-3.1-3.1 1.4-1.4.6.6 2.5-2.5-2.4-2.4 1.4-1.4 2.1 2.1z"/></svg></div><h1>Mod View</h1><p>Pick a channel in Channel, below, to watch its stream here.</p></div><div class="bar" id="sBar"></div><div id="sTabs" hidden></div></div>
   <div class="q" id="controls">
     <div id="tabs" role="tablist">
       <span class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 2l2.4.1.1 2.4-11.4 11.4 2.1 2.1-1.4 1.4-2.4-2.4-2.5 2.5.6.6-1.4 1.4-3.1-3.1 1.4-1.4.6.6 2.5-2.5-2.4-2.4 1.4-1.4 2.1 2.1z"/></svg></span>
@@ -232,7 +232,7 @@
     if (p.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;
     p.textContent = "";
     if (!S.running) {
-      p.append(el("p", "say", "The Mod Suite is starting. If this stays, switch the Mod Suite on in Settings > Streaming."));
+      p.append(el("p", "say", "Mod View is starting. If this stays, switch Mod View on in Settings > Streaming."));
       return;
     }
     if (said.text && Date.now() - said.at < 15000) p.append(el("p", said.bad ? "bad" : "say", said.text));

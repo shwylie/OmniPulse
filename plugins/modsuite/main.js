@@ -1,9 +1,9 @@
-// OmniPulse Mod Suite: for moderators. A channel you moderate, watched one at a time (on Twitch, Kick, or both
+// OmniPulse Mod View: for moderators. A channel you moderate, watched one at a time (on Twitch, Kick, or both
 // when the streamer multi-streams, as one chat): its chat (Twitch's IRC, Kick's live chat), with what you do there
 // done as you (time-outs, bans, deleted messages, what you say), its chat modes and Shield Mode (Twitch), and the messages Twitch's AutoMod holds back, for you to allow or deny.
 // Its sign-ins are the Stream Suite's (one sign-in for both: the app keeps them as one, and tells each when the
 // other signs in, out, or renews). Signing in here asks for everything the Stream Suite needs too. Everything
-// goes to the app for its Mod Suite page (/mod): the chat (modChat, modGone, modClear) and the state (modState).
+// goes to the app for its Mod View page (/mod): the chat (modChat, modGone, modClear) and the state (modState).
 
 const S = () => OmniPulse.settings;
 const yes = (v) => v === true || v === "true";
@@ -203,7 +203,7 @@ async function kickRenew() {
 
 // ---------- the platforms' APIs, as you ----------
 async function helix(method, path, body, again) {
-  if (!S().token) throw new Error("sign in to Twitch first (Channel, in the Mod Suite)");
+  if (!S().token) throw new Error("sign in to Twitch first (Channel, in Mod View)");
   const r = await OmniPulse.fetch("https://api.twitch.tv/helix/" + path, {
     method,
     headers: { "Client-Id": S().twitchClientId, Authorization: "Bearer " + S().token, "Content-Type": "application/json" },
@@ -220,7 +220,7 @@ async function helix(method, path, body, again) {
 }
 
 async function kickApi(method, path, body, again) {
-  if (!S().kickToken) throw new Error("sign in to Kick first (Channel, in the Mod Suite)");
+  if (!S().kickToken) throw new Error("sign in to Kick first (Channel, in Mod View)");
   const r = await OmniPulse.fetch("https://api.kick.com/public/v1/" + path, {
     method,
     headers: { Authorization: "Bearer " + S().kickToken, "Content-Type": "application/json", Accept: "application/json" },
@@ -275,7 +275,7 @@ async function channelsRead() {
     }
     note = "";
   } catch (e) {
-    note = /403|401/.test(e.message) ? "Sign in to Twitch again so the Mod Suite can list the channels you moderate." : "";
+    note = /403|401/.test(e.message) ? "Sign in to Twitch again so Mod View can list the channels you moderate." : "";
   }
   channels = out;
   // (the one being watched: a moderator there, by this list)
@@ -300,7 +300,7 @@ function isMod(platform) {
 }
 
 // The emotes you can use on Twitch, for the chat's emote menu and for showing them (the Stream Suite gives its own
-// list while it's running; this is for when only the Mod Suite is)
+// list while it's running; this is for when only Mod View is)
 async function emotesRead() {
   if (!S().token || !S().userId) return;
   const out = [];
@@ -528,7 +528,7 @@ function eventsConnect(p, my, url) {
           automodNote = "";
         } catch (e) {
           if (/409/.test(e.message)) continue;
-          automodNote = /403/.test(e.message) ? "AutoMod's held messages are for the channel's moderators. You're not one on Twitch here." : /401/.test(e.message) ? "Sign in to Twitch again so the Mod Suite can see AutoMod's held messages." : "Couldn't follow AutoMod here: " + e.message;
+          automodNote = /403/.test(e.message) ? "AutoMod's held messages are for the channel's moderators. You're not one on Twitch here." : /401/.test(e.message) ? "Sign in to Twitch again so Mod View can see AutoMod's held messages." : "Couldn't follow AutoMod here: " + e.message;
         }
       }
       push();
@@ -833,7 +833,7 @@ async function act(cmd) {
       return (cmd.allow ? "Allowed " : "Denied ") + (h ? h.user + "'s message." : "the message.");
     }
   }
-  throw new Error("the Mod Suite can't " + cmd.do);
+  throw new Error("Mod View can't " + cmd.do);
 }
 
 // ---------- running ----------
@@ -850,7 +850,7 @@ async function start() {
 
 OmniPulse.register({
   start() { start().catch((e) => OmniPulse.log("start: " + e.message)); return true; },
-  // (what the Mod Suite page asks: its answer, if any, said in its chat)
+  // (what Mod View page asks: its answer, if any, said in its chat)
   do(cmd) { return act(cmd || {}); },
   status() { return { twitch: S().login || "", kick: S().kickLogin || "", watching }; },
   // (the shared sign-in changed in the Stream Suite: signed in, out, or renewed)

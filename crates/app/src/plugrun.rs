@@ -627,7 +627,7 @@ mod tests {
         stop("chatbot");
     }
 
-    /// The Mod Suite watching a multi-streamer on Twitch and Kick at once, as one chat: both platforms' messages
+    /// Mod View watching a multi-streamer on Twitch and Kick at once, as one chat: both platforms' messages
     /// come in; you're a moderator on Kick but not on Twitch, so Twitch's moderation is refused, by name, and
     /// Kick's goes through
     #[test]

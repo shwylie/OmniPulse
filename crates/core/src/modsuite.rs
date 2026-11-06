@@ -1,5 +1,5 @@
-// The Mod Suite: for moderators. A channel you moderate, watched in OmniPulse: its stream, its chat with
-// moderation on each message, and its chat modes, Shield Mode and AutoMod queue. The Mod Suite plugin
+// Mod View: for moderators. A channel you moderate, watched in OmniPulse: its stream, its chat with
+// moderation on each message, and its chat modes, Shield Mode and AutoMod queue. Mod View plugin
 // (plugins/modsuite) signs you in, reads the chat and does what you ask; this keeps what it sends (the chat,
 // and its state: who you're signed in as, the channels you moderate, the one you're watching, its modes and
 // held messages) for the page (/mod), and hands what the page asks to the app.

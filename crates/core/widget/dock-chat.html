@@ -219,7 +219,7 @@
   body.st-ribbon .sw { background: var(--bg); color: var(--text); }
   body.st-ribbon .sw.on { background: var(--grad); border-color: transparent; color: #111; font-weight: 700; }
   body.sq.st-glass .msg, body.sq.st-bubbles .msg, body.sq.st-ribbon .msg, body.sq #mod section, body.sq .notice { border-radius: 0; }
-  /* the Mod Suite's: no Auto-Ban (the streamer's chatbot has that); the platform filters and where it goes only while
+  /* Mod View's: no Auto-Ban (the streamer's chatbot has that); the platform filters and where it goes only while
      watching both (multi-streaming); a platform you're not a moderator on: its messages' mod buttons greyed out */
   .suite #mAb, .suite .mod .ab, .suite #oModAb { display: none !important; }
   .suite:not(.multi) #fTwitch, .suite:not(.multi) #fKick, .suite:not(.multi) #to { display: none !important; }
@@ -341,7 +341,7 @@
   "use strict";
   const $ = (id) => document.getElementById(id);
   const log = $("log");
-  // (the Mod Suite's (?suite=mod): the channel you're moderating, its chat and its state from the Mod Suite, not the
+  // (Mod View's (?suite=mod): the channel you're moderating, its chat and its state from Mod View, not the
   // chatbot's; one channel, so no platform filters, and no Auto-Ban (the streamer's chatbot has that))
   const SUITE = /[?&]suite=mod\b/.test(location.search);
   const BASE = SUITE ? "/mod" : "/dock";
@@ -607,7 +607,7 @@
     box.className = "mod";
     const base = { platform: m.platform, id: m.id, user: m.user, login: m.login, userId: m.userId };
     const ask = (what, extra) => {
-      // (the Mod Suite: not a moderator on this message's platform, so nothing's asked: said, by platform)
+      // (Mod View: not a moderator on this message's platform, so nothing's asked: said, by platform)
       if (SUITE && document.documentElement.classList.contains("nomod-" + (m.platform === "kick" ? "kick" : "twitch"))) {
         addNotice("You're not a moderator in this " + (m.platform === "kick" ? "Kick" : "Twitch") + " chat, so you can't do that to " + (m.user || "them") + " there.", true);
         return;
@@ -631,7 +631,7 @@
       ask("ban");
     }));
     box.append(iconButton("undo", "Let " + m.user + " back in (after a ban or time-out)", "", "unban", () => ask("unban")));
-    // (the Mod Suite: greyed out where you're not a moderator, and saying so)
+    // (Mod View: greyed out where you're not a moderator, and saying so)
     if (SUITE) box.title = "Your mod buttons for " + (m.platform === "kick" ? "Kick" : "Twitch") + " messages";
     box.append(iconButton("shield", "Auto-Ban this message's words", "", "ab", () => { modOpen(true); $("abTerm").value = String(m.text || "").replace(/\[emote:\d+:[^\]]*\]/g, "").trim().slice(0, 100); $("abTerm").focus(); $("abTerm").select(); }));
     return box;

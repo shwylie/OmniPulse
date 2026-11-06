@@ -1,6 +1,6 @@
 {
   "id": "modsuite",
-  "name": "OmniPulse Mod Suite",
+  "name": "OmniPulse Mod View",
   "version": "0.1.0",
   "author": "OmniPulse",
   "description": "For moderators: watch a channel you moderate, with its stream, its chat and your mod tools side by side. Uses the same Twitch and Kick sign-in as the Stream Suite.",

@@ -207,6 +207,26 @@ pub fn wrap(img: &image::RgbImage, x: f32, y: f32, w: f32, h: f32) -> Option<(f3
     Some((bx0, by0, bw, bh, norm))
 }
 
+/// A frame's corners in the screenshot's pixels: its own, or its box's four
+pub fn corners_px(f: &Value) -> Vec<(f32, f32)> {
+    let a = |k: &str| f[k].as_f64().unwrap_or(0.0) as f32;
+    let (x, y, w, h) = (a("x"), a("y"), a("w"), a("h"));
+    let p = points_of(f);
+    let p = if p.len() >= 3 { p } else { vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)] };
+    p.iter().map(|q| (x + q.0 * w, y + q.1 * h)).collect()
+}
+
+/// A frame given corners of your own (the screenshot's pixels): its box round them, and them as fractions of it
+pub fn set_corners(f: &mut Value, pts: &[(f32, f32)]) {
+    if pts.len() < 3 { return; }
+    let (x0, y0) = pts.iter().fold((f32::MAX, f32::MAX), |a, p| (a.0.min(p.0), a.1.min(p.1)));
+    let (x1, y1) = pts.iter().fold((f32::MIN, f32::MIN), |a, p| (a.0.max(p.0), a.1.max(p.1)));
+    let (w, h) = ((x1 - x0).max(4.0), (y1 - y0).max(4.0));
+    f["x"] = json!(x0.round()); f["y"] = json!(y0.round()); f["w"] = json!(w.round()); f["h"] = json!(h.round());
+    f["shape"] = json!("custom");
+    f["pts"] = json!(pts.iter().map(|p| [(((p.0 - x0) / w) * 1000.0).round() / 1000.0, (((p.1 - y0) / h) * 1000.0).round() / 1000.0]).collect::<Vec<_>>());
+}
+
 /// A frame's corners (as fractions of its box), as kept in it ("pts"); none for a box
 pub fn points_of(f: &Value) -> Vec<(f32, f32)> {
     f["pts"].as_array().map(|a| a.iter().filter_map(|p| Some((p[0].as_f64()? as f32, p[1].as_f64()? as f32))).collect()).unwrap_or_default()
