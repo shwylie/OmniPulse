@@ -9,10 +9,16 @@ pub fn frames(v: &str) -> Vec<Value> {
     serde_json::from_str::<Value>(v).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default()
 }
 
+/// What makes a frame's look, besides its style: carried from one frame to the next made, and to all by Same Look for All
+pub const LOOK_KEYS: [&str; 6] = ["anim", "thick", "round", "fill", "labelStyle", "pulse"];
+
 /// A new frame, at a box (the screenshot's pixels), in the style of the last one made
 pub fn frame(x: f32, y: f32, w: f32, h: f32, like: Option<&Value>) -> Value {
     let style = like.and_then(|l| l["style"].as_str()).unwrap_or("brackets");
-    json!({ "x": x.round(), "y": y.round(), "w": w.round().max(4.0), "h": h.round().max(4.0), "style": style, "label": "", "pad": 6, "pulse": false })
+    let mut f = json!({ "x": x.round(), "y": y.round(), "w": w.round().max(4.0), "h": h.round().max(4.0), "style": style, "label": "", "pad": 6, "pulse": false });
+    // (the rest of the last one's look too, so a set of frames matches without setting each)
+    if let Some(l) = like { for k in LOOK_KEYS { if !l[k].is_null() { f[k] = l[k].clone(); } } }
+    f
 }
 
 /// A frame fitted to the element in a box you drew (the screenshot's pixels): wrapped in its own shape if that
@@ -116,18 +122,23 @@ pub fn wrap(img: &image::RgbImage, x: f32, y: f32, w: f32, h: f32) -> Option<(f3
     // (its patches: the biggest one reaching the middle half of the box drawn)
     let mut label = vec![0u32; rw * rh];
     let mut best: Option<(u32, usize)> = None;
+    // (and the others that are in the box you drew (most of each inside it, and not specks): a frame round several
+    // parts takes them all)
+    let mut also: Vec<u32> = Vec::new();
+    let (ix0, iy0, ix1, iy1) = ((x - x0 as f32).max(0.0) as usize, (y - y0 as f32).max(0.0) as usize, (x - x0 as f32 + w) as usize, (y - y0 as f32 + h) as usize);
     let (mx0, my0, mx1, my1) = ((x - x0 as f32 + w * 0.25) as usize, (y - y0 as f32 + h * 0.25) as usize, (x - x0 as f32 + w * 0.75) as usize, (y - y0 as f32 + h * 0.75) as usize);
     let mut next = 0u32;
     for start in 0..rw * rh {
         if !mask[start] || label[start] != 0 { continue; }
         next += 1;
-        let (mut size, mut middle) = (0usize, false);
+        let (mut size, mut middle, mut inside) = (0usize, false, 0usize);
         let mut stack = vec![start];
         label[start] = next;
         while let Some(i) = stack.pop() {
             size += 1;
             let (cx, cy) = (i % rw, i / rw);
             if (mx0..=mx1).contains(&cx) && (my0..=my1).contains(&cy) { middle = true; }
+            if (ix0..=ix1).contains(&cx) && (iy0..=iy1).contains(&cy) { inside += 1; }
             let mut push = |j: usize| if mask[j] && label[j] == 0 { label[j] = next; stack.push(j); };
             if cx > 0 { push(i - 1); }
             if cx + 1 < rw { push(i + 1); }
@@ -135,6 +146,7 @@ pub fn wrap(img: &image::RgbImage, x: f32, y: f32, w: f32, h: f32) -> Option<(f3
             if cy + 1 < rh { push(i + rw); }
         }
         if middle && best.is_none_or(|b| size > b.1) { best = Some((next, size)); }
+        if inside * 10 >= size * 7 && size as f32 >= (0.004 * w * h).max(12.0) { also.push(next); }
     }
     let (id, size) = best?;
     if (size as f32) < 0.03 * w * h { return None; }
@@ -142,7 +154,8 @@ pub fn wrap(img: &image::RgbImage, x: f32, y: f32, w: f32, h: f32) -> Option<(f3
     let mut pts: Vec<(f32, f32)> = Vec::new();
     for cy in 0..rh {
         let row = &label[cy * rw..(cy + 1) * rw];
-        if let (Some(l), Some(r)) = (row.iter().position(|&v| v == id), row.iter().rposition(|&v| v == id)) {
+        let ours = |v: &u32| *v == id || also.contains(v);
+        if let (Some(l), Some(r)) = (row.iter().position(|v| ours(v)), row.iter().rposition(|v| ours(v))) {
             for (px, py) in [(l as f32, cy as f32), (r as f32 + 1.0, cy as f32), (l as f32, cy as f32 + 1.0), (r as f32 + 1.0, cy as f32 + 1.0)] { pts.push((px + x0 as f32, py + y0 as f32)); }
         }
     }
@@ -157,7 +170,7 @@ pub fn wrap(img: &image::RgbImage, x: f32, y: f32, w: f32, h: f32) -> Option<(f3
         let n = hull.len();
         let tri = |i: usize| { let (a, b, c) = (hull[(i + n - 1) % n], hull[i], hull[(i + 1) % n]); ((b.0 - a.0) * (c.1 - a.1) - (c.0 - a.0) * (b.1 - a.1)).abs() / 2.0 };
         let (i, least) = (0..n).map(|i| (i, tri(i))).min_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or((0, 0.0));
-        if n > 8 || least < whole * 0.012 && whole - area(&hull) + least < whole * 0.03 { hull.remove(i); } else { break; }
+        if n > 12 || least < whole * 0.012 && whole - area(&hull) + least < whole * 0.03 { hull.remove(i); } else { break; }
     }
     let (bx0, by0) = hull.iter().fold((f32::MAX, f32::MAX), |a, p| (a.0.min(p.0), a.1.min(p.1)));
     let (bx1, by1) = hull.iter().fold((f32::MIN, f32::MIN), |a, p| (a.0.max(p.0), a.1.max(p.1)));

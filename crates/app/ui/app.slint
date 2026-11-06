@@ -3531,7 +3531,18 @@ component HudFrame inherits Rectangle {
 component HudEditor inherits Rectangle {
     callback act(string);
     // (big enough to draw round a minimap on: no taller than about half a window, the picked frame's settings under it)
-    height: min(self.width * HudLook.ratio, 540px) + 30px;
+    height: min(self.width * HudLook.ratio, 540px) + 44px;
+    // (how a part is marked: a box dragged round it ("box": wrapped round what's inside), or its corners clicked
+    // one by one ("corners": any shape, however odd, round one part or several)
+    property <string> tool: "box";
+    property <int> count;
+    property <string> poly;
+    property <string> path-d;
+    property <string> marks-d;
+    property <length> fx;
+    property <length> fy;
+    function drop-outline() { root.count = 0; root.poly = ""; root.path-d = ""; root.marks-d = ""; }
+    function finish-outline() { if (root.count >= 3) { root.act("hud:poly:" + root.poly); } root.drop-outline(); }
     // (what a press there does: draw, move or size; where it started)
     property <string> mode;
     property <length> sx;
@@ -3552,23 +3563,33 @@ component HudEditor inherits Rectangle {
     property <length> gh: root.mode == "draw" ? abs(clamp(ta.mouse-y, 0px, stage.height) - root.sy) : root.mode == "size" ? clamp(root.bh + root.dy, 8px, stage.height - root.by) : root.bh;
     // (what can be done now, over it (not on it: the HUD's parts are at its edges): draw the first; pick one or draw
     // another; or what the picked one takes)
-    Text {
+    HorizontalLayout {
         x: stage.x;
         y: 0;
         width: stage.width;
-        height: 24px;
-        text: HudLook.frames.length == 0 ? "Drag a box round a part of your HUD, like the minimap, health or ammo. It wraps round that part's shape."
-            : HudLook.has-sel ? "Drag the frame to move it, or its white corner to resize it. Arrow keys nudge it (Shift for 10), Delete takes it away, Esc puts it down."
-            : "Click a frame to change it, or drag a box round another part of your HUD.";
-        color: Theme.accent.mix(Theme.text, 0.5);
-        font-size: 12px;
-        font-weight: 600;
-        vertical-alignment: center;
-        overflow: elide;
+        height: 36px;
+        spacing: 8px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.tool == "corners" ? (root.count == 0 ? "Click each corner of the part, going round it. It can be any shape, round one part or several."
+                    : root.count < 3 ? "Keep going round it: click the next corner."
+                    : "Click the first corner again (or press Enter) to finish. Esc starts over.")
+                : HudLook.frames.length == 0 ? "Drag a box round a part of your HUD, like the minimap, health or ammo. It wraps round what's inside."
+                : HudLook.has-sel ? "Drag the frame to move it, or its white corner to resize it. Arrow keys nudge it (Shift for 10), Delete takes it away, Esc puts it down."
+                : "Click a frame to change it, or drag a box round another part of your HUD.";
+            color: Theme.accent.mix(Theme.text, 0.5);
+            font-size: 12px;
+            font-weight: 600;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        VerticalLayout { alignment: center; Pill { label: "Drag a Box"; on: root.tool == "box"; tip: "Drag a box round a part: the frame wraps round what's inside it"; clicked => { root.tool = "box"; root.drop-outline(); } } }
+        VerticalLayout { alignment: center; Pill { label: "Click Its Corners"; on: root.tool == "corners"; tip: "Click round a part's corners yourself: for odd shapes, or a frame round several parts"; clicked => { root.tool = "corners"; root.drop-outline(); } } }
+        if root.tool == "corners" && root.count >= 3: VerticalLayout { alignment: center; Pill { label: "Finish"; clicked => { root.finish-outline(); } } }
     }
     stage := Rectangle {
-        y: 30px;
-        width: min(parent.width, (parent.height - 30px) / HudLook.ratio);
+        y: 44px;
+        width: min(parent.width, (parent.height - 44px) / HudLook.ratio);
         height: self.width * HudLook.ratio;
         x: (parent.width - self.width) / 2;
         border-radius: 10px;
@@ -3609,9 +3630,17 @@ component HudEditor inherits Rectangle {
             border-color: #ffffff;
             background: #ffffff22;
         }
+        // (an outline being clicked out: its lines so far, closed once it has three corners, and a mark on each)
+        if root.count > 0: Path { width: parent.width; height: parent.height; viewbox-width: parent.width / 1px; viewbox-height: parent.height / 1px; commands: root.path-d + (root.count >= 3 ? " Z" : ""); stroke: #ffffff; stroke-width: 2px; fill: #ffffff26; }
+        if root.count > 0: Path { width: parent.width; height: parent.height; viewbox-width: parent.width / 1px; viewbox-height: parent.height / 1px; commands: root.marks-d; fill: #ffffff; stroke: #000000a0; stroke-width: 1px; }
         // (the keys, once the screenshot's been clicked)
         keys := FocusScope {
             key-pressed(e) => {
+                if (root.count > 0) {
+                    if (e.text == Key.Return) { root.finish-outline(); }
+                    if (e.text == Key.Escape) { root.drop-outline(); }
+                    return accept;
+                }
                 if (!HudLook.has-sel) { return reject; }
                 if (e.text == Key.LeftArrow) { root.act("hudn:left" + (e.modifiers.shift ? ":10" : "")); return accept; }
                 if (e.text == Key.RightArrow) { root.act("hudn:right" + (e.modifiers.shift ? ":10" : "")); return accept; }
@@ -3623,9 +3652,22 @@ component HudEditor inherits Rectangle {
             }
         }
         ta := TouchArea {
-            mouse-cursor: root.mode == "move" ? MouseCursor.move : root.mode == "size" || root.over-corner ? MouseCursor.nwse-resize : root.over-sel ? MouseCursor.move : MouseCursor.crosshair;
+            mouse-cursor: root.tool == "corners" ? MouseCursor.crosshair : root.mode == "move" ? MouseCursor.move : root.mode == "size" || root.over-corner ? MouseCursor.nwse-resize : root.over-sel ? MouseCursor.move : MouseCursor.crosshair;
             pointer-event(e) => {
-                if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+                // (clicking out an outline: a corner each click; the first one clicked again finishes it)
+                if e.kind == PointerEventKind.down && e.button == PointerEventButton.left && root.tool == "corners" {
+                    keys.focus();
+                    if root.count >= 3 && abs(self.mouse-x - root.fx) < 10px && abs(self.mouse-y - root.fy) < 10px {
+                        root.finish-outline();
+                    } else {
+                        if root.count == 0 { root.fx = self.mouse-x; root.fy = self.mouse-y; }
+                        root.path-d = root.path-d + (root.count == 0 ? "M " : " L ") + (self.mouse-x / 1px) + " " + (self.mouse-y / 1px);
+                        root.marks-d = root.marks-d + " M " + (self.mouse-x / 1px - 4) + " " + (self.mouse-y / 1px - 4) + " h 8 v 8 h -8 Z";
+                        root.poly = root.poly + (root.count == 0 ? "" : ";") + (self.mouse-x / self.width) + "," + (self.mouse-y / self.height);
+                        root.count += 1;
+                    }
+                }
+                if e.kind == PointerEventKind.down && e.button == PointerEventButton.left && root.tool != "corners" {
                     keys.focus();
                     root.sx = self.mouse-x;
                     root.sy = self.mouse-y;

@@ -4,57 +4,60 @@
 <meta charset="utf-8">
 <!--
   Frames round a game's HUD (its minimap, health bar...), made in the Stream Suite (Settings > Streaming > Suite >
-  Creators > Game HUD Frames) from a screenshot of the game: each frame where you marked it, scaled with the
-  source, see-through everywhere else. One OBS Browser source the size of your canvas, above the game. Only
-  lines up while the game runs at the screenshot's resolution and HUD scale. /hud; it reads suite.creators.
+  Game HUD Frames) from a screenshot of the game: each frame where you marked it, scaled with the source,
+  see-through everywhere else. One OBS Browser source the size of your canvas, above the game. Only lines up
+  while the game runs at the screenshot's resolution and HUD scale. /hud; it reads suite.creators.
+
+  Every frame is drawn as lines round its outline (its corners in pts, or its box's four), so each style and each
+  animation works on any shape: a box, a slanted slot, or an outline you clicked out yourself.
 -->
 <title>OmniPulse Game HUD Frames</title>
 <style>
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
   body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #fff; --c1: #8e9bff; --c2: #ff7ac8; }
   body.preview { background: #111 var(--shot) center / 100% 100% no-repeat; }
-  .fr { position: absolute; box-sizing: border-box; pointer-events: none; }
-  .fr .lbl { position: absolute; left: 0; bottom: 100%; margin-bottom: 0.35em; padding: 0.15em 0.6em; font-size: var(--ls, 14px); font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
-  /* Corner Brackets */
-  .st-brackets { --t: 3px; --l: 22%; background:
-      linear-gradient(var(--c1), var(--c1)) top left / var(--l) var(--t) no-repeat, linear-gradient(var(--c1), var(--c1)) top left / var(--t) var(--l) no-repeat,
-      linear-gradient(var(--c1), var(--c1)) top right / var(--l) var(--t) no-repeat, linear-gradient(var(--c1), var(--c1)) top right / var(--t) var(--l) no-repeat,
-      linear-gradient(var(--c2), var(--c2)) bottom left / var(--l) var(--t) no-repeat, linear-gradient(var(--c2), var(--c2)) bottom left / var(--t) var(--l) no-repeat,
-      linear-gradient(var(--c2), var(--c2)) bottom right / var(--l) var(--t) no-repeat, linear-gradient(var(--c2), var(--c2)) bottom right / var(--t) var(--l) no-repeat; }
-  .st-brackets .lbl { color: var(--c1); text-shadow: 0 0 6px rgba(0, 0, 0, 0.9); padding-left: 0; }
-  /* Glow: a soft line of light round it */
-  .st-glow { border: 2px solid var(--c1); border-radius: 10px; box-shadow: 0 0 14px var(--c1), inset 0 0 10px color-mix(in srgb, var(--c1) 45%, transparent); }
-  .st-glow .lbl { background: var(--c1); border-radius: 6px 6px 0 0; margin-bottom: 0; color: #fff; }
-  /* Neon: two lines, the inner one the second colour */
-  .st-neon { border: 2px solid var(--c1); border-radius: 6px; box-shadow: 0 0 10px var(--c1), inset 0 0 0 4px transparent, inset 0 0 0 6px var(--c2); }
-  .st-neon .lbl { color: var(--c1); text-shadow: 0 0 8px var(--c1); }
-  /* Tech: cut corners and ticks along its edges */
-  .st-tech { border: 2px solid var(--c1); clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); }
-  .st-tech::before, .st-tech::after { content: ""; position: absolute; width: 30%; height: 4px; background: var(--c2); }
-  .st-tech::before { top: -1px; right: 12%; } .st-tech::after { bottom: -1px; left: 12%; }
-  .st-tech .lbl { background: linear-gradient(90deg, var(--c1), var(--c2)); clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 100%, 0 100%); padding-right: 1.4em; }
-  /* Soft: a rounded gradient line */
-  .st-soft { border-radius: 14px; padding: 3px; background: linear-gradient(135deg, var(--c1), var(--c2)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
-  .st-soft .lbl { display: none; }
-  .soft-lbl { position: absolute; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; padding: 0.15em 0.6em; border-radius: 999px; background: linear-gradient(90deg, var(--c1), var(--c2)); white-space: nowrap; }
-  /* a shaped one (its corners in pts): its lines drawn in an SVG over its box, in its style */
-  .fr.shaped { background: none !important; border: 0 !important; box-shadow: none !important; clip-path: none !important; -webkit-mask: none !important; mask: none !important; padding: 0 !important; }
-  .fr.shaped::before, .fr.shaped::after { display: none; }
+  .fr { position: absolute; box-sizing: border-box; pointer-events: none; --tk: 1; }
   .fr svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-  .fr svg * { fill: none; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-  .fr .ln { stroke: var(--c1); stroke-width: 2.5; }
-  .st-brackets .ln { stroke-width: 3.5; }
-  .st-glow .ln { filter: drop-shadow(0 0 5px var(--c1)) drop-shadow(0 0 9px var(--c1)); }
+  .fr svg path { fill: none; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+  .ln { stroke: var(--c1); stroke-width: calc(2.5px * var(--tk)); }
+  .in { stroke: var(--c2); stroke-width: calc(2px * var(--tk)); }
+  .tk { stroke: var(--c2); stroke-width: calc(4px * var(--tk)); }
+  .fl { fill: color-mix(in srgb, var(--c1) 16%, transparent) !important; stroke: none; }
+  .dt { fill: var(--c2) !important; stroke: none; }
+  /* the styles */
+  .st-brackets .ln { stroke-width: calc(3.5px * var(--tk)); }
+  .st-glow .ln { filter: drop-shadow(0 0 5px var(--c1)) drop-shadow(0 0 10px var(--c1)); }
   .st-neon .ln { filter: drop-shadow(0 0 6px var(--c1)); }
-  .fr .in { stroke: var(--c2); stroke-width: 2; }
-  .st-tech .ln { stroke-dasharray: none; }
-  .st-tech .tk { stroke: var(--c2); stroke-width: 4; }
-  .st-soft .ln { stroke: url(#soft-grad); stroke-width: 3.5; }
-  .st-soft.shaped .lbl { display: block; border-radius: 999px; background: linear-gradient(90deg, var(--c1), var(--c2)); }
-  /* a slow pulse, if it's on */
-  .pulse { animation: pulse 2.4s ease-in-out infinite; }
-  @keyframes pulse { 50% { opacity: 0.55; } }
-  body.still .pulse { animation: none; }
+  .st-neon .in { filter: drop-shadow(0 0 4px var(--c2)); }
+  .st-soft .ln, .st-ribbon .ln { stroke: url(#grad); stroke-width: calc(3.5px * var(--tk)); }
+  .st-ribbon .ln { stroke-width: calc(7px * var(--tk)); }
+  .st-dashed .ln { stroke-dasharray: 10 8; }
+  .st-dots .ln { stroke-width: calc(1.5px * var(--tk)); opacity: 0.85; }
+  .st-glass .ln { stroke-width: calc(1.5px * var(--tk)); stroke: color-mix(in srgb, var(--c1) 70%, #fff); }
+  /* its label, above its top left corner */
+  .lbl { position: absolute; left: 0; bottom: 100%; margin-bottom: 0.35em; padding: 0.15em 0.6em; font-size: var(--ls, 14px); font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; color: var(--c1); text-shadow: 0 0 6px rgba(0, 0, 0, 0.9); }
+  .lb-tag .lbl { background: var(--c1); color: #fff; text-shadow: none; border-radius: 6px 6px 0 0; margin-bottom: 0; }
+  .lb-pill .lbl { background: linear-gradient(90deg, var(--c1), var(--c2)); color: #fff; text-shadow: none; border-radius: 999px; }
+  .lb-cut .lbl { background: linear-gradient(90deg, var(--c1), var(--c2)); color: #fff; text-shadow: none; clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 100%, 0 100%); padding-right: 1.4em; }
+  .lb-glow .lbl { text-shadow: 0 0 8px var(--c1), 0 0 2px #000; }
+  /* the animations (each on the whole frame, or on a line of its own running round it) */
+  .an-pulse { animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: 0.5; } }
+  .an-breathe .ln { animation: breathe 3s ease-in-out infinite; }
+  @keyframes breathe { 0%, 100% { filter: drop-shadow(0 0 2px var(--c1)); } 50% { filter: drop-shadow(0 0 8px var(--c1)) drop-shadow(0 0 16px var(--c1)); } }
+  .an-flicker { animation: flicker 4s linear infinite; }
+  @keyframes flicker { 0%, 43%, 47%, 51%, 80%, 84%, 100% { opacity: 1; } 45%, 82% { opacity: 0.35; } 49% { opacity: 0.7; } }
+  .run { stroke: #fff; stroke-width: calc(3px * var(--tk)); stroke-dasharray: 12 88; filter: drop-shadow(0 0 6px var(--c2)) drop-shadow(0 0 3px #fff); animation: run 3s linear infinite; }
+  @keyframes run { to { stroke-dashoffset: -100; } }
+  .an-march .ln { stroke-dasharray: 10 8; animation: march 0.9s linear infinite; }
+  @keyframes march { to { stroke-dashoffset: -18; } }
+  .an-draw .ln, .an-draw .in { stroke-dasharray: 100; animation: drawin 6s ease-in-out infinite; }
+  @keyframes drawin { 0% { stroke-dashoffset: 100; } 25%, 85% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -100; } }
+  .scan { fill: color-mix(in srgb, var(--c2) 55%, transparent) !important; stroke: none; animation: scan 2.8s ease-in-out infinite; }
+  @keyframes scan { 0% { transform: translateY(0); opacity: 0; } 12%, 88% { opacity: 1; } 100% { transform: translateY(var(--sh)); opacity: 0; } }
+  .an-spin .ln { stroke-dasharray: 22 6 4 6; animation: spin 5s linear infinite; }
+  @keyframes spin { to { stroke-dashoffset: -100; } }
+  body.still * { animation: none !important; }
 </style>
 </head>
 <body>
@@ -65,16 +68,36 @@
   const PREVIEW = /[?&]preview=1/.test(location.search);
   let sig = "";
   const NS = "http://www.w3.org/2000/svg";
-  // (a shaped frame's lines, in its box's pixels (w x h): its outline; Neon's second line a little inside it;
-  // Corner Brackets' short lines from each corner along its edges; Tech's ticks on its longest edges)
-  function shapeSvg(pts, w, h, style) {
+  let gradN = 0;
+  // A frame's lines, in its box's pixels (w x h), round its corners (p): its outline (its corners rounded, if
+  // asked), then what its style adds (Neon's second line inside it, Corner Brackets' short lines from each corner,
+  // Tech's ticks on its longest edges, Dots at each corner, a faint fill for Glass), then what its animation adds
+  // (a light running round it, a line scanning down it)
+  function frameSvg(pts, w, h, f) {
+    const style = f.style || "brackets", anim = f.anim || (f.pulse ? "pulse" : "none");
     const p = pts.map(([x, y]) => [x * w, y * h]), n = p.length;
-    const line = (q) => "M" + q.map(([x, y]) => x.toFixed(1) + " " + y.toFixed(1)).join(" L") + " Z";
+    const rad = f.round ? Math.min(w, h) * 0.12 : 0;
+    // (a closed line through its corners, each rounded by `r`)
+    const line = (q, r) => {
+      if (!r) return "M" + q.map(([x, y]) => x.toFixed(1) + " " + y.toFixed(1)).join(" L") + " Z";
+      let d = "";
+      q.forEach((b, i) => {
+        const a = q[(i + q.length - 1) % q.length], c = q[(i + 1) % q.length];
+        const cut = (o) => { const dx = o[0] - b[0], dy = o[1] - b[1], l = Math.max(1, Math.hypot(dx, dy)), k = Math.min(r, l / 2) / l; return [b[0] + dx * k, b[1] + dy * k]; };
+        const s = cut(a), e = cut(c);
+        d += (i ? " L" : "M") + s[0].toFixed(1) + " " + s[1].toFixed(1) + " Q" + b[0].toFixed(1) + " " + b[1].toFixed(1) + " " + e[0].toFixed(1) + " " + e[1].toFixed(1);
+      });
+      return d + " Z";
+    };
+    const inset = (k) => { const cx = p.reduce((a, q) => a + q[0], 0) / n, cy = p.reduce((a, q) => a + q[1], 0) / n; return p.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]); };
     const svg = document.createElementNS(NS, "svg");
     svg.setAttribute("viewBox", "0 0 " + w + " " + h);
     svg.setAttribute("preserveAspectRatio", "none");
-    const add = (d, cls) => { const e = document.createElementNS(NS, "path"); e.setAttribute("d", d); e.setAttribute("class", cls); svg.append(e); };
-    if (style === "soft") svg.innerHTML = '<defs><linearGradient id="soft-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:var(--c1)"/><stop offset="1" style="stop-color:var(--c2)"/></linearGradient></defs>';
+    const add = (d, cls, len) => { const e = document.createElementNS(NS, "path"); e.setAttribute("d", d); e.setAttribute("class", cls); if (len) e.setAttribute("pathLength", "100"); svg.append(e); return e; };
+    const gid = "grad" + ++gradN;
+    svg.innerHTML = '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:var(--c1)"/><stop offset="1" style="stop-color:var(--c2)"/></linearGradient></defs>';
+    const outline = line(p, rad);
+    if (style === "glass" || f.fill) add(outline, "fl");
     if (style === "brackets") {
       const reach = Math.min(w, h) * 0.24;
       let d = "";
@@ -84,15 +107,27 @@
         d += "M" + s[0] + " " + s[1] + " L" + b[0] + " " + b[1] + " L" + e[0] + " " + e[1] + " ";
       });
       add(d, "ln");
-    } else add(line(p), "ln");
-    if (style === "neon") {
-      const cx = p.reduce((a, q) => a + q[0], 0) / n, cy = p.reduce((a, q) => a + q[1], 0) / n, k = Math.max(0.5, 1 - 10 / Math.max(20, Math.min(w, h)));
-      add(line(p.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k])), "in");
+    } else {
+      const ln = add(outline, "ln", true);
+      if (style === "soft" || style === "ribbon") ln.style.stroke = "url(#" + gid + ")";
     }
+    if (style === "neon" || style === "double") add(line(inset(Math.max(0.5, 1 - 12 / Math.max(24, Math.min(w, h)))), rad * 0.8), "in", true);
     if (style === "tech") {
-      // (a tick along its two longest edges, a third of the way along)
       const edges = p.map((a, i) => [a, p[(i + 1) % n]]).sort((u, v) => Math.hypot(v[1][0] - v[0][0], v[1][1] - v[0][1]) - Math.hypot(u[1][0] - u[0][0], u[1][1] - u[0][1])).slice(0, 2);
       for (const [a, c] of edges) add("M" + (a[0] + (c[0] - a[0]) * 0.55) + " " + (a[1] + (c[1] - a[1]) * 0.55) + " L" + (a[0] + (c[0] - a[0]) * 0.85) + " " + (a[1] + (c[1] - a[1]) * 0.85), "tk");
+    }
+    if (style === "dots") { const r = 3.5 * (Number(f.thick) || 1); add(p.map(([x, y]) => "M" + (x - r) + " " + y + " a" + r + " " + r + " 0 1 0 " + r * 2 + " 0 a" + r + " " + r + " 0 1 0 " + -r * 2 + " 0").join(" "), "dt"); }
+    // (a light running round it: on a line of its own over the outline, whatever the style)
+    if (anim === "run") add(outline, "run", true);
+    // (a line scanning down it: a thin bar across its box, kept inside its outline)
+    if (anim === "scan") {
+      const cid = "clip" + gradN;
+      const cp = document.createElementNS(NS, "clipPath"); cp.id = cid;
+      const cpp = document.createElementNS(NS, "path"); cpp.setAttribute("d", outline); cp.append(cpp);
+      svg.querySelector("defs").append(cp);
+      const g = document.createElementNS(NS, "g"); g.setAttribute("clip-path", "url(#" + cid + ")");
+      const bar = document.createElementNS(NS, "path"); bar.setAttribute("d", "M0 -3 H" + w + " V3 H0 Z"); bar.setAttribute("class", "scan"); bar.style.setProperty("--sh", h + "px");
+      g.append(bar); svg.append(g);
     }
     return svg;
   }
@@ -108,18 +143,21 @@
     const stage = $("stage");
     stage.innerHTML = "";
     for (const f of h.frames || []) {
-      const pad = Number(f.pad) || 6;
+      const pad = Number(f.pad) || 0;
       const el = document.createElement("div");
-      const pts = Array.isArray(f.pts) && f.pts.length >= 3 ? f.pts.filter((q) => Array.isArray(q) && q.length === 2).map((q) => [Number(q[0]) || 0, Number(q[1]) || 0]) : null;
-      el.className = "fr st-" + (f.style || "brackets") + (f.pulse ? " pulse" : "") + (pts ? " shaped" : "");
+      const own = Array.isArray(f.pts) && f.pts.length >= 3 ? f.pts.filter((q) => Array.isArray(q) && q.length === 2).map((q) => [Number(q[0]) || 0, Number(q[1]) || 0]) : null;
+      const pts = own || [[0, 0], [1, 0], [1, 1], [0, 1]];
+      const anim = f.anim || (f.pulse ? "pulse" : "none");
+      el.className = "fr st-" + (f.style || "brackets") + " an-" + anim + " lb-" + (f.labelStyle || "plain");
+      el.style.setProperty("--tk", String(Math.max(0.5, Math.min(3, Number(f.thick) || 1))));
+      // (its own colours, if it has them: else the Suite's)
+      if (f.c1) el.style.setProperty("--c1", f.c1);
+      if (f.c2) el.style.setProperty("--c2", f.c2);
       const bw = (f.w + pad * 2) * kx, bh = (f.h + pad * 2) * ky;
       Object.assign(el.style, { left: (f.x - pad) * kx + "px", top: (f.y - pad) * ky + "px", width: bw + "px", height: bh + "px" });
-      if (pts) el.append(shapeSvg(pts, bw, bh, f.style || "brackets"));
+      el.append(frameSvg(pts, bw, bh, f));
       el.style.setProperty("--ls", Math.max(10, Math.min(22, 14 * ky)) + "px");
-      if (f.label) {
-        const l = document.createElement("div"); l.className = "lbl"; l.textContent = f.label; el.append(l);
-        if (f.style === "soft" && !pts) { const s = document.createElement("div"); s.className = "soft-lbl"; s.textContent = f.label; s.style.fontSize = Math.max(10, Math.min(22, 14 * ky)) + "px"; s.style.left = (f.x - pad) * kx + "px"; s.style.top = (f.y - pad) * ky - 28 * ky + "px"; stage.append(s); }
-      }
+      if (f.label) { const l = document.createElement("div"); l.className = "lbl"; l.textContent = f.label; el.append(l); }
       stage.append(el);
     }
   }
@@ -129,12 +167,12 @@
     try {
       const s = await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
       if (s.accent) { document.body.style.setProperty("--c1", s.accent); document.body.style.setProperty("--c2", s.accent2 || s.accent); }
-      if (!/[?&]preview=1/.test(location.search) && offIn(s, "hud")) return;
+      if (!PREVIEW && offIn(s, "hud")) return;
       document.body.classList.toggle("still", !!(s.suite && s.suite.anim === "none"));
       const h = ((s.suite && s.suite.creators) || []).find((x) => x.kind === "hud");
       if (h) draw(h);
     } catch (e) {}
-    setTimeout(poll, /[?&]preview=1/.test(location.search) ? 250 : 1500);
+    setTimeout(poll, PREVIEW ? 250 : 1500);
   }
   addEventListener("resize", () => (sig = ""));
   poll();

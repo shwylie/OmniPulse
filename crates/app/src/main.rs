@@ -7698,6 +7698,13 @@ fn bot_set(shared: &Shared, key: &str, v: &str) {
             "hudF_label" => { fr["label"] = serde_json::json!(v); paint = false; }
             "hudF_pad" => fr["pad"] = serde_json::json!(v.parse::<f64>().unwrap_or(6.0)),
             "hudF_pulse" => fr["pulse"] = serde_json::json!(v == "true"),
+            "hudF_anim" => { fr["anim"] = serde_json::json!(v); fr["pulse"] = serde_json::json!(v == "pulse"); }
+            "hudF_thick" => fr["thick"] = serde_json::json!(v.parse::<f64>().unwrap_or(1.0)),
+            "hudF_round" => fr["round"] = serde_json::json!(v == "true"),
+            "hudF_fill" => fr["fill"] = serde_json::json!(v == "true"),
+            "hudF_labelStyle" => fr["labelStyle"] = serde_json::json!(v),
+            // (every frame given this one's look: its style, animation, thickness, corners, fill and label style)
+            "hudF_all" => {}
             _ => {
                 let step = HUD_STEP.with(|s| s.get());
                 if v == "big" { HUD_STEP.with(|s| s.set(if step > 1.0 { 1.0 } else { 10.0 })); bot_paint(shared); return; }
@@ -7897,6 +7904,19 @@ fn bot_act(shared: &Shared, act: &str) {
                 frames.push(f);
                 bot_set(shared, "hudSel", &(frames.len() - 1).to_string());
             }
+        } else if let Some(r) = rest.strip_prefix("poly:") {
+            // (an outline clicked out corner by corner, as fractions of the screenshot: a frame of that shape, as is)
+            let pts: Vec<(f32, f32)> = r.split(';').filter_map(|p| { let n = nums(p); (n.len() == 2).then(|| (n[0].clamp(0.0, 1.0) * iw, n[1].clamp(0.0, 1.0) * ih)) }).collect();
+            if pts.len() >= 3 {
+                let (x0, y0) = pts.iter().fold((f32::MAX, f32::MAX), |a, p| (a.0.min(p.0), a.1.min(p.1)));
+                let (x1, y1) = pts.iter().fold((f32::MIN, f32::MIN), |a, p| (a.0.max(p.0), a.1.max(p.1)));
+                let (w, h) = ((x1 - x0).max(4.0), (y1 - y0).max(4.0));
+                let mut f = hud::frame(x0, y0, w, h, frames.last());
+                f["shape"] = serde_json::json!("custom");
+                f["pts"] = serde_json::json!(pts.iter().map(|p| [(((p.0 - x0) / w) * 1000.0).round() / 1000.0, (((p.1 - y0) / h) * 1000.0).round() / 1000.0]).collect::<Vec<_>>());
+                frames.push(f);
+                bot_set(shared, "hudSel", &(frames.len() - 1).to_string());
+            }
         } else if let Some(r) = rest.strip_prefix("pick:") {
             let n = nums(r);
             if n.len() == 2 {
@@ -7922,6 +7942,11 @@ fn bot_act(shared: &Shared, act: &str) {
                     if shape != "rect" { hud::reshape(None, f, &shape); }
                 }
             }
+        } else if rest == "same" && sel >= 0.0 && (sel as usize) < frames.len() {
+            // (every frame given the picked one's look)
+            let from = frames[sel as usize].clone();
+            for f in frames.iter_mut() { f["style"] = from["style"].clone(); for k in hud::LOOK_KEYS { if from[k].is_null() { if let Some(o) = f.as_object_mut() { o.remove(k); } } else { f[k] = from[k].clone(); } } }
+            say("Every frame has this one's look now.");
         } else if rest == "del" && sel >= 0.0 && (sel as usize) < frames.len() {
             frames.remove(sel as usize);
             bot_set(shared, "hudSel", "-1");
