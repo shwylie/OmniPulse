@@ -91,7 +91,24 @@
       });
       return d + " Z";
     };
-    const inset = (k) => { const cx = p.reduce((a, q) => a + q[0], 0) / n, cy = p.reduce((a, q) => a + q[1], 0) / n; return p.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]); };
+    // (its line moved in by d pixels all the way round, each side parallel to its own: hud.rs's inset, the two
+    // kept the same; a sharp corner's reach held to three times that)
+    const inset = (d) => {
+      let area = 0;
+      for (let i = 0; i < n; i++) { const a = p[i], b = p[(i + 1) % n]; area += a[0] * b[1] - b[0] * a[1]; }
+      const s = area >= 0 ? 1 : -1;
+      const unit = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.max(0.001, Math.hypot(dx, dy)); return [dx / l, dy / l]; };
+      return p.map((b, i) => {
+        const u = unit(p[(i + n - 1) % n], b), v = unit(b, p[(i + 1) % n]);
+        const n1 = [-u[1] * s, u[0] * s], n2 = [-v[1] * s, v[0] * s];
+        let bx = n1[0] + n2[0], by = n1[1] + n2[1];
+        const bl = Math.hypot(bx, by);
+        if (bl < 0.001) return [b[0] + n1[0] * d, b[1] + n1[1] * d];
+        bx /= bl; by /= bl;
+        const k = Math.min(d / Math.max(0.01, bx * n1[0] + by * n1[1]), d * 3);
+        return [b[0] + bx * k, b[1] + by * k];
+      });
+    };
     const svg = document.createElementNS(NS, "svg");
     svg.setAttribute("viewBox", "0 0 " + w + " " + h);
     svg.setAttribute("preserveAspectRatio", "none");
@@ -113,7 +130,7 @@
       const ln = add(outline, "ln", true);
       if (style === "soft" || style === "ribbon") ln.style.stroke = "url(#" + gid + ")";
     }
-    if (style === "neon" || style === "double") add(line(inset(Math.max(0.5, 1 - 12 / Math.max(24, Math.min(w, h)))), rad * 0.8), "in", true);
+    if (style === "neon" || style === "double") add(line(inset(Math.min(7, Math.max(3.5, Math.min(w, h) * 0.1))), rad * 0.8), "in", true);
     if (style === "tech") {
       const edges = p.map((a, i) => [a, p[(i + 1) % n]]).sort((u, v) => Math.hypot(v[1][0] - v[0][0], v[1][1] - v[0][1]) - Math.hypot(u[1][0] - u[0][0], u[1][1] - u[0][1])).slice(0, 2);
       for (const [a, c] of edges) add("M" + (a[0] + (c[0] - a[0]) * 0.55) + " " + (a[1] + (c[1] - a[1]) * 0.55) + " L" + (a[0] + (c[0] - a[0]) * 0.85) + " " + (a[1] + (c[1] - a[1]) * 0.85), "tk");

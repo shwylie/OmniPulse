@@ -118,7 +118,52 @@ pub fn wrap(img: &image::RgbImage, x: f32, y: f32, w: f32, h: f32) -> Option<(f3
     let mut spread: Vec<f32> = edge.iter().map(|p| dist(*p)).collect();
     spread.sort_by(f32::total_cmp);
     let t = (spread[spread.len() / 2] * 3.0 + 14.0).max(34.0);
-    let mask: Vec<bool> = (0..rh).flat_map(|cy| (0..rw).map(move |cx| (cx, cy))).map(|(cx, cy)| dist(at(cx, cy)) > t).collect();
+    // (a background of more than one colour (sand and rock behind a HUD): every colour that's common along the
+    // region's edge is background, not only the middle one. What's like any of them, and reached from the edge
+    // through more of the same, is the background; the rest is the part, the bits inside it that happen to be the
+    // background's colour too)
+    let mut bins: std::collections::HashMap<u16, (u32, [u32; 3])> = std::collections::HashMap::new();
+    for p in &edge {
+        let e = bins.entry(((p[0] as u16 >> 4) << 8) | ((p[1] as u16 >> 4) << 4) | (p[2] as u16 >> 4)).or_default();
+        e.0 += 1;
+        for k in 0..3 { e.1[k] += p[k] as u32; }
+    }
+    let common = ((edge.len() as f32 * 0.02) as u32).max(3);
+    let pal: Vec<[f32; 3]> = bins.values().filter(|b| b.0 >= common).map(|b| [b.1[0] as f32 / b.0 as f32, b.1[1] as f32 / b.0 as f32, b.1[2] as f32 / b.0 as f32]).collect();
+    let like_bg = |p: [u8; 3]| dist(p) <= t || pal.iter().any(|c| ((p[0] as f32 - c[0]).powi(2) + (p[1] as f32 - c[1]).powi(2) + (p[2] as f32 - c[2]).powi(2)).sqrt() <= 26.0);
+    let bgish: Vec<bool> = (0..rh).flat_map(|cy| (0..rw).map(move |cx| (cx, cy))).map(|(cx, cy)| like_bg(at(cx, cy))).collect();
+    let mut mask = vec![true; rw * rh];
+    let mut stack: Vec<usize> = Vec::new();
+    for cx in 0..rw { stack.push(cx); stack.push((rh - 1) * rw + cx); }
+    for cy in 0..rh { stack.push(cy * rw); stack.push(cy * rw + rw - 1); }
+    while let Some(i) = stack.pop() {
+        if !mask[i] || !bgish[i] { continue; }
+        mask[i] = false;
+        let (cx, cy) = (i % rw, i / rw);
+        if cx > 0 { stack.push(i - 1); }
+        if cx + 1 < rw { stack.push(i + 1); }
+        if cy > 0 { stack.push(i - rw); }
+        if cy + 1 < rh { stack.push(i + rw); }
+    }
+    // (threads and specks of background left on it, a couple of pixels thick: worn off, then the part grown back
+    // to its size)
+    let worn = |m: &[bool], keep: bool| -> Vec<bool> {
+        (0..rw * rh).map(|i| {
+            let (cx, cy) = (i % rw, i / rw);
+            let mut all = true;
+            let mut any = false;
+            for (dx, dy) in [(0i64, 0i64), (-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                let (x, y) = (cx as i64 + dx, cy as i64 + dy);
+                let v = x >= 0 && y >= 0 && (x as usize) < rw && (y as usize) < rh && m[y as usize * rw + x as usize];
+                all &= v; any |= v;
+            }
+            if keep { all } else { any }
+        }).collect()
+    };
+    // (its corners kept: what's worn off comes back where it's within a few pixels of what's left)
+    let mut near = worn(&worn(&mask, true), true);
+    for _ in 0..6 { near = worn(&near, false); }
+    let mask: Vec<bool> = mask.iter().zip(&near).map(|(m, n)| *m && *n).collect();
     // (its patches: the biggest one reaching the middle half of the box drawn)
     let mut label = vec![0u32; rw * rh];
     let mut best: Option<(u32, usize)> = None;
@@ -199,6 +244,7 @@ pub fn wrap(img: &image::RgbImage, x: f32, y: f32, w: f32, h: f32) -> Option<(f3
         let (i, least) = (0..n).map(|i| (i, off(i))).min_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or((0, 0.0));
         if n > 20 || least < tol { hull.remove(i); } else { break; }
     }
+    let hull = tidy(hull, tol);
     if hull.len() < 3 { return None; }
     let (bx0, by0) = hull.iter().fold((f32::MAX, f32::MAX), |a, p| (a.0.min(p.0), a.1.min(p.1)));
     let (bx1, by1) = hull.iter().fold((f32::MIN, f32::MIN), |a, p| (a.0.max(p.0), a.1.max(p.1)));
@@ -206,6 +252,73 @@ pub fn wrap(img: &image::RgbImage, x: f32, y: f32, w: f32, h: f32) -> Option<(f3
     let norm: Vec<(f32, f32)> = hull.iter().map(|p| (((p.0 - bx0) / bw * 1000.0).round() / 1000.0, ((p.1 - by0) / bh * 1000.0).round() / 1000.0)).collect();
     Some((bx0, by0, bw, bh, norm))
 }
+
+/// A traced outline tidied (the screenshot's pixels), so it reads as drawn on purpose: small steps and notches
+/// (a few pixels of a busy background caught with the part) flattened, sides that are nearly level or upright
+/// made exactly so, corners a few pixels apart made one, and corners left along a straight side taken out
+fn tidy(mut p: Vec<(f32, f32)>, tol: f32) -> Vec<(f32, f32)> {
+    let (x0, y0) = p.iter().fold((f32::MAX, f32::MAX), |a, q| (a.0.min(q.0), a.1.min(q.1)));
+    let (x1, y1) = p.iter().fold((f32::MIN, f32::MIN), |a, q| (a.0.max(q.0), a.1.max(q.1)));
+    // (what counts as small here: a step this deep or less isn't the part's shape)
+    let small = (0.035 * (x1 - x0).min(y1 - y0)).clamp(3.0, 9.0).max(tol);
+    let off = |p: &[(f32, f32)], i: usize| { let n = p.len(); let (a, b, c) = (p[(i + n - 1) % n], p[i], p[(i + 1) % n]); ((b.0 - a.0) * (c.1 - a.1) - (c.0 - a.0) * (b.1 - a.1)).abs() / ((c.0 - a.0).hypot(c.1 - a.1)).max(0.001) };
+    for _ in 0..3 {
+        // (a short side between two longer ones going the same way: a step; its two corners made one, on the
+        // longer neighbour's line)
+        let mut i = 0;
+        while p.len() > 4 && i < p.len() {
+            let n = p.len();
+            let (a, b, c, d) = (p[(i + n - 1) % n], p[i], p[(i + 1) % n], p[(i + 2) % n]);
+            let len = (c.0 - b.0).hypot(c.1 - b.1);
+            let (before, after) = ((b.0 - a.0).hypot(b.1 - a.1), (d.0 - c.0).hypot(d.1 - c.1));
+            if len <= small && before > len * 2.0 && after > len * 2.0 {
+                // (the corner on the longer side kept; the other goes)
+                if before >= after { p.remove((i + 1) % n); } else { p.remove(i); }
+            } else { i += 1; }
+        }
+        // (nearly level, or nearly upright: exactly so)
+        let n = p.len();
+        for i in 0..n {
+            let j = (i + 1) % n;
+            let (dx, dy) = ((p[j].0 - p[i].0).abs(), (p[j].1 - p[i].1).abs());
+            if dx > dy && dy <= (dx * 0.12).max(1.5).min(small) { let y = (p[i].1 + p[j].1) / 2.0; p[i].1 = y; p[j].1 = y; }
+            else if dy > dx && dx <= (dy * 0.12).max(1.5).min(small) { let x = (p[i].0 + p[j].0) / 2.0; p[i].0 = x; p[j].0 = x; }
+        }
+        // (corners left on a straight side, or doubled: out)
+        let mut i = 0;
+        while p.len() > 3 && i < p.len() {
+            let n = p.len();
+            let next = p[(i + 1) % n];
+            if (next.0 - p[i].0).hypot(next.1 - p[i].1) < 2.0 || off(&p, i) < 1.0 { p.remove(i); } else { i += 1; }
+        }
+    }
+    p
+}
+
+/// A closed shape's line moved in by `d` pixels all the way round, each side kept parallel to its own (a sharp
+/// corner's reach held to three times that)
+pub fn inset(p: &[(f32, f32)], d: f32) -> Vec<(f32, f32)> {
+    let n = p.len();
+    if n < 3 { return p.to_vec(); }
+    let area: f32 = (0..n).map(|i| { let (a, b) = (p[i], p[(i + 1) % n]); a.0 * b.1 - b.0 * a.1 }).sum();
+    let s = if area >= 0.0 { 1.0 } else { -1.0 };
+    let unit = |a: (f32, f32), b: (f32, f32)| { let (dx, dy) = (b.0 - a.0, b.1 - a.1); let l = dx.hypot(dy).max(0.001); (dx / l, dy / l) };
+    (0..n).map(|i| {
+        let (a, b, c) = (p[(i + n - 1) % n], p[i], p[(i + 1) % n]);
+        let (u, v) = (unit(a, b), unit(b, c));
+        // (each side's way in; the corner goes in along the middle of the two)
+        let (n1, n2) = ((-u.1 * s, u.0 * s), (-v.1 * s, v.0 * s));
+        let (mut bx, mut by) = (n1.0 + n2.0, n1.1 + n2.1);
+        let bl = bx.hypot(by);
+        if bl < 0.001 { return (b.0 + n1.0 * d, b.1 + n1.1 * d); }
+        bx /= bl; by /= bl;
+        let k = (d / (bx * n1.0 + by * n1.1).max(0.01)).min(d * 3.0);
+        (b.0 + bx * k, b.1 + by * k)
+    }).collect()
+}
+
+/// How far in a frame's second line sits, for its box
+pub fn inset_by(w: f32, h: f32) -> f32 { (w.min(h) * 0.1).clamp(3.5, 7.0) }
 
 /// A frame's corners in the screenshot's pixels: its own, or its box's four
 pub fn corners_px(f: &Value) -> Vec<(f32, f32)> {
@@ -239,9 +352,7 @@ pub fn shape_paths(pts: &[(f32, f32)], w: f32, h: f32) -> (String, String, Strin
     let p: Vec<(f32, f32)> = pts.iter().map(|&(x, y)| (x * w, y * h)).collect();
     if p.len() < 3 { return Default::default(); }
     let path = |q: &[(f32, f32)]| q.iter().enumerate().map(|(i, (x, y))| format!("{}{x:.1} {y:.1}", if i == 0 { "M" } else { " L" })).collect::<String>() + " Z";
-    let (cx, cy) = (p.iter().map(|q| q.0).sum::<f32>() / p.len() as f32, p.iter().map(|q| q.1).sum::<f32>() / p.len() as f32);
-    let k = (1.0 - 10.0 / w.min(h).max(20.0)).max(0.5);
-    let inner: Vec<(f32, f32)> = p.iter().map(|&(x, y)| (cx + (x - cx) * k, cy + (y - cy) * k)).collect();
+    let inner = inset(&p, inset_by(w, h));
     let reach = w.min(h) * 0.24;
     let mut br = String::new();
     for i in 0..p.len() {
@@ -307,6 +418,60 @@ mod tests {
         assert!(super::boxy(&pts), "{pts:?}");
         // (on a flat picture: nothing)
         assert!(super::wrap(&image::RgbImage::from_pixel(100, 100, image::Rgb([90, 90, 90])), 10.0, 10.0, 50.0, 40.0).is_none());
+    }
+
+    #[test]
+    fn a_second_line_runs_parallel_inside_the_first() {
+        // (a wide stepped shape, as a player's plate: every side of the line inside it 5 from its own)
+        let p = [(0.0, 0.0), (300.0, 0.0), (300.0, 40.0), (200.0, 40.0), (200.0, 100.0), (0.0, 100.0)];
+        let q = super::inset(&p, 5.0);
+        assert_eq!(q, vec![(5.0, 5.0), (295.0, 5.0), (295.0, 35.0), (195.0, 35.0), (195.0, 95.0), (5.0, 95.0)]);
+        // (drawn the other way round: still inside)
+        let back: Vec<(f32, f32)> = p.iter().rev().cloned().collect();
+        assert!(super::inset(&back, 5.0).contains(&(5.0, 5.0)));
+    }
+
+    #[test]
+    fn a_traced_outline_is_tidied() {
+        // (a plate with a notch a few pixels deep on its right, a top that's a pixel off level, and a slanted end)
+        let p = vec![(0.0, 0.0), (300.0, 1.0), (300.0, 40.0), (298.0, 41.0), (298.5, 60.0), (280.0, 100.0), (0.0, 100.5)];
+        let t = super::tidy(p, 1.6);
+        assert_eq!(t.len(), 5, "{t:?}");
+        // (level top and foot, upright left and right; the slant kept)
+        assert!(t[0].1 == t[1].1 && t.iter().any(|q| q.0 == 280.0), "{t:?}");
+    }
+
+    /// (by hand: HUD_IMG a screenshot, HUD_BOXES "x,y,w,h;..." boxes drawn on it, HUD_OUT a folder: each one's
+    /// wrap printed, and pictured there with its outline and its second line)
+    #[test]
+    #[ignore]
+    fn wrap_boxes_pictured() {
+        let (Ok(f), Ok(b), Ok(out)) = (std::env::var("HUD_IMG"), std::env::var("HUD_BOXES"), std::env::var("HUD_OUT")) else { return };
+        let img = image::open(f).unwrap().to_rgb8();
+        for (bi, bx) in b.split(';').enumerate() {
+            let n: Vec<f32> = bx.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+            let got = super::wrap(&img, n[0], n[1], n[2], n[3]);
+            println!("WRAP {bx} => {got:?}");
+            let Some((x, y, w, h, pts)) = got else { continue };
+            let m = 30.0;
+            let (cx, cy) = ((x - m).max(0.0) as u32, (y - m).max(0.0) as u32);
+            let (cw, ch) = (((w + m * 2.0) as u32).min(img.width() - cx), ((h + m * 2.0) as u32).min(img.height() - cy));
+            let k = 2u32;
+            let mut pic = image::imageops::resize(&image::imageops::crop_imm(&img, cx, cy, cw, ch).to_image(), cw * k, ch * k, image::imageops::FilterType::Triangle);
+            let px: Vec<(f32, f32)> = pts.iter().map(|q| (x + q.0 * w, y + q.1 * h)).collect();
+            let mut line = |q: &[(f32, f32)], col: [u8; 3]| for i in 0..q.len() {
+                let (a, c) = (q[i], q[(i + 1) % q.len()]);
+                let steps = ((c.0 - a.0).hypot(c.1 - a.1) * k as f32 * 2.0) as usize + 1;
+                for s in 0..=steps {
+                    let t = s as f32 / steps as f32;
+                    let (lx, ly) = (((a.0 + (c.0 - a.0) * t - cx as f32) * k as f32) as i64, ((a.1 + (c.1 - a.1) * t - cy as f32) * k as f32) as i64);
+                    for (ox, oy) in [(0, 0), (1, 0), (0, 1), (1, 1)] { let (ux, uy) = (lx + ox, ly + oy); if ux >= 0 && uy >= 0 && (ux as u32) < pic.width() && (uy as u32) < pic.height() { pic.put_pixel(ux as u32, uy as u32, image::Rgb(col)); } }
+                }
+            };
+            line(&px, [0, 255, 255]);
+            line(&super::inset(&px, super::inset_by(w, h)), [255, 120, 220]);
+            pic.save(std::path::Path::new(&out).join(format!("wrap{bi}.png"))).unwrap();
+        }
     }
 
     /// (by hand: HUD_IMG a screenshot, HUD_BOXES "x,y,w,h;..." boxes drawn on it; each one's wrap printed)
