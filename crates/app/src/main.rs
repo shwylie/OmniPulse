@@ -7408,7 +7408,9 @@ fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
         // (a split page's column is narrow: a row of choices too wide for it, a dropdown, so none's cut off)
         let split = BOT_SHEET.with(|b| matches!(b.borrow().as_str(), "panels" | "cam")) || split_page;
         let wide = names.iter().map(|n| n.chars().count() as f32 * 7.4 + 34.0).sum::<f32>() > 440.0;
-        let (kind, n) = if x.kind == "chips" && split && wide { ("choose", ids.iter().position(|i| *i == x.value).map_or(-1, |i| i as i32)) }
+        // (not a choice of animation: those keep their buttons, each with its animation playing on it)
+        let anim = matches!(x.key.as_str(), "camAnim" | "camTagAnim" | "camEnter" | "hudF_anim");
+        let (kind, n) = if x.kind == "chips" && split && wide && !anim { ("choose", ids.iter().position(|i| *i == x.value).map_or(-1, |i| i as i32)) }
             // (a link row: 1 when it opens a web page, so it shows as one; an action here shows as done here)
             else if x.kind == "link" { (x.kind, i32::from(x.extra.starts_with("url:") || x.extra.starts_with("http"))) }
             else { (x.kind, x.n) };
@@ -8026,6 +8028,13 @@ fn bot_act(shared: &Shared, act: &str) {
         return bot_paint(shared);
     }
     if let Some(text) = act.strip_prefix("copy:") { if share::copy(text).is_ok() { say("Copied."); } return; }
+    // (the Webcam Overlay or the HUD frames as they really are, moving: the real page, in a window of its own)
+    if let Some(which) = act.strip_prefix("realprev:") {
+        let port = shared.borrow().web.prefs["widgetPort"].as_u64().unwrap_or(7878);
+        let (path, title) = if which == "hud" { ("/hud?preview=1", "Game HUD Frames Preview") } else { ("/cam/main?preview=1", "Webcam Overlay Preview") };
+        if let Err(e) = web_preview(&format!("real-{which}"), title, &format!("http://127.0.0.1:{port}{path}"), 1120, 630) { say(&e); }
+        return;
+    }
     // (its widgets: switched here, their settings their own pages, asked first if something here isn't saved)
     if let Some(key) = act.strip_prefix("row-toggle:") { set_toggle(shared, key); return bot_paint(shared); }
     if let Some(key) = act.strip_prefix("row-more:") { if let Some(name) = panels::of_switch(key) { pf_leave(shared, &format!("panel:{name}")); } return; }

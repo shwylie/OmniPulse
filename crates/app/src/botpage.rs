@@ -678,6 +678,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 v.push(f("text", "hudF_label", "Label", "Words above it, like MAP. Leave it empty for none.", &g("label", ""), "MAP"));
                 v.push(f("chips", "hudF_labelStyle", "Label Style", "", &g("labelStyle", "plain"), "plain=Plain|glow=Glowing|tag=Tag|pill=Pill|cut=Cut Corner"));
                 v.push(f("chips", "hudF_pad", "Room round it", "", &fr["pad"].as_f64().unwrap_or(6.0).to_string(), "0=None|6=A Little|14=More|24=Lots"));
+                v.push(f("link", "", "See It Moving", "Opens the real frames over your screenshot in a window, animations and all. It shows what's saved, so click Save first.", "", "realprev:hud"));
                 v.push(f("head", "", &format!("Frame {}: Where It Is", sel + 1), "", "", ""));
                 v.push(f("buttons", "", "", "Move it a pixel at a time. On the screenshot, the arrow keys do the same (with Shift, 10 at a time).", "", "hudn:left=← Left|hudn:right=→ Right|hudn:up=↑ Up|hudn:down=↓ Down"));
                 v.push(f("buttons", "", "", "Make it bigger or smaller, from its middle.", "", "hudn:wider=Wider|hudn:narrower=Narrower|hudn:taller=Taller|hudn:shorter=Shorter"));
@@ -787,12 +788,19 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 1 => {
                     v.push(f("note", "", "Now the frame that goes round your camera.", "", "", ""));
                     v.push(f("chips", "camShape", "Shape", "", &or("camShape", "rounded"), "rounded=Rounded|square=Square|circle=Circle|hex=Hexagon|arch=Arch"));
-                    v.push(f("chips", "camBorder", "Border", "", &or("camBorder", "glow"), "thin=Thin|thick=Thick|double=Double|glow=Glow|gradient=Gradient|brackets=Corner Brackets|edge=Edge Light"));
+                    v.push(f("chips", "camBorder", "Border", "", &or("camBorder", "glow"), "thin=Thin|thick=Thick|double=Double|glow=Glow|neon=Neon Tube|gradient=Gradient|duo=Two-Tone|brackets=Corner Brackets|edge=Edge Light|dashed=Dashed|dotted=Dotted|comic=Comic|glass=Glass"));
+                    v.push(f("chips", "camThick", "Line", "How heavy the border is.", &or("camThick", "normal"), "thin=Thin|normal=Normal|thick=Thick|heavy=Heavy"));
+                    v.push(f("chips", "camAnim", "Animation", "Something moving on the frame. Still keeps it calm.", &or("camAnim", "none"), "none=Still|light=A Light Running Round|pulse=Slow Pulse|breathe=Breathing|hue=Colours Shifting|flash=A Flash Now and Then"));
+                    v.push(f("chips", "camDecor", "Extras", "Something more round the frame.", &or("camDecor", "none"), "none=None|ticks=Corner Ticks|bars=Top and Bottom Bars|sparkle=Sparkles"));
+                    v.push(f("link", "", "See It Moving", "Opens the real overlay in a window, with its border, animation and extras as they'll be on stream. It shows what's saved, so click Save first.", "", "realprev:cam"));
+                    v.push(f("toggle", "camShadow", "A Shadow Under It", "Lifts the frame off the game a little.", if on(cur, "camShadow", false) { "true" } else { "false" }, ""));
                 }
                 // (3: its look)
                 2 => {
                     v.push(f("note", "", "Pick a look for the name tag and the clock, and the colours for it all.", "", "", ""));
-                    v.push(f("chips", "camTheme", "Theme", "For the name tag and the clock.", &or("camTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|gradient=Gradient|minimal=Minimal"));
+                    v.push(f("chips", "camTheme", "Theme", "For the name tag and the clock.", &or("camTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|gradient=Gradient|minimal=Minimal|ribbon=Ribbon|outline=Outline|pixel=Pixel|tape=Label Tape"));
+                    v.push(f("chips", "camTagAnim", "Name Tag Animation", "", &or("camTagAnim", "none"), "none=Still|shine=A Shine Across It|float=Floating|glow=Glowing"));
+                    v.push(f("chips", "camEnter", "How the Parts Come In", "When the overlay loads, or you change it.", &or("camEnter", "none"), "none=Just There|fade=Fade In|slide=Slide Up|pop=Pop"));
                     v.push(f("chips", "suiteColors", "Colours", "Shared with the Suite's widgets.", if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") }, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"));
                 }
                 // (4: what's on it)

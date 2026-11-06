@@ -1708,6 +1708,71 @@ component Chip inherits Rectangle {
     ta := TouchArea { clicked => { root.clicked(); } }
 }
 
+/// An animation, shown small: a little frame doing what the choice does (a light running round it, a pulse, a line
+/// scanning down...), stepped 12 times a second (not every frame: a page of these would keep the app busy)
+component AnimPreview inherits Rectangle {
+    in property <string> kind;
+    in property <color> ink: Theme.accent;
+    property <int> step;
+    Timer { interval: 80ms; running: root.kind != "none" && root.kind != "" && Theme.motion; triggered => { root.step = mod(root.step + 1, 40); } }
+    property <float> ph: root.step / 40;
+    // (up and down between 0 and 1, once a cycle)
+    property <float> wave: 0.5 - 0.5 * cos(root.ph * 360deg);
+    property <bool> fills: root.kind == "shine" || root.kind == "float" || root.kind == "glow" || root.kind == "fade" || root.kind == "slide" || root.kind == "pop";
+    // (once round its edge: across the top, down the right, back along the bottom, up the left)
+    property <float> q: root.ph * 4;
+    property <length> rw: self.width - 4px;
+    property <length> rh: self.height - 4px;
+    property <length> dotx: root.q < 1 ? root.rw * root.q : root.q < 2 ? root.rw : root.q < 3 ? root.rw * (3 - root.q) : 0px;
+    property <length> doty: root.q < 1 ? 0px : root.q < 2 ? root.rh * (root.q - 1) : root.q < 3 ? root.rh : root.rh * (4 - root.q);
+    width: 26px;
+    height: 18px;
+    box := Rectangle {
+        property <float> grow: root.kind == "breathe" ? 1 + 0.1 * root.wave : root.kind == "pop" ? 0.6 + 0.4 * min(1, root.ph * 2.5) : 1;
+        width: (root.kind == "draw" ? max(2px, parent.width * min(1, root.ph * 1.6)) : parent.width) * self.grow;
+        height: parent.height * self.grow;
+        x: root.kind == "draw" ? 0px : (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2 + (root.kind == "float" ? -2px * root.wave : root.kind == "slide" ? 6px * (1 - min(1, root.ph * 2.5)) : 0px);
+        clip: root.kind == "draw" || root.kind == "scan" || root.kind == "shine";
+        border-radius: 4px;
+        border-width: root.fills ? 0px : root.kind == "flash" && root.ph > 0.82 && root.ph < 0.92 ? 3px : 2px;
+        border-color: root.kind == "hue" ? hsv(root.ph * 360, 0.75, 1) : root.kind == "flash" && root.ph > 0.82 && root.ph < 0.92 ? #ffffff : root.ink;
+        background: root.fills ? root.ink.with-alpha(root.kind == "glow" ? 0.55 + 0.45 * root.wave : 1) : transparent;
+        opacity: root.kind == "pulse" ? 1 - 0.6 * root.wave
+            : root.kind == "flicker" ? (mod(root.step, 9) == 0 || mod(root.step, 13) == 0 ? 0.25 : 1)
+            : root.kind == "fade" || root.kind == "slide" || root.kind == "pop" ? min(1, root.ph * 2.5) : 1;
+        if root.kind == "scan": Rectangle { x: 0; width: parent.width; height: 2px; y: parent.height * root.ph; background: root.ink; }
+        if root.kind == "shine": Rectangle { width: 7px; height: parent.height; x: -8px + (parent.width + 16px) * root.ph; background: #ffffffb0; }
+    }
+    // (a light running round it)
+    if root.kind == "run" || root.kind == "light": Rectangle { x: root.dotx; y: root.doty; width: 4px; height: 4px; border-radius: 2px; background: #ffffff; }
+    // (dashes on the move, along its top and bottom)
+    if root.kind == "march" || root.kind == "spin": Rectangle {
+        clip: true;
+        for k in 4: Rectangle { x: mod(k * 9 + root.step, 36) * 1px - 5px; y: 0px; width: 5px; height: 2px; background: Theme.elevated; }
+        for k in 4: Rectangle { x: parent.width - mod(k * 9 + root.step, 36) * 1px; y: parent.height - 2px; width: 5px; height: 2px; background: Theme.elevated; }
+    }
+}
+
+/// A choice of animation: its name, with the animation itself playing small beside it
+component AnimChip inherits Rectangle {
+    in property <string> label;
+    in property <string> kind;
+    in property <bool> on;
+    callback clicked;
+    height: 36px;
+    width: al.preferred-width + 24px;
+    border-radius: 18px;
+    background: on ? Theme.accent : (ata.has-hover ? Theme.line : Theme.elevated);
+    al := HorizontalLayout {
+        x: 12px;
+        spacing: 8px;
+        VerticalLayout { alignment: center; AnimPreview { kind: root.kind; ink: root.on ? Theme.on-accent : Theme.accent; } }
+        Text { text: root.label; color: root.on ? Theme.on-accent : Theme.text; font-size: 13px; font-weight: 600; vertical-alignment: center; }
+    }
+    ata := TouchArea { clicked => { root.clicked(); } }
+}
+
 component TrackRow inherits Rectangle {
     in property <Row> item;
     in property <int> index;
@@ -5383,7 +5448,24 @@ component BotFieldRow inherits VerticalLayout {
         spacing: 6px;
         Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
         if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 11px; wrap: word-wrap; }
-        HorizontalLayout { spacing: 6px; alignment: start; for c[i] in root.f.opts: Chip { label: c; on: root.f.value == root.f.opt-ids[i]; clicked => { root.set(root.f.key, root.f.opt-ids[i]); } } }
+        // (a choice of animation (its key ends "Anim" or "anim", or it's how parts come in): each with its own playing
+        // small on its button; a long row of choices: over as many rows as it takes)
+        if root.f.key == "hudF_anim" || root.f.key == "camAnim" || root.f.key == "camTagAnim" || root.f.key == "camEnter": VerticalLayout {
+            spacing: 6px;
+            for r in ceil(root.f.opts.length / 3): HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                for k in min(3, root.f.opts.length - r * 3): AnimChip { label: root.f.opts[r * 3 + k]; kind: root.f.opt-ids[r * 3 + k]; on: root.f.value == root.f.opt-ids[r * 3 + k]; clicked => { root.set(root.f.key, root.f.opt-ids[r * 3 + k]); } }
+            }
+        }
+        if !(root.f.key == "hudF_anim" || root.f.key == "camAnim" || root.f.key == "camTagAnim" || root.f.key == "camEnter"): VerticalLayout {
+            spacing: 6px;
+            for r in ceil(root.f.opts.length / 8): HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                for k in min(8, root.f.opts.length - r * 8): Chip { label: root.f.opts[r * 8 + k]; on: root.f.value == root.f.opt-ids[r * 8 + k]; clicked => { root.set(root.f.key, root.f.opt-ids[r * 8 + k]); } }
+            }
+        }
     }
     // (choices too many for a row: a dropdown of them)
     if root.f.kind == "choose": VerticalLayout {
