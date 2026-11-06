@@ -540,7 +540,44 @@ static STREAMS: Mutex<Vec<(String, String, u64)>> = Mutex::new(Vec::new()); // (
 pub fn forget_streams() {
     if let Ok(mut g) = STREAMS.lock() {
         g.clear();
+        streams_keep(&g);
     }
+}
+
+// Kept through a restart (<data>/state/youtube-streams.json): an address is good for about six hours, so a
+// song looked up before the app was closed starts without asking YouTube again. Addresses only, never sound.
+static STREAMS_READ: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(not(test))]
+fn streams_file() -> Option<std::path::PathBuf> {
+    crate::data_dir().ok().map(|d| d.join("state").join("youtube-streams.json"))
+}
+#[cfg(test)]
+fn streams_file() -> Option<std::path::PathBuf> { None }
+
+/// What a kept file holds that's still good at `now`
+fn streams_kept(text: &str, now: u64) -> Vec<(String, String, u64)> {
+    serde_json::from_str::<Vec<(String, String, u64)>>(text).unwrap_or_default().into_iter()
+        .filter(|(id, url, exp)| valid_id(id) && url.starts_with("https://") && *exp > now + 120)
+        .collect()
+}
+
+/// The kept ones read, the first time anything asks
+fn streams_read() {
+    if STREAMS_READ.swap(true, std::sync::atomic::Ordering::SeqCst) { return; }
+    let Some(text) = streams_file().and_then(|p| std::fs::read_to_string(p).ok()) else { return };
+    let kept = streams_kept(&text, crate::now_secs());
+    if let Ok(mut g) = STREAMS.lock() {
+        for k in kept { if !g.iter().any(|x| x.0 == k.0) { g.push(k); } }
+    }
+}
+
+/// (a self-test's lookups aren't kept)
+fn streams_keep(g: &[(String, String, u64)]) {
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { return; }
+    let Some(p) = streams_file() else { return };
+    if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); }
+    let _ = std::fs::write(p, serde_json::to_string(g).unwrap_or_default());
 }
 
 #[cfg(feature = "desktop")]
@@ -553,6 +590,7 @@ fn expiry(url: &str) -> u64 {
 
 /// Whether a video's address is in hand already, good for a while yet (it would start without asking YouTube)
 pub fn stream_known(video_id: &str) -> bool {
+    streams_read();
     let now = crate::now_secs();
     STREAMS.lock().map(|g| g.iter().any(|(id, _, exp)| id == video_id && *exp > now + 600)).unwrap_or(false)
 }
@@ -585,11 +623,13 @@ const STREAM_FAILED_SECS: u64 = 60;
 
 #[cfg(feature = "desktop")]
 async fn stream_url_now(video_id: &str, fresh: bool) -> Result<String, String> {
+    streams_read();
     let now = crate::now_secs();
     if let Ok(mut g) = STREAMS.lock() {
         g.retain(|(_, _, exp)| *exp > now + 120);
         if fresh {
             g.retain(|(id, _, _)| id != video_id);
+            streams_keep(&g);
         } else if let Some((_, url, _)) = g.iter().find(|(id, _, _)| id == video_id) {
             return Ok(url.clone());
         }
@@ -614,6 +654,7 @@ async fn stream_url_now(video_id: &str, fresh: bool) -> Result<String, String> {
         if g.len() > 200 {
             g.remove(0);
         }
+        streams_keep(&g);
     }
     Ok(url)
 }
@@ -642,6 +683,23 @@ pub async fn lyrics(video_id: &str) -> Result<Option<(String, String)>, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kept_addresses_come_back_until_near_their_end() {
+        let now = 1_000_000;
+        let text = json!([["dQw4w9WgXcQ", "https://rr1.googlevideo.com/x", now + 3600], ["oHg5SJYRHA0", "https://rr1.googlevideo.com/y", now + 60], ["bad id!", "https://x", now + 3600], ["9bZkp7q19f0", "ftp://x", now + 3600]]).to_string();
+        let kept = streams_kept(&text, now);
+        assert_eq!(kept.iter().map(|k| k.0.as_str()).collect::<Vec<_>>(), vec!["dQw4w9WgXcQ"]);
+        assert!(streams_kept("not json", now).is_empty());
+    }
+
+    #[test]
+    fn an_address_in_hand_is_known_until_near_its_end() {
+        let now = crate::now_secs();
+        STREAMS.lock().unwrap().extend([("knownTestAA".to_string(), "u".to_string(), now + 3600), ("knownTestBB".to_string(), "u".to_string(), now + 60)]);
+        assert!(stream_known("knownTestAA") && !stream_known("knownTestBB") && !stream_known("knownTestCC"));
+        STREAMS.lock().unwrap().retain(|x| !x.0.starts_with("knownTest"));
+    }
 
     #[test]
     fn reads_lengths() {

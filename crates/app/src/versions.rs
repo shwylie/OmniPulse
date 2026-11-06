@@ -305,6 +305,32 @@ pub async fn find(t: &Track) -> Option<Version> {
     }
 }
 
+/// An Audius upload as a candidate: "Artist - Title" titles taken apart, so the artist it names counts with
+/// whoever uploaded it (a remix is uploaded by its remixer)
+pub fn audius_candidate(a: &omnipulse_core::audius::AudiusTrack) -> YtTrack {
+    let (artists, title) = match a.title.split_once(" - ") {
+        Some((by, title)) if !by.trim().is_empty() && !title.trim().is_empty() => (format!("{}, {}", by.trim(), a.artist), title.trim().to_string()),
+        _ => (a.artist.clone(), a.title.clone()),
+    };
+    YtTrack { id: a.id.clone(), title, artists, duration_ms: a.duration_ms, ..Default::default() }
+}
+
+/// Whether an Audius upload is this song: as close as a YouTube Music version must be, by the artist, and
+/// the same length to within a few seconds (so never another cut, a flip or a mix with it in)
+pub fn audius_fits(t: &Track, c: &YtTrack) -> bool {
+    let same_length = t.ms == 0 || c.duration_ms == 0 || t.ms.abs_diff(c.duration_ms) <= 4_000;
+    same_length && score(t, c) >= 0.5 && artist_hit(t, c)
+}
+
+/// The same song on Audius, if it's there: (where it plays from, what it's called there)
+pub async fn audius(t: &Track) -> Option<(String, String)> {
+    let found = omnipulse_core::audius::search(first_query(t).trim()).await.ok()?;
+    let mut fits: Vec<(f32, YtTrack)> = found.iter().map(audius_candidate).filter(|c| audius_fits(t, c)).map(|c| (score(t, &c), c)).collect();
+    fits.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    let c = fits.into_iter().next()?.1;
+    Some((omnipulse_core::audius::stream_url(&c.id), format!("{} by {}", c.title, c.artists)))
+}
+
 /// What it's looked for by first: its artist and title (a remix album's, with who remixed it)
 fn first_query(t: &Track) -> String {
     let (ga, gt) = guess_names(t);
@@ -333,6 +359,22 @@ mod tests {
     }
     fn yt(title: &str, artists: &str, ms: u64) -> YtTrack {
         YtTrack { id: "v".into(), title: title.into(), artists: artists.into(), duration_ms: ms, ..Default::default() }
+    }
+
+    #[test]
+    fn an_audius_upload_is_the_song_only_when_its_the_same_one() {
+        use omnipulse_core::audius::AudiusTrack;
+        let au = |title: &str, artist: &str, ms: u64| audius_candidate(&AudiusTrack { id: "a".into(), title: title.into(), artist: artist.into(), duration_ms: ms });
+        let t = Track { src: Src::Spotify("s".into()), key: "sp:s".into(), title: "Holding On - Rome in Silver Remix".into(), artist: "Dabin, Rome in Silver".into(), ms: 181_500, ..Default::default() };
+        // (as Audius names a remix: "Artist - Title (X Remix)", uploaded by X)
+        assert!(audius_fits(&t, &au("Dabin - Holding On (Rome in Silver Remix)", "Rome in Silver", 181_000)));
+        // (another length: another cut; someone else's flip; the original)
+        assert!(!audius_fits(&t, &au("Dabin - Holding On (Rome in Silver Remix)", "Rome in Silver", 240_000)));
+        assert!(!audius_fits(&t, &au("Dabin - Holding On (TWERL flip)", "TWERL", 181_000)));
+        let orig = Track { src: Src::Spotify("o".into()), key: "sp:o".into(), title: "Never Stop".into(), artist: "Crankdat".into(), ms: 200_000, ..Default::default() };
+        assert!(audius_fits(&orig, &au("Never Stop", "Crankdat", 201_000)));
+        assert!(!audius_fits(&orig, &au("Never Stop", "Someone Else", 200_000)));
+        assert!(!audius_fits(&orig, &au("AXIS: Crankdat [Exclusive Mix]", "Dancing Astronaut", 3_303_000)));
     }
 
     #[test]

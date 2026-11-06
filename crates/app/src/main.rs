@@ -3479,6 +3479,18 @@ fn start(shared: &Shared) {
             };
             if preview { full_elsewhere(&t, h.clone()).await } else { (r, None) }
         };
+        // (YouTube couldn't play it, or has no version of it: the same song from Audius, if it's there)
+        let mut from_audius: Option<String> = None;
+        let (src, version) = match src {
+            Err(e) if t.go_plus || mb => match versions::audius(&t).await {
+                Some((url, named)) => match tokio::task::spawn_blocking(move || omnipulse_audio::open_url(&url, "mp3").map(|d| Box::new(d) as Box<dyn omnipulse_audio::Source>)).await {
+                    Ok(Ok(s)) => { from_audius = Some(named); (Ok(Some(s)), None) }
+                    _ => (Err(e), version),
+                },
+                None => (Err(e), version),
+            },
+            src => (src, version),
+        };
         let src = match (src, smart_from) {
             (Ok(Some(mut s)), Some(ms)) => tokio::task::spawn_blocking(move || { let _ = s.seek(ms); s }).await.map(Some).map_err(|e| e.to_string()),
             (src, _) => src,
@@ -3551,6 +3563,10 @@ fn start(shared: &Shared) {
                         engine.play();
                         ui.set_playing(true);
                         ui.set_status("".into());
+                        if let Some(named) = &from_audius {
+                            omnipulse_core::diag::note(&format!("\"{}\" plays from Audius ({named}): YouTube couldn't play it", t.title));
+                            ui.set_status(format!("YouTube couldn't play \"{}\", so it's playing from Audius.", t.title).into());
+                        }
                         if casting().is_some() { omnipulse_core::cast::track(cast_meta(&shared.borrow())); }
                         // which version a Go+ track is playing; the closest one's note stays while it plays
                         if let Some(v) = &version {

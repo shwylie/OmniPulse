@@ -3,6 +3,8 @@
 // Nothing here knows about a window; the apps pass in callbacks where the page used to be called.
 
 pub mod apple;
+#[cfg(feature = "desktop")]
+pub mod audius;
 pub mod diag;
 pub mod docks;
 pub mod modsuite;
