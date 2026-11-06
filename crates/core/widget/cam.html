@@ -123,6 +123,9 @@
   const ID = decodeURIComponent((location.pathname.match(/^\/cam\/([^/?#]+)/) || [])[1] || "");
   const PREVIEW = /[?&]preview=1/.test(location.search);
   if (PREVIEW) document.body.classList.add("preview");
+  // (?live=1: the app's own preview: the overlay as its page has it now (changes not saved yet too), on a canvas of
+  // 1920 x 1080 zoomed to the camera and what's round it)
+  const LIVEPREV = /[?&]live=1/.test(location.search);
   const SPOTS = { br: [72, 62, 26, 34], bl: [2, 62, 26, 34], tr: [72, 4, 26, 34], tl: [2, 4, 26, 34] };
   // (each live part: its widget's page, and the shape of its slot as wide : tall)
   const LIVE = { now: ["/", 3.6], alerts: ["/alerts", 3.6], follow: ["/latest-follow", 4.6], sub: ["/latest-sub", 4.6], goals: ["/goals", 1.8], hype: ["/hype", 4.6], chat: ["/chat", 0.7], socials: ["/socials", 4.2] };
@@ -233,7 +236,7 @@
     const keep = {};
     stage.querySelectorAll(".part.live").forEach((e) => (keep[e.dataset.src] = e));
     stage.innerHTML = "";
-    const W = innerWidth, H = innerHeight;
+    const W = LIVEPREV ? 1920 : innerWidth, H = LIVEPREV ? 1080 : innerHeight;
     const cam = document.createElement("div"); cam.id = "cam";
     const fr = document.createElement("div"); fr.id = "frame"; fr.className = "s-" + (c.shape || "rounded") + " b-" + (c.border || "thin") + " k-" + (c.thick || "normal") + " a-" + (c.anim || "none") + " d-" + (c.decor || "none") + (c.shadow ? " sh" : "");
     [cam, fr].forEach((e) => Object.assign(e.style, { left: (b.x / 100) * W + "px", top: (b.y / 100) * H + "px", width: (b.w / 100) * W + "px", height: (b.h / 100) * H + "px" }));
@@ -265,6 +268,15 @@
       }
       if (el) stage.append(el);
     }
+    // (the app's preview: zoomed to the camera and what's round it, with a little room, in the middle)
+    if (LIVEPREV) {
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (const e of stage.children) { if (e.id === "cam") continue; const l = parseFloat(e.style.left) || 0, t = parseFloat(e.style.top) || 0, w = parseFloat(e.style.width) || 0, h = parseFloat(e.style.height) || 0; x0 = Math.min(x0, l); y0 = Math.min(y0, t); x1 = Math.max(x1, l + w); y1 = Math.max(y1, t + h); }
+      const m = 46, bw = x1 - x0 + m * 2, bh = y1 - y0 + m * 2, k = Math.min(innerWidth / bw, innerHeight / bh);
+      Object.assign(stage.style, { inset: "auto", left: "0", top: "0", width: W + "px", height: H + "px", transformOrigin: "0 0",
+        transform: "translate(" + ((innerWidth - bw * k) / 2 - (x0 - m) * k) + "px, " + ((innerHeight - bh * k) / 2 - (y0 - m) * k) + "px) scale(" + k + ")" });
+      document.documentElement.style.fontSize = "16px";
+    }
     tick(c);
   }
   function tick() {
@@ -279,6 +291,7 @@
   async function poll() {
     try {
       const s = await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
+      if (LIVEPREV) { try { const pv = await (await fetch("/creators-preview.json", { cache: "no-store" })).json(); if (Array.isArray(pv.list)) { s.suite = s.suite || {}; s.suite.creators = pv.list.map((c) => Object.assign({}, c, { colors: c.colors || { c1: s.accent, c2: s.accent2 || s.accent } })); } } catch (e) {} }
       if (s.accent) { document.body.style.setProperty("--c1", s.accent); document.body.style.setProperty("--c2", s.accent2 || s.accent); }
       if (!PREVIEW && offIn(s, "cam")) return;
       const all = (s.suite && s.suite.creators) || [];

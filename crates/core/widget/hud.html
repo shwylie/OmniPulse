@@ -66,6 +66,8 @@
   "use strict";
   const $ = (id) => document.getElementById(id);
   const PREVIEW = /[?&]preview=1/.test(location.search);
+  // (?live=1: the app's own preview: the frames as their page has them now, changes not saved yet too)
+  const LIVEPREV = /[?&]live=1/.test(location.search);
   let sig = "";
   const NS = "http://www.w3.org/2000/svg";
   let gradN = 0;
@@ -166,6 +168,7 @@
   async function poll() {
     try {
       const s = await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
+      if (LIVEPREV) { try { const pv = await (await fetch("/creators-preview.json", { cache: "no-store" })).json(); if (Array.isArray(pv.list)) { s.suite = s.suite || {}; s.suite.creators = pv.list.map((c) => Object.assign({}, c, { colors: c.colors || { c1: s.accent, c2: s.accent2 || s.accent } })); } } catch (e) {} }
       if (s.accent) { document.body.style.setProperty("--c1", s.accent); document.body.style.setProperty("--c2", s.accent2 || s.accent); }
       if (!PREVIEW && offIn(s, "hud")) return;
       document.body.classList.toggle("still", !!(s.suite && s.suite.anim === "none"));

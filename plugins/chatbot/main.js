@@ -3479,6 +3479,15 @@ OmniPulse.register({
   suiteShoutout() { return shoutout(); },
   suiteTimer(what) { return timerDo(String(what || "").split(":")[0], num(String(what || "").split(":")[1])) || "Done."; },
   suiteRefresh() { suitePush(); return "ok"; },
+  // (the Webcam Overlay and the HUD frames as they'd be with these settings over the saved ones: for their live
+  // previews in the app, while a page has changes not saved yet; nothing's kept)
+  creatorsWith(vals) {
+    const s = OmniPulse.settings, was = {}, add = vals && typeof vals === "object" ? vals : {};
+    for (const k of Object.keys(add)) { was[k] = Object.prototype.hasOwnProperty.call(s, k) ? { v: s[k] } : null; s[k] = add[k]; }
+    let out;
+    try { out = { list: [camOverlay(), hudSet()] }; } finally { for (const k of Object.keys(was)) { if (was[k]) s[k] = was[k].v; else delete s[k]; } }
+    return out;
+  },
   // the Actions page's pickers: your rewards on Twitch and Kick, and OBS's scenes and sources (each one only
   // if it's reachable now)
   async pickLists() {

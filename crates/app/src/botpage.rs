@@ -678,7 +678,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 v.push(f("text", "hudF_label", "Label", "Words above it, like MAP. Leave it empty for none.", &g("label", ""), "MAP"));
                 v.push(f("chips", "hudF_labelStyle", "Label Style", "", &g("labelStyle", "plain"), "plain=Plain|glow=Glowing|tag=Tag|pill=Pill|cut=Cut Corner"));
                 v.push(f("chips", "hudF_pad", "Room round it", "", &fr["pad"].as_f64().unwrap_or(6.0).to_string(), "0=None|6=A Little|14=More|24=Lots"));
-                v.push(f("link", "", "See It Moving", "Opens the real frames over your screenshot in a window, animations and all. It shows what's saved, so click Save first.", "", "realprev:hud"));
+                v.push(f("hudlive", "", "", "", "", ""));
                 v.push(f("head", "", &format!("Frame {}: Where It Is", sel + 1), "", "", ""));
                 v.push(f("buttons", "", "", "Move it a pixel at a time. On the screenshot, the arrow keys do the same (with Shift, 10 at a time).", "", "hudn:left=← Left|hudn:right=→ Right|hudn:up=↑ Up|hudn:down=↓ Down"));
                 v.push(f("buttons", "", "", "Make it bigger or smaller, from its middle.", "", "hudn:wider=Wider|hudn:narrower=Narrower|hudn:taller=Taller|hudn:shorter=Shorter"));
@@ -792,7 +792,6 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                     v.push(f("chips", "camThick", "Line", "How heavy the border is.", &or("camThick", "normal"), "thin=Thin|normal=Normal|thick=Thick|heavy=Heavy"));
                     v.push(f("chips", "camAnim", "Animation", "Something moving on the frame. Still keeps it calm.", &or("camAnim", "none"), "none=Still|light=A Light Running Round|pulse=Slow Pulse|breathe=Breathing|hue=Colours Shifting|flash=A Flash Now and Then"));
                     v.push(f("chips", "camDecor", "Extras", "Something more round the frame.", &or("camDecor", "none"), "none=None|ticks=Corner Ticks|bars=Top and Bottom Bars|sparkle=Sparkles"));
-                    v.push(f("link", "", "See It Moving", "Opens the real overlay in a window, with its border, animation and extras as they'll be on stream. It shows what's saved, so click Save first.", "", "realprev:cam"));
                     v.push(f("toggle", "camShadow", "A Shadow Under It", "Lifts the frame off the game a little.", if on(cur, "camShadow", false) { "true" } else { "false" }, ""));
                 }
                 // (3: its look)
@@ -1131,6 +1130,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             // (one address: what it shows is kept here, and OBS's picks it up when it's saved)
             let path = "/vis".to_string();
             let mut v = vec![
+                f("widgetlive", "", "", "", "vis", ""),
                 f("note", "", "The app's visualisers on stream, drawn by OBS. The GPU scenes are still being built, so they may change, and some may not look right yet.", "", "", ""),
                 addr(&path, "Add it as a Browser source the size of your canvas, like 1920 × 1080. What you pick below shows in OBS once you click Save. The app's own styles lay over your stream as they are; a GPU scene fills its source."),
                 f("chips", "visScene", "Style", "The app's own styles, drawn see-through so they lay straight over your stream.", &scene, "bars=Bars|mirror=Mirror|peaks=Peaks|blocks=Blocks|dots=Dots|wave=Wave|solid=Solid Wave|centre=Centre|halo=Halo"),

@@ -383,6 +383,7 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                     }
                     // (the Mod Suite: its page, its state, its chat, and what it asks)
                     "/mod" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::modsuite::MOD_HTML.as_bytes()),
+                    "/creators-preview.json" => reply_own(&mut stream, "200 OK", "application/json", CREATORS_PREVIEW.lock().unwrap().clone().unwrap_or(json!({})).to_string().as_bytes()),
                     "/mod/state.json" => reply_own(&mut stream, "200 OK", "application/json", crate::modsuite::state_json().to_string().as_bytes()),
                     "/mod/chat.json" => {
                         let after = query_map(query).get("after").and_then(|v| v.as_str().and_then(|a| a.parse().ok())).unwrap_or(0);
@@ -484,6 +485,10 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
 /// The settings page's preview (the app's pop-out): what's on the page so far, unsaved, over the widget's
 /// state, for a page asking with ?preview=1. None: no page open, the state as it is
 static PREVIEW: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
+/// The Suite's creators (the Webcam Overlay, the HUD frames) as they are on their settings pages, changes not saved
+/// yet among them: for their live previews in the app ({ list: [...] }; /creators-preview.json)
+static CREATORS_PREVIEW: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
+pub fn creators_preview_set(v: Option<Value>) { *CREATORS_PREVIEW.lock().unwrap() = v; }
 
 pub fn preview_set(v: Option<Value>) {
     if let Ok(mut p) = PREVIEW.lock() { *p = v; }

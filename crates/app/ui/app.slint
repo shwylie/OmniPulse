@@ -144,6 +144,27 @@ export global WEdit {
     callback done(bool);
 }
 
+/// A creator's live preview (the Webcam Overlay's, the HUD frames'): the real page, in a web view the app places on
+/// this spot; where it is, and which ("cam", "hud": none, no spot showing)
+export global BLive {
+    in-out property <length> x;
+    in-out property <length> y;
+    in-out property <length> w;
+    in-out property <length> h;
+    in-out property <string> which;
+}
+
+component BotLiveSpot inherits Rectangle {
+    in property <string> which;
+    property <length> lx: self.absolute-position.x;
+    property <length> ly: self.absolute-position.y;
+    changed lx => { BLive.x = self.lx; }
+    changed ly => { BLive.y = self.ly; }
+    changed width => { BLive.w = self.width; }
+    changed height => { BLive.h = self.height; }
+    init => { BLive.x = self.lx; BLive.y = self.ly; BLive.w = self.width; BLive.h = self.height; BLive.which = self.which; }
+}
+
 /// The Mod Suite's page (its web view, as the app places it on this spot): where it is
 export global ModView {
     in-out property <length> x;
@@ -3990,6 +4011,8 @@ component CamPreview inherits Rectangle {
     clip: true;
     background: #2a2e3c;
     Checker { x: 0; y: 0; width: parent.width; height: parent.height; }
+    // (the real overlay over this drawing, once it's loaded: its borders, animations and extras as they'll be)
+    BotLiveSpot { which: "cam"; x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px; }
     for r in CamLook.rects: Rectangle {
         x: parent.width * r.x;
         y: parent.height * r.y;
@@ -4502,6 +4525,21 @@ component ChatRow inherits Rectangle {
 }
 
 /// The Multichat Overlay as it'll look in OBS: over a stream, made-up chat coming in every couple of seconds
+/// A dock's preview on its settings page: the real dock (the Chat Dock, the Activity Feed), as it'll be in OBS
+component DockPreview inherits Rectangle {
+    in property <length> view-top: -100000px;
+    in property <length> view-bottom: 100000px;
+    in property <string> name;
+    height: 440px;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: Theme.line;
+    clip: true;
+    background: Theme.bg;
+    Text { text: root.name + ": the real dock shows here once the Stream Suite is running."; color: Theme.muted; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; width: parent.width - 40px; x: 20px; }
+    LiveSpot { x: 1px; y: 1px; width: root.width - 2px; height: root.height - 2px; view-top: root.view-top; view-bottom: root.view-bottom; }
+}
+
 component ChatPreview inherits Rectangle {
     // (the part of the page in sight: the real page is shown only while all of it is)
     in property <length> view-top: -100000px;
@@ -5512,6 +5550,44 @@ component BotFieldRow inherits VerticalLayout {
         }
     }
     if root.f.kind == "hudedit": HudEditor { act(a) => { root.act(a); } }
+    // (a widget's real page as its preview: the Visualiser's, as it's saved, moving to what's playing)
+    if root.f.kind == "widgetlive": VerticalLayout {
+        spacing: 6px;
+        Text { text: "A Preview"; color: Theme.text; font-weight: 700; font-size: 13px; }
+        Text { text: "The real widget, as it's saved: click Save to see a change here. It moves to what's playing."; color: Theme.muted; font-size: 11px; wrap: word-wrap; }
+        Rectangle {
+            height: wlv.height;
+            wlv := Rectangle {
+                width: min(parent.width, 640px);
+                x: (parent.width - self.width) / 2;
+                height: self.width * 9 / 16;
+                border-radius: 10px;
+                clip: true;
+                background: #101018;
+                Checker { x: 0; y: 0; width: parent.width; height: parent.height; }
+                BotLiveSpot { which: root.f.value; width: parent.width; height: parent.height; }
+            }
+        }
+    }
+    // (the frames as they'll really look, moving, over the screenshot: the real page, on this spot)
+    if root.f.kind == "hudlive": VerticalLayout {
+        spacing: 6px;
+        Text { text: "As They'll Look on Stream"; color: Theme.text; font-weight: 700; font-size: 13px; }
+        Text { text: "The real frames over your screenshot, with their animations. It follows your changes as you make them."; color: Theme.muted; font-size: 11px; wrap: word-wrap; }
+        Rectangle {
+            height: hlv.height;
+            hlv := Rectangle {
+                width: min(parent.width, 720px);
+                x: (parent.width - self.width) / 2;
+                height: self.width * HudLook.ratio;
+                border-radius: 10px;
+                clip: true;
+                background: #000000;
+                Image { width: parent.width; height: parent.height; source: HudLook.shot; image-fit: fill; }
+                BotLiveSpot { which: "hud"; width: parent.width; height: parent.height; }
+            }
+        }
+    }
     if root.f.kind == "suiteprev": SuitePreview { which: root.f.value; theme: root.f.extra; font: root.f.note; rain-size: root.f.opts.length > 0 && root.f.value == "emoterain" ? root.f.opts[0] : ""; rain-spin: root.f.value == "emoterain" && root.f.opts.length > 1 && root.f.opts[1] == "spin"; goal-names: root.f.opts; goal-targets: root.f.opt-ids; rings: root.f.label == "rings"; look: root.f.label; own-c1: root.f.c1; own-c2: root.f.c2; gif: root.f.n == 1; spot: root.f.key; }
     if root.f.kind == "chips2": HorizontalLayout {
         spacing: 12px;
@@ -6139,6 +6215,8 @@ component BotPage inherits Rectangle {
                             wrap-note: true;
                             tint: BotLook.tile(di + ri * 3 + 3); name: d.n; d: d.i; on: root.widget-on; has-toggle: false; has-gear: d.k != ""; gear-tip: d.n + ": its settings";
                             note: root.widget-on ? d.t : "Turn on the Stream Suite first. Its addresses work while it's running.";
+                            open-tip: "See it: opens the real dock in a window";
+                            open => { root.act("dockprev:" + d.p); }
                             copy => { root.act("copy:http://127.0.0.1:" + root.port + d.p); }
                             gear => { root.act("dockset:" + d.k); }
                         }
@@ -9572,6 +9650,7 @@ export component AppWindow inherits Window {
                             // (the preview, on a smaller window: first, above what it shows)
                             if root.width < 1440px && root.pf-preview == "lyrics": LyricsPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; look: root.pf-lyrics; }
                             if root.width < 1440px && root.pf-preview == "socials": SocialPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; items: root.pf-social-items; look: root.pf-social; }
+                            if root.width < 1440px && (root.pf-preview == "dockchat" || root.pf-preview == "dockfeed"): DockPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; name: root.pf-preview == "dockchat" ? "Chat Dock" : "Activity Feed"; }
                             if root.width < 1440px && root.pf-preview == "multichat": ChatPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; look: root.pf-chat; samples: root.pf-chat-samples; }
                             if root.width < 1440px && root.pf-preview == "alerts": AlertPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; look: root.pf-alert; }
                             if root.width < 1440px && root.pf-preview == "widget": WidgetPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; look: root.pf-widget; art: root.now-art; title: root.now-title == "Nothing playing" || root.now-title == "" ? "A Song You Love" : root.now-title; artist: root.now-artist == "" ? "Your Favourite Artist" : root.now-artist; }
@@ -9767,6 +9846,7 @@ export component AppWindow inherits Window {
                             if root.pf-preview == "lyrics": LyricsPreview { look: root.pf-lyrics; }
                             if root.pf-preview == "socials": SocialPreview { items: root.pf-social-items; look: root.pf-social; }
                             if root.pf-preview == "multichat": ChatPreview { look: root.pf-chat; samples: root.pf-chat-samples; }
+                            if root.pf-preview == "dockchat" || root.pf-preview == "dockfeed": DockPreview { name: root.pf-preview == "dockchat" ? "Chat Dock" : "Activity Feed"; }
                             if root.pf-preview == "alerts": AlertPreview { look: root.pf-alert; }
                             if root.pf-preview == "widget": WidgetPreview { look: root.pf-widget; art: root.now-art; title: root.now-title == "Nothing playing" || root.now-title == "" ? "A Song You Love" : root.now-title; artist: root.now-artist == "" ? "Your Favourite Artist" : root.now-artist; }
                           }

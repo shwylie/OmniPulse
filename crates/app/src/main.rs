@@ -8028,6 +8028,13 @@ fn bot_act(shared: &Shared, act: &str) {
         return bot_paint(shared);
     }
     if let Some(text) = act.strip_prefix("copy:") { if share::copy(text).is_ok() { say("Copied."); } return; }
+    // (a dock, as it'll be in OBS: the real one, in a window of its own, the size of a dock)
+    if let Some(path) = act.strip_prefix("dockprev:") {
+        let port = shared.borrow().web.prefs["widgetPort"].as_u64().unwrap_or(7878);
+        let title = match path { "/dock/chat" => "Chat Dock", "/dock/activity" => "Activity Feed", "/dock/mod" => "Moderation Dock", "/dock/info" => "Stream Info", _ => "Viewer List" };
+        if path.starts_with("/dock/") { if let Err(e) = web_preview(&format!("dock{}", path.replace('/', "-")), &format!("{title} Preview"), &format!("http://127.0.0.1:{port}{path}"), 440, 720) { say(&e); } }
+        return;
+    }
     // (the Webcam Overlay or the HUD frames as they really are, moving: the real page, in a window of its own)
     if let Some(which) = act.strip_prefix("realprev:") {
         let port = shared.borrow().web.prefs["widgetPort"].as_u64().unwrap_or(7878);
@@ -8545,7 +8552,7 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
     if let Some(ui) = shared.borrow().ui.upgrade() {
         ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows))));
         // (the Lyrics Widget's page: a preview of its look, as it's set)
-        ui.set_pf_preview(if name == "lyricsw" { "lyrics".into() } else if name == "socials" { "socials".into() } else if name == "multichat" { "multichat".into() } else if name == "alerts" { "alerts".into() } else if name == "widget" { "widget".into() } else { "".into() });
+        ui.set_pf_preview(if name == "lyricsw" { "lyrics".into() } else if name == "socials" { "socials".into() } else if name == "multichat" { "multichat".into() } else if name == "alerts" { "alerts".into() } else if name == "widget" { "widget".into() } else if name == "dockchat" || name == "dockfeed" { name.into() } else { "".into() });
         if name == "lyricsw" { ui.set_pf_lyrics(lyrics_look(vals)); }
         if name == "socials" { social_preview(&ui, &shared.borrow().web.prefs, vals); }
         if name == "multichat" { chat_preview(&ui, vals); }
@@ -9227,6 +9234,9 @@ fn live_path(ui: &AppWindow) -> Option<String> {
         "widget" => format!("/?{q}"),
         "alerts" => format!("{}?{q}", if ui.get_pf_alert().in_widget { "/" } else { "/alerts" }),
         "lyrics" => format!("/lyrics?{q}"),
+        // (a dock's settings page: the real dock)
+        "dockchat" => "/dock/chat".to_string(),
+        "dockfeed" => "/dock/activity".to_string(),
         // (with no platforms added, the drawing's sample ones: the real one would be empty)
         "socials" if !ui.get_pf_social().sample => format!("/socials?{q}"),
         // (its look is in its address, as an OBS source's is: the page's settings put there)
@@ -9387,6 +9397,82 @@ fn mod_view(shared: &Shared) {
     MODV.with(|m| {
         let mut m = m.borrow_mut();
         let Some((view, last)) = m.as_mut() else { return };
+        if *last == at { return; }
+        if show { let _ = view.set_bounds(rect); }
+        if show != last.4 { let _ = view.set_visible(show); if !show { repaint_all(&ui); } }
+        *last = at;
+    });
+}
+
+thread_local! {
+    /// a creator's live preview: which ("cam", "hud"), its web view, where it was last put (and whether showing),
+    /// and the settings it was last given
+    static BLIVE: RefCell<Option<(String, wry::WebView, (f32, f32, f32, f32, bool), String)>> = const { RefCell::new(None) };
+    static BLIVE_BEAT: std::cell::Cell<(i32, Option<std::time::Instant>)> = const { std::cell::Cell::new((0, None)) };
+    static BLIVE_TICK: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// The Webcam Overlay's and the HUD frames' live previews (from the window's 40 ms timer): the real page
+/// (/cam/main or /hud, ?live=1) in a see-through web view on its spot in their settings page, given the page's
+/// settings as they are (changes not saved yet too) a few times a second. It steps aside while a menu or a dialog
+/// is over the page, or its spot has scrolled out of the page's room, and it's let go when you leave
+fn bot_live(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let sheet = BOT_SHEET.with(|b| b.borrow().clone());
+    let g = ui.global::<BLive>();
+    let want = if ui.get_pf_open() && matches!(sheet.as_str(), "cam" | "hud" | "vis") && g.get_which() == sheet.as_str() { Some(sheet) } else { None };
+    let Some(which) = want else {
+        if BLIVE.with(|b| b.borrow_mut().take().is_some()) { omnipulse_core::widget::creators_preview_set(None); repaint_all(&ui); }
+        // (the spot's gone with its page: forgotten, so the next page's is its own)
+        if !ui.get_pf_open() { g.set_which("".into()); }
+        return;
+    };
+    if BLIVE.with(|b| b.borrow().as_ref().is_some_and(|x| x.0 != which)) { BLIVE.with(|b| b.borrow_mut().take()); }
+    let beat = ui.global::<WLive>().get_beat();
+    let menu = BLIVE_BEAT.with(|b| {
+        let (last, at) = b.get();
+        if beat != last { b.set((beat, Some(std::time::Instant::now()))); return true; }
+        at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(400))
+    });
+    let win_h = ui.window().size().height as f32 / ui.window().scale_factor();
+    let (x, y, w, h) = (g.get_x(), g.get_y(), g.get_w(), g.get_h());
+    // (all of it within the page's room: under the page's title, above the player)
+    let seen = y >= 150.0 && y + h <= win_h - 96.0;
+    let show = seen && !menu && !ui.get_covered() && !ui.get_flow_open() && w > 8.0 && h > 8.0 && !ui.window().is_minimized();
+    let at = (x, y, w, h, show);
+    let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(x as f64, y as f64).into(), size: wry::dpi::LogicalSize::new(w as f64, h as f64).into() };
+    // (the page's settings as they are, given to the Suite for what the overlay would be: when they change)
+    let tick = BLIVE_TICK.with(|t| { t.set(t.get().wrapping_add(1)); t.get() });
+    if tick % 5 == 0 {
+        let cur = bot_current(shared);
+        let vals: serde_json::Map<String, serde_json::Value> = cur.into_iter().filter(|(k, _)| k.starts_with("cam") || k.starts_with("hud") || k.starts_with("suite") || k == "themeFonts" || k == "login").collect();
+        let sig = serde_json::Value::Object(vals.clone()).to_string();
+        let changed = BLIVE.with(|b| b.borrow().as_ref().is_none_or(|x| x.3 != sig));
+        if changed {
+            BLIVE.with(|b| if let Some(x) = b.borrow_mut().as_mut() { x.3 = sig.clone(); });
+            if let Some(p) = plugrun::get(BOT) {
+                let rt = shared.borrow().rt.clone();
+                rt.spawn(async move { if let Ok(v) = p.call("creatorsWith", vec![serde_json::Value::Object(vals)]).await { if v["list"].is_array() { omnipulse_core::widget::creators_preview_set(Some(v)); } } });
+            }
+        }
+    }
+    if BLIVE.with(|b| b.borrow().is_none()) {
+        if !show || plugrun::get(BOT).is_none() { return; }
+        let prefs = shared.borrow().web.prefs.clone();
+        let port = prefs["widgetPort"].as_u64().unwrap_or(7878);
+        let mut on = prefs.clone();
+        if let Some(o) = on.as_object_mut() { o.insert("widget".into(), serde_json::json!(true)); }
+        if integrations::widget_start(&prefs).is_none() { let _ = integrations::widget_start(&on); }
+        if let Ok(d) = omnipulse_core::data_dir() { unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", d.join("webview")); } }
+        let url = format!("http://127.0.0.1:{port}{}", if which == "hud" { "/hud?live=1" } else if which == "vis" { "/vis" } else { "/cam/main?preview=1&live=1" });
+        use slint::winit_030::WinitWindowAccessor;
+        let view = ui.window().with_winit_window(|w| wry::WebViewBuilder::new().with_url(&url).with_transparent(true).with_bounds(rect).build_as_child(w).ok()).flatten();
+        if let Some(v) = view { BLIVE.with(|b| *b.borrow_mut() = Some((which, v, at, String::new()))); }
+        return;
+    }
+    BLIVE.with(|b| {
+        let mut b = b.borrow_mut();
+        let Some((_, view, last, _)) = b.as_mut() else { return };
         if *last == at { return; }
         if show { let _ = view.set_bounds(rect); }
         if show != last.4 { let _ = view.set_visible(show); if !show { repaint_all(&ui); } }
@@ -16059,7 +16145,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // (the songs' measurements: the one big file of before moved into a small file each, once, in the background)
     rt.spawn_blocking(omnipulse_core::rhythm::migrate);
     // (the Stream Widget's page: the real widget over its preview, kept in place as the page scrolls)
-    let _live = { let t = slint::Timer::default(); let s = shared.clone(); t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(40), move || { live_widget(&s); words_view(&s); mod_view(&s); page_repaint(&s); }); t };
+    let _live = { let t = slint::Timer::default(); let s = shared.clone(); t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(40), move || { live_widget(&s); words_view(&s); mod_view(&s); bot_live(&s); page_repaint(&s); }); t };
 
     // OMNIPULSE_SELFTEST=<folder>: visits each page, plays the first track silently, saves a picture of
     // each page and quits (for checking the app without anyone at the screen)

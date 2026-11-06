@@ -812,8 +812,11 @@ OmniPulse.register({
   status() { return { twitch: S().login || "", kick: S().kickLogin || "", watching }; },
   // (the shared sign-in changed in the Stream Suite: signed in, out, or renewed)
   account(v) {
-    const was = S().login || "";
+    const was = S().login || "", tokenWas = S().token || "";
     Object.assign(OmniPulse.settings, v || {});
+    // (signed in again, as the same account: its new sign-in may allow what the old one didn't, so the channels you
+    // moderate are read again and the "sign in again" note goes)
+    if ((S().token || "") !== tokenWas && was === (S().login || "")) { note = ""; channelsRead().catch(() => {}); }
     if (watching && watching.twitch && !S().token) stopPlatform("twitch");
     if (watching && watching.kick && !S().kickToken) stopPlatform("kick");
     if (watching && !watching.twitch && !watching.kick) watching = null;
