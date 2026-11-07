@@ -5,8 +5,8 @@
 //
 // The order (prefs.playFrom: ids) lists the app's own sources, "local", "soundcloud" and "youtube", and
 // each plugin that plays ("plug:<id>"). Sources missing from it come after, built-ins first. One switched
-// off (prefs.playFromOff) keeps its place but never plays a song instead; its own songs play as ever. By
-// default nothing changes: a song plays from where it is.
+// off (prefs.playFromOff) keeps its place but is never played from: its own songs come from any source
+// that's on, in the order. By default nothing changes: a song plays from where it is.
 
 use crate::track::{Src, Track};
 use crate::versions;
@@ -31,8 +31,8 @@ pub fn sources(prefs: &Value) -> Vec<(String, String)> {
     order.into_iter().filter_map(|id| all.iter().find(|(i, _)| *i == id).cloned()).collect()
 }
 
-/// The sources switched off (prefs.playFromOff): nothing plays from them instead of a song; their own
-/// songs play as ever
+/// The sources switched off (prefs.playFromOff): never played from; their own songs come from a source
+/// that's on and has them (and, for now, from their own when none does, so they still play)
 pub fn off(prefs: &Value) -> Vec<String> {
     prefs["playFromOff"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect()
 }
@@ -128,13 +128,15 @@ pub fn own_first(prefs: &Value) -> bool {
 /// full from its own source here, so another's looked for even with Where You Liked It on.
 pub async fn find(t: &Track, prefs: &Value, locals: &[Track], elsewhere: bool) -> Option<Track> {
     if let Some(d) = decided(&t.key) { return d; }
-    if own_first(prefs) && !elsewhere {
+    let own = source_of(t);
+    let off = off(prefs);
+    // (its own source switched off: never played from; the song from any source that's on, in your order)
+    let own_off = off.contains(&own);
+    if own_first(prefs) && !elsewhere && !own_off {
         decide(&t.key, None);
         return None;
     }
-    let own = source_of(t);
-    let off = off(prefs);
-    let ids: Vec<String> = sources(prefs).into_iter().map(|(i, _)| i).take_while(|i| *i != own).filter(|i| !off.contains(i)).collect();
+    let ids: Vec<String> = sources(prefs).into_iter().map(|(i, _)| i).take_while(|i| own_off || *i != own).filter(|i| !off.contains(i) && *i != own).collect();
     if ids.is_empty() || t.is_mix() {
         decide(&t.key, None);
         return None;
@@ -187,6 +189,17 @@ mod tests {
         vals.insert("on:youtube".into(), json!(false));
         vals.insert("on:soundcloud".into(), json!(true));
         assert_eq!(list_save(&p, &vals), json!(["youtube"]));
+        // (a source off: its own songs looked for in the others, with Where You Liked It on too)
+        let yt = Track { key: "yt:1".into(), src: Src::YouTube("1".into()), title: "Strobe".into(), artist: "deadmau5".into(), ms: 636_000, ..Default::default() };
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        forget_all();
+        assert!(rt.block_on(find(&yt, &json!({}), &[], false)).is_none());
+        let strobe = Track { key: "l:1".into(), src: Src::Local("C:/m/strobe.flac".into()), title: "Strobe".into(), artist: "deadmau5".into(), ms: 636_000, ..Default::default() };
+        forget_all();
+        assert_eq!(rt.block_on(find(&yt, &json!({ "playFromOff": ["youtube"] }), &[strobe.clone()], false)).map(|c| c.key), Some("l:1".to_string()));
+        forget_all();
+        assert!(rt.block_on(find(&yt, &json!({ "playFromOff": ["youtube", "local", "soundcloud"] }), &[strobe], false)).is_none());
+        forget_all();
     }
 
     #[test]

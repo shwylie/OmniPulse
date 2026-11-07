@@ -880,7 +880,7 @@ pub fn plug_access(m: &omnipulse_core::plugins::Manifest) -> (Vec<String>, Vec<S
 /// Play From: every source that plays, in your order, each with its switch and Move Up (the first: a reset)
 fn playfrom_fields(prefs: &Value) -> Vec<Value> {
     let mut f = vec![
-        note("A song plays from the first source above its own that has it: your files, or a plugin with a better copy, over a stream of it. It stays as it is in your Library and the queue; only what you hear changes. Move a source up to prefer it. Switch one off and no song plays from it instead of its own; its own songs still play. Nothing changes until you do."),
+        note("A song plays from the first source above its own that has it: your files, or a plugin with a better copy, over a stream of it. It stays as it is in your Library and the queue; only what you hear changes. Move a source up to prefer it. Switch one off and nothing plays from it: its songs come from a source that's on and has them. Nothing changes until you do."),
         tog("playFromOwn", "Where You Liked It", "On: a song plays from its own source when it can, a SoundCloud like from SoundCloud. The order below only steps in for one that can't play there in full: a Go+ song, or a Spotify song without Premium. Off: the order decides for every song."),
     ];
     for (i, (id, name)) in crate::playfrom::sources(prefs).into_iter().enumerate() {

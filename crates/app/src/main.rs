@@ -3455,6 +3455,10 @@ fn start(shared: &Shared) {
         // (Play From: a source above its own that has the song: that plays, the song as it is kept)
         let needs_other = plays_elsewhere(&t, mix_on_now);
         let played_as = if mixed.is_none() { playfrom::find(&t, &pf_prefs, &locals, needs_other).await } else { playfrom::played_as(&t.key) };
+        // (its own source switched off in Play From and no source that's on has it: for now it plays from
+        // its own anyway, saying so; not skipped)
+        let own_off = mixed.is_none() && played_as.is_none() && playfrom::off(&pf_prefs).contains(&playfrom::source_of(&t));
+        if own_off { omnipulse_core::diag::note(&format!("Play From: no source that's on has {} - {}: its own ({}) plays it, though it's off", t.artist, t.title, playfrom::source_of(&t))); }
         // a Go+ track: never the preview, but its version on YouTube Music (crate::versions); a
         // MusicBrainz song the same way (MusicBrainz knows it, YouTube Music has it to play)
         // (and a Spotify song with a free account signed in, or none for playback: from YouTube Music too)
@@ -3574,6 +3578,7 @@ fn start(shared: &Shared) {
                             omnipulse_core::diag::note(&format!("\"{}\" plays from Audius ({named}): YouTube couldn't play it", t.title));
                             ui.set_status(format!("YouTube couldn't play \"{}\", so it's playing from Audius.", t.title).into());
                         }
+                        if own_off { ui.set_status(format!("No source that's on has \"{}\", so it's playing from its own, which is off.", t.title).into()); }
                         if casting().is_some() { omnipulse_core::cast::track(cast_meta(&shared.borrow())); }
                         // which version a Go+ track is playing; the closest one's note stays while it plays
                         if let Some(v) = &version {
@@ -7343,8 +7348,9 @@ fn paint_settings(a: &App) {
                 let state = plugin_state(&a.web.prefs, m);
                 let home = if m.section.is_empty() { String::new() } else { format!("You'll find its settings in Settings > {}. Turning it off here removes it from there too. ", m.section) };
                 let note = format!("{}{}{}{home}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if m.addon.is_empty() { String::new() } else { format!("An addon at {}. ", omnipulse_core::plugins::addon_site(m)) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
-                // (its settings, from here too: a plugin with a page elsewhere (the chatbot's, in Streaming) goes there, once it's on)
-                let more = if m.section.is_empty() { m.settings.as_array().is_some_and(|l| !l.is_empty()) } else { plugin_on(&a.web.prefs, &m.id) };
+                // (its settings, from here too: a plugin with a page elsewhere (the chatbot's, in Streaming) goes there, once it's on;
+                // an addon's are on its site: its gear opens that page in your browser)
+                let more = if !m.addon.is_empty() { true } else if m.section.is_empty() { m.settings.as_array().is_some_and(|l| !l.is_empty()) } else { plugin_on(&a.web.prefs, &m.id) };
                 list.push(SetRow { cost: "Plugin".into(), head: Default::default(), label: plugin_label(m).into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false, more, button: Default::default() });
             }
             // (the plugins: adding one, and taking out the ones you've added; it stays at the top)
@@ -15587,6 +15593,13 @@ fn main() -> Result<(), slint::PlatformError> {
             return go(&s, Place::Page("mod".into()));
         }
         if let Some(id) = key.strip_prefix("plugOn_").or_else(|| key.strip_prefix("plugRun_")) {
+            // (an addon: its settings page on its site (<its address>/configure), in your browser)
+            if let Some(base) = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.addon).filter(|a| !a.is_empty()) {
+                let url = format!("{}/configure", base.trim_end_matches('/'));
+                let note = match omnipulse_core::open_browser(&url) { Ok(()) => "Its settings page is open in your browser.".to_string(), Err(e) => format!("Couldn't open its settings page: {e}") };
+                if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(note.into()); }
+                return;
+            }
             // (its page where it lives: Settings > Streaming for the chatbot, so Back goes there)
             if let Some(sec) = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.section).filter(|x| !x.is_empty()) {
                 if let Some(ui) = s.borrow().ui.upgrade() { ui.set_set_cat(sec.into()); }
