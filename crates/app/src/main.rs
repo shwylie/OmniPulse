@@ -8,6 +8,7 @@
 mod keysetup;
 mod slimport;
 mod offset;
+mod playfrom;
 mod plugrun;
 mod collab;
 mod desktop;
@@ -3449,16 +3450,21 @@ fn start(shared: &Shared) {
     let mix_on_now = smart_on(&shared.borrow().web.prefs);
     // (Smart Transitions' fade: it comes in from its first sound, its silence before that left out)
     let smart_from = SMART_START.with(|x| x.borrow_mut().take()).filter(|(k, _)| *k == t.key && resume == 0 && trim_of(&shared.borrow().web.prefs, &t.key).0 == 0).map(|x| x.1);
+    let (pf_prefs, locals) = { let a = shared.borrow(); (a.web.prefs.clone(), a.library.iter().filter(|t| t.plat() == "local").cloned().collect::<Vec<_>>()) };
     rt.spawn(async move {
+        // (Play From: a source above its own that has the song: that plays, the song as it is kept)
+        let played_as = if mixed.is_none() { playfrom::find(&t, &pf_prefs, &locals).await } else { playfrom::played_as(&t.key) };
         // a Go+ track: never the preview, but its version on YouTube Music (crate::versions); a
         // MusicBrainz song the same way (MusicBrainz knows it, YouTube Music has it to play)
         // (and a Spotify song with a free account signed in, or none for playback: from YouTube Music too)
         // (with Seamless Mix on, a Spotify song plays from YouTube Music too, its Spotify details kept,
         // so it mixes in and out like any other; Spotify's own playback if there's no version of it)
         let sp_free = matches!(t.src, track::Src::Spotify(_)) && (!sp_plays_here() || mix_on_now);
-        let mb = matches!(t.src, track::Src::Catalog(_)) || listen_needs_version(&t) || sp_free;
+        let mb = (matches!(t.src, track::Src::Catalog(_)) || listen_needs_version(&t) || sp_free) && played_as.is_none();
         let (src, version) = if let Some((_, v)) = mixed {
             (Ok(None), v)
+        } else if let Some(alt) = &played_as {
+            (player::open_source(alt, h.clone()).await.map(Some), None)
         } else if t.go_plus {
             full_elsewhere(&t, h.clone()).await
         } else if mb {
@@ -3523,7 +3529,7 @@ fn start(shared: &Shared) {
                         sb_load(&shared, video);
                         rhythm_begin(&shared, &t, 0);
                         if (smart_on(&shared.borrow().web.prefs)) && MIX_OUT_OK.with(|c| c.get()) { rhythm_ahead(&shared, t.clone()); }
-                        let what = sound::loud_source(&t, version.as_ref().map(|v| v.yt.id.as_str()));
+                        let what = sound::loud_source(&playfrom::as_played(&t), version.as_ref().map(|v| v.yt.id.as_str()));
                         shared.borrow_mut().cur_loud = what.as_ref().map(|(k, id)| format!("{k}:{id}"));
                         FADE.with(|f| *f.borrow_mut() = (false, String::new()));
                         let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
@@ -3843,12 +3849,15 @@ async fn rhythm_measure_whole(t: Track) {
     // (why one couldn't be measured, and how long one took: in the log, for the ratings' reviews)
     let note = |w: &str| omnipulse_core::diag::note(&format!("Seamless Mix couldn't measure {}: {w}", t.title));
     let began = std::time::Instant::now();
-    let (kind, id) = match &t.src {
+    // (Play From: what plays for it is what's measured)
+    let play = playfrom::as_played(&t);
+    let (kind, id) = match &play.src {
         track::Src::YouTube(id) => ("youtube", id.clone()),
         track::Src::Local(p) => ("local", p.clone()),
-        track::Src::SoundCloud(id) if !t.go_plus && omnipulse_core::soundcloud::signed_in() => ("soundcloud", id.to_string()),
-        track::Src::SoundCloud(_) if t.go_plus => return note("a SoundCloud Go+ song (only its preview can be got)"),
-        _ if mix_via_youtube(&t) => match versions::find(&t).await { Some(v) => ("youtube", v.yt.id), None => return note("no YouTube Music version found") },
+        track::Src::Plugin(..) => ("plugin", play.key.clone()),
+        track::Src::SoundCloud(id) if !play.go_plus && omnipulse_core::soundcloud::signed_in() => ("soundcloud", id.to_string()),
+        track::Src::SoundCloud(_) if play.go_plus => return note("a SoundCloud Go+ song (only its preview can be got)"),
+        _ if mix_via_youtube(&play) => match versions::find(&play).await { Some(v) => ("youtube", v.yt.id), None => return note("no YouTube Music version found") },
         _ => return note("nothing it plays from can be measured"),
     };
     // (all of it: up to 20 minutes)
@@ -3871,7 +3880,10 @@ async fn rhythm_measure_whole(t: Track) {
 fn loud_ahead(shared: &Shared, t: Track) {
     if (sound::loud_step(&shared.borrow().web.prefs) == "off" && !smart_on(&shared.borrow().web.prefs)) || t.is_mix() { return; }
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    let (pf_prefs, locals) = { let a = shared.borrow(); (a.web.prefs.clone(), a.library.iter().filter(|t| t.plat() == "local").cloned().collect::<Vec<_>>()) };
     rt.spawn(async move {
+        // (Play From decided here, ahead: what plays for it is what's measured)
+        let t = playfrom::find(&t, &pf_prefs, &locals).await.unwrap_or(t);
         let version = if mix_via_youtube(&t) { versions::find(&t).await } else { None };
         let Some((kind, id)) = sound::loud_source(&t, version.as_ref().map(|v| v.yt.id.as_str())) else { return };
         let Ok(a) = omnipulse_core::loudness::analyse(kind, &id).await else { return };
@@ -4230,13 +4242,14 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     let (rt, weak, prefs) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), a.web.prefs.clone()) };
     let h = rt.clone();
     rt.spawn(async move {
-        let (src, version) = if mix_via_youtube(&next) {
-            match versions::find(&next).await {
+        let play = playfrom::as_played(&next);
+        let (src, version) = if mix_via_youtube(&play) {
+            match versions::find(&play).await {
                 Some(v) => (player::open_source(&Track::youtube(&v.yt), h).await, Some(v)),
                 None => (Err("no version on YouTube Music".to_string()), None),
             }
         } else {
-            (player::open_source(&next, h).await, None)
+            (player::open_source(&play, h).await, None)
         };
         let tempo = omnipulse_audio::Tempo::new(plan.rate);
         let ready = tokio::task::spawn_blocking({
@@ -4256,7 +4269,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
             if !still { return; }
             match ready {
                 Ok((src, pitch)) => {
-                    let what = sound::loud_source(&next, version.as_ref().map(|v| v.yt.id.as_str()));
+                    let what = sound::loud_source(&playfrom::as_played(&next), version.as_ref().map(|v| v.yt.id.as_str()));
                     let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
                     let db = sound::loud_db(&prefs, &next, known, version.is_some());
                     // (slowed into the next one's tempo: from here, the one playing goes through the stretch, as it was until the mix)
@@ -7334,6 +7347,8 @@ fn paint_settings(a: &App) {
             }
             // (the plugins: adding one, and taking out the ones you've added; it stays at the top)
             list.insert(0, SetRow { cost: Default::default(), head: Default::default(), label: "Add a Plugin".into(), note: "Music sources made by others. Each is walled off and only reaches the sites it lists.".into(), on: false, key: "plugAdd".into(), sub: false, more: false, button: "Add".into() });
+            list.insert(1, SetRow { cost: Default::default(), head: Default::default(), label: "Play From".into(), note: "The sources in your order: your files, SoundCloud, YouTube Music and your plugins. A song plays from the first above its own that has it.".into(), on: false, key: "playFromOpen".into(), sub: false, more: false, button: "Order".into() });
+
         }
         ModelRc::from(Rc::new(VecModel::from(list)))
     };
@@ -8557,7 +8572,7 @@ fn panel_open(shared: &Shared, name: &str) {
             n if n.starts_with("social:") => "Streaming",
             "youtube" => "Integrations",
             n if n.starts_with("alert:") => "Streaming",
-            "plugins" => "Plugins",
+            "plugins" | "playfrom" => "Plugins",
             "smart" => "Sound",
             "discord" | "together" | "lyrics" => "Integrations",
             _ => "Library",
@@ -8991,6 +9006,15 @@ fn windows_version() -> String {
 
 fn panel_press(shared: &Shared, key: &str) {
     if key == "reportSend" { return report_send(shared); }
+    // (Play From: a source moved up a place, or the first pressed: the order reset)
+    if let Some(id) = key.strip_prefix("playFrom:") {
+        let first = playfrom::sources(&shared.borrow().web.prefs).first().map(|x| x.0.clone()).unwrap_or_default();
+        let order = if id == first { playfrom::forget_all(); Vec::new() } else { playfrom::moved_up(&shared.borrow().web.prefs, id) };
+        if let Some(o) = shared.borrow_mut().web.prefs.as_object_mut() { o.insert("playFrom".into(), serde_json::json!(order)); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("playFrom", serde_json::json!(order)); }
+        pf_paint(shared);
+        return;
+    }
     if key == "alSlImport" { return sl_import_ask(shared); }
     if key == "ytHelpersSetup" { return helpers_act(shared, "setup"); }
     // (the Stream Deck plugin: given to Stream Deck to install, as it asks)
@@ -15541,6 +15565,7 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             return pf_open(&s, id);
         }
+        if key == "playFromOpen" { return panel_open(&s, "playfrom"); }
         if let Some(name) = panels::of_switch(&key) { panel_open(&s, name); }
     });
     let s = shared.clone();

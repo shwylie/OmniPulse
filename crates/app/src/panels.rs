@@ -75,6 +75,7 @@ pub fn title(name: &str) -> String {
         "offset" => "OmniPulse Offset",
         "hidden" => "Hidden & Not Recommended",
         "plugins" => "Add a Plugin",
+        "playfrom" => "Play From",
         "safe" => "What Counts as Safe",
         _ => "Avoid Recent Plays",
     }.to_string()
@@ -103,6 +104,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "offset" => vec![("out2Offset", json!(0)), ("out2Volume", json!(1))],
         "hidden" => vec![],
         "plugins" => vec![("plugSource", json!(""))],
+        "playfrom" => vec![],
         "dockchat" | "dockfeed" | "dockviewers" | "dockinfo" | "multichat" => vec![],
         _ => vec![("recentWindow", json!("week"))],
     }
@@ -825,6 +827,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
         "hidden" => crate::hide::fields(prefs),
         "safe" => crate::streamsafe::panel_fields(prefs),
         "plugins" => plugin_fields(prefs),
+        "playfrom" => playfrom_fields(prefs),
         "offset" => vec![
             num("out2Offset", "Offset", "In milliseconds, from -5000 to 5000. How much later OmniPulse Offset plays than what you hear. Use a negative number for earlier."),
             range("out2Volume", "Volume", "", 0.0, 1.0, 0.01, "%", false),
@@ -870,6 +873,15 @@ pub fn plug_access(m: &omnipulse_core::plugins::Manifest) -> (Vec<String>, Vec<S
     cannot.push(if m.hosts.is_empty() { "Connect to the internet".into() } else { "Connect to any other site".into() });
     cannot.extend(["See your accounts or sign-ins (SoundCloud, Spotify, YouTube Music, Last.fm, Discord)", "Open, read or change your files", "See your playlists, Library, listening history or settings", "Change anything else in the app"].map(String::from));
     (can, cannot, warn)
+}
+
+/// Play From: every source that plays, in your order, each with Move Up (the first: a reset)
+fn playfrom_fields(prefs: &Value) -> Vec<Value> {
+    let mut f = vec![note("A song plays from the first source above its own that has it: your files, or a plugin with a better copy, over a stream of it. It stays as it is in your Library and the queue; only what you hear changes. Move a source up to prefer it. Nothing changes until you do.")];
+    for (i, (id, name)) in crate::playfrom::sources(prefs).into_iter().enumerate() {
+        f.push(button(&format!("playFrom:{id}"), &format!("{}. {name}", i + 1), if i == 0 { "Reset Order" } else { "Move Up" }, if i == 0 { "First: nothing is looked for above it." } else { "" }));
+    }
+    f
 }
 
 fn plugin_fields(_prefs: &Value) -> Vec<Value> {

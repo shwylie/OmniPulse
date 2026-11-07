@@ -243,7 +243,7 @@ async fn run_once(program: &OsStr, target: &str, label: &str, format: &str, toke
         let why = stderr.lines().rev().find(|l| l.contains("ERROR")).or_else(|| stderr.lines().rev().find(|l| !l.trim().is_empty()))
             .unwrap_or("no details").trim();
         if bot_check(why) { return Err(Fail::Bot); }
-        let code = out.status.code().map(|c| c.to_string()).unwrap_or_else(|| "a signal".into());
+        crate::diag::note(&format!("yt-dlp exit {:?}: {why}", out.status.code()));
         return Err(Fail::Other(format!("YouTube Music couldn't find a stream for \"{query}\": {}", plain(why))));
     }
     // a line per format: when it can be used, then its address; with an audio-only format there's one,
