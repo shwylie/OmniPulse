@@ -9281,7 +9281,7 @@ fn panel_press(shared: &Shared, key: &str) {
             "Back to how it was.".to_string()
         }
         "plugFile" => {
-            let Some(path) = ask_path(rfd::FileDialog::new().set_title("A plugin's manifest").add_filter("Plugin manifest", &["json"]), Ask::Open, { let (s, k) = (shared.clone(), key.to_string()); move || panel_press(&s, &k) }) else { return };
+            let Some(path) = ask_path(rfd::FileDialog::new().set_title("A plugin: its .omniplugin package, or its manifest.json").add_filter("Plugin package or manifest", &["omniplugin", "json", "zip"]).add_filter("All files", &["*"]), Ask::Open, { let (s, k) = (shared.clone(), key.to_string()); move || panel_press(&s, &k) }) else { return };
             panel_put(shared, "plugSource", serde_json::json!(path.display().to_string()));
             return panel_press(shared, "plugCheck");
         }
@@ -9291,9 +9291,10 @@ fn panel_press(shared: &Shared, key: &str) {
                 let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
                 rt.spawn(async move {
                     let r = omnipulse_core::plugins::inspect(&src).await;
+                    omnipulse_core::diag::note(&match &r { Ok(p) => format!("plugin read: {} ({})", p.manifest.id, src), Err(e) => format!("plugin not read ({src}): {e}") });
                     let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
                         let Some(sh) = s.borrow().clone() else { return };
-                        ui.set_status(match &r { Ok(p) => format!("Read {}: what it would be able to do is below.", p.manifest.name), Err(_) => "Couldn't read it.".to_string() }.into());
+                        ui.set_status(match &r { Ok(p) => format!("Read {}: what it would be able to do is below.", p.manifest.name), Err(e) => format!("Couldn't read it: {e}") }.into());
                         panels::PLUG_PENDING.with(|p| *p.borrow_mut() = Some(r));
                         pf_paint(&sh);
                     }));
@@ -9307,6 +9308,7 @@ fn panel_press(shared: &Shared, key: &str) {
             let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
             rt.spawn(async move {
                 let r = omnipulse_core::plugins::install(&src, &pkg.digest).await;
+                omnipulse_core::diag::note(&match &r { Ok(m) => format!("plugin added: {} ({})", m.id, src), Err(e) => format!("plugin not added ({src}): {e}") });
                 let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
                     let Some(sh) = s.borrow().clone() else { return };
                     match r {
@@ -9901,6 +9903,11 @@ fn widget_preview_open(shared: &Shared, name: &str) {
 }
 
 fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_json::Value>) {
+    // (Add a Plugin: Save with a plugin read and waiting adds it, as Add Plugin does; the page stays open)
+    if name == "plugins" && panels::PLUG_PENDING.with(|p| matches!(&*p.borrow(), Some(Ok(_)))) {
+        PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals)));
+        return panel_press(shared, "plugInstall");
+    }
     if let Some(id) = name.strip_prefix("social:") {
         let all = socials::edit_save(&shared.borrow().web.prefs, id, &vals);
         pref_put(shared, "socialList", all);
@@ -16865,7 +16872,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 "plugread" => { panel_put(&s, "plugSource", serde_json::json!(std::env::current_dir().unwrap_or_default().join("plugins").join("internet-archive").join("manifest.json").display().to_string())); panel_press(&s, "plugCheck"); }
                 // (plugread:<file>: that plugin file read; ppress:<key>: a panel's button pressed, the fields said)
                 w if w.starts_with("plugread:") => { panel_put(&s, "plugSource", serde_json::json!(&w[9..])); panel_press(&s, "plugCheck"); }
+                // (more:<key>: a settings row's button clicked, as its page does)
+                w if w.starts_with("more:") => { ui.invoke_set_more(w[5..].into()); println!("selftest: more {}: panel {} \"{}\" with {} fields, path {:?}", &w[5..], ui.get_pf_open(), ui.get_pf_head(), ui.get_pf_fields().row_count(), ui.get_pf_crumbs().iter().collect::<Vec<_>>()); }
                 w if w.starts_with("ppress:") => { println!("selftest: press {} among {}", &w[7..], ui.get_pf_fields().iter().map(|f| format!("{}:{}", f.kind, f.key)).collect::<Vec<_>>().join(" ")); panel_press(&s, &w[7..]); println!("selftest: status {}", ui.get_status()); }
+                "pfsave" => { ui.invoke_pf_save(); println!("selftest: saved: panel {} with {} fields, status \"{}\"", ui.get_pf_open(), ui.get_pf_fields().row_count(), ui.get_status()); }
                 "pfclose" => { PF_EDIT.with(|e| e.borrow_mut().take()); ui.set_pf_open(false); }
                 "qopen" => ui.set_queue_open(true),
                 "dragq" => {
