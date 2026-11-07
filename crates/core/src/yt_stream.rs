@@ -147,6 +147,14 @@ fn bot_said(wait: u64) -> String {
 }
 
 /// yt-dlp's error is YouTube's bot check
+/// A helper's error line, as a person reads it: "ERROR: [youtube] abc: Video unavailable" is "Video unavailable"
+fn plain(why: &str) -> String {
+    let s = why.trim().trim_start_matches("ERROR:").trim();
+    let s = s.strip_prefix('[').and_then(|r| r.split_once(']')).map(|(_, r)| r.trim()).unwrap_or(s);
+    let s = s.split_once(": ").filter(|(id, _)| id.len() <= 16 && !id.contains(' ')).map(|(_, r)| r).unwrap_or(s);
+    s.to_string()
+}
+
 fn bot_check(why: &str) -> bool {
     let w = why.to_lowercase();
     w.contains("not a bot") || w.contains("confirm you")
@@ -219,15 +227,15 @@ async fn run_once(program: &OsStr, target: &str, label: &str, format: &str, toke
 
     let child = cmd.spawn().map_err(|e| Fail::Other(
         if e.kind() == std::io::ErrorKind::NotFound {
-            "yt-dlp isn't set up yet: Settings > Integrations > YouTube Music > Set up.".to_string()
+            "YouTube Music isn't set up yet: Settings > Integrations > YouTube Music > Set Up.".to_string()
         } else {
-            format!("Couldn't start yt-dlp: {e}")
+            format!("Couldn't start YouTube Music's helper: {e}")
         }
     ))?;
     let out = tokio::time::timeout(TIMEOUT, child.wait_with_output())
         .await
-        .map_err(|_| Fail::Other(format!("yt-dlp took longer than {} seconds and was stopped.", TIMEOUT.as_secs())))?
-        .map_err(|e| Fail::Other(format!("yt-dlp failed: {e}")))?;
+        .map_err(|_| Fail::Other(format!("YouTube Music took longer than {} seconds and was stopped.", TIMEOUT.as_secs())))?
+        .map_err(|e| Fail::Other(format!("YouTube Music failed: {e}")))?;
 
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
@@ -236,7 +244,7 @@ async fn run_once(program: &OsStr, target: &str, label: &str, format: &str, toke
             .unwrap_or("no details").trim();
         if bot_check(why) { return Err(Fail::Bot); }
         let code = out.status.code().map(|c| c.to_string()).unwrap_or_else(|| "a signal".into());
-        return Err(Fail::Other(format!("yt-dlp couldn't resolve \"{query}\" (exit {code}): {why}")));
+        return Err(Fail::Other(format!("YouTube Music couldn't find a stream for \"{query}\": {}", plain(why))));
     }
     // a line per format: when it can be used, then its address; with an audio-only format there's one,
     // but the first is taken to be safe
@@ -251,7 +259,7 @@ async fn run_once(program: &OsStr, target: &str, label: &str, format: &str, toke
             (u.starts_with("http://") || u.starts_with("https://")).then(|| (a.parse::<u64>().unwrap_or(0), u.to_string()))
         })
         .next()
-        .ok_or_else(|| Fail::Other(format!("yt-dlp found nothing to play for \"{query}\".")))?;
+        .ok_or_else(|| Fail::Other(format!("YouTube Music found nothing to play for \"{query}\".")))?;
     // YouTube hands out its streams a few seconds before they work (yt-dlp waits for them too): waited
     // for here, so whatever opens it next isn't refused (never more than 15 s)
     let wait = at.saturating_sub(crate::now_secs()).min(15);
@@ -354,7 +362,7 @@ mod tests {
     async fn a_failing_yt_dlp_gives_its_error() {
         let p = fake("fail", "echo WARNING: something 1>&2\r\necho ERROR: [youtube] abc: Video unavailable 1>&2\r\nexit /b 1");
         let e = resolve_with(&p, "x").await.unwrap_err();
-        assert!(e.contains("exit 1") && e.contains("Video unavailable"), "{e}");
+        assert_eq!(e, "YouTube Music couldn't find a stream for \"x\": Video unavailable");
         assert!(bot_wait().is_none());
     }
 
