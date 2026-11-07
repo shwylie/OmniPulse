@@ -159,6 +159,20 @@ pub fn artist_hit(t: &Track, c: &YtTrack) -> bool {
     artist.is_empty() || artist.iter().all(|w| place.contains(w))
 }
 
+/// The same version of the song: neither is a remix, edit, live take... the other isn't (a remix album's
+/// track says so or not; a remix's edit is the remix). For what plays *instead* of a song: the closest
+/// version isn't it
+pub fn same_version(t: &Track, c: &YtTrack) -> bool {
+    let want: HashSet<String> = match_words(&match_title(t)).into_iter().collect();
+    let got: HashSet<String> = match_words(&upload_title(&c.title)).into_iter().collect();
+    let remixed = !remixers(t).is_empty();
+    VERSION_WORDS.iter().all(|v| {
+        if remixed && (*v == "mix" || BY_WORDS.contains(v)) { return true; }
+        if *v == "edit" && want.contains("remix") && got.contains("remix") { return true; }
+        want.contains(*v) == got.contains(*v)
+    })
+}
+
 pub fn score(t: &Track, c: &YtTrack) -> f32 {
     static MUSIC_VIDEO: OnceLock<Regex> = OnceLock::new();
     let (ga, _) = guess_names(t);

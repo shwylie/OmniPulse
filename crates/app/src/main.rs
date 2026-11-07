@@ -3453,7 +3453,8 @@ fn start(shared: &Shared) {
     let (pf_prefs, locals) = { let a = shared.borrow(); (a.web.prefs.clone(), a.library.iter().filter(|t| t.plat() == "local").cloned().collect::<Vec<_>>()) };
     rt.spawn(async move {
         // (Play From: a source above its own that has the song: that plays, the song as it is kept)
-        let played_as = if mixed.is_none() { playfrom::find(&t, &pf_prefs, &locals).await } else { playfrom::played_as(&t.key) };
+        let needs_other = plays_elsewhere(&t, mix_on_now);
+        let played_as = if mixed.is_none() { playfrom::find(&t, &pf_prefs, &locals, needs_other).await } else { playfrom::played_as(&t.key) };
         // a Go+ track: never the preview, but its version on YouTube Music (crate::versions); a
         // MusicBrainz song the same way (MusicBrainz knows it, YouTube Music has it to play)
         // (and a Spotify song with a free account signed in, or none for playback: from YouTube Music too)
@@ -3881,9 +3882,10 @@ fn loud_ahead(shared: &Shared, t: Track) {
     if (sound::loud_step(&shared.borrow().web.prefs) == "off" && !smart_on(&shared.borrow().web.prefs)) || t.is_mix() { return; }
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
     let (pf_prefs, locals) = { let a = shared.borrow(); (a.web.prefs.clone(), a.library.iter().filter(|t| t.plat() == "local").cloned().collect::<Vec<_>>()) };
+    let needs_other = plays_elsewhere(&t, smart_on(&shared.borrow().web.prefs));
     rt.spawn(async move {
         // (Play From decided here, ahead: what plays for it is what's measured)
-        let t = playfrom::find(&t, &pf_prefs, &locals).await.unwrap_or(t);
+        let t = playfrom::find(&t, &pf_prefs, &locals, needs_other).await.unwrap_or(t);
         let version = if mix_via_youtube(&t) { versions::find(&t).await } else { None };
         let Some((kind, id)) = sound::loud_source(&t, version.as_ref().map(|v| v.yt.id.as_str())) else { return };
         let Ok(a) = omnipulse_core::loudness::analyse(kind, &id).await else { return };
@@ -9955,6 +9957,15 @@ fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_j
         if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status("Alerts saved.".into()); }
         return;
     }
+    // (Play From: the sources switched off, into their list; the order's kept as you moved it)
+    if name == "playfrom" {
+        let v = playfrom::list_save(&shared.borrow().web.prefs, &vals);
+        pref_put(shared, "playFromOff", v);
+        pref_put(shared, "playFromOwn", serde_json::json!(vals.get("playFromOwn").and_then(|v| v.as_bool()).unwrap_or(true)));
+        PF_EDIT.with(|e| e.borrow_mut().take());
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status("Play From saved.".into()); }
+        return;
+    }
     // (What Counts as Safe: its switches, into the list)
     if name == "safe" {
         let v = streamsafe::panel_save(&shared.borrow().web.prefs, &vals);
@@ -12721,6 +12732,13 @@ fn listen_host_pos() -> u64 {
 /// signed in for its library, plays them from YouTube Music)
 fn sp_plays_here() -> bool {
     omnipulse_core::spotify_engine::spe_signed_in() && omnipulse_core::spotify_engine::spe_premium() != Some(false)
+}
+
+/// Whether a song can't play in full from its own source here, so it plays from elsewhere anyway: a Go+
+/// preview, a catalogue's song, a Spotify song without Premium (or with a mix on, which plays them from
+/// YouTube Music), or one the host's app can't play as it is (Play From's "where you liked it" lets these through)
+fn plays_elsewhere(t: &Track, mix_on: bool) -> bool {
+    t.go_plus || matches!(t.src, track::Src::Catalog(_)) || listen_needs_version(t) || (matches!(t.src, track::Src::Spotify(_)) && (!sp_plays_here() || mix_on))
 }
 
 /// Whether this app can play the host's track as it is (else its YouTube Music version)

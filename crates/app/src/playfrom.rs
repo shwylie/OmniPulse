@@ -4,8 +4,9 @@
 // title, art and likes); only what's heard comes from elsewhere. Found once per song while the app runs.
 //
 // The order (prefs.playFrom: ids) lists the app's own sources, "local", "soundcloud" and "youtube", and
-// each plugin that plays ("plug:<id>"). Sources missing from it come after, built-ins first. By default
-// nothing changes: a song plays from where it is.
+// each plugin that plays ("plug:<id>"). Sources missing from it come after, built-ins first. One switched
+// off (prefs.playFromOff) keeps its place but never plays a song instead; its own songs play as ever. By
+// default nothing changes: a song plays from where it is.
 
 use crate::track::{Src, Track};
 use crate::versions;
@@ -28,6 +29,27 @@ pub fn sources(prefs: &Value) -> Vec<(String, String)> {
     }
     let order = order(prefs, &all);
     order.into_iter().filter_map(|id| all.iter().find(|(i, _)| *i == id).cloned()).collect()
+}
+
+/// The sources switched off (prefs.playFromOff): nothing plays from them instead of a song; their own
+/// songs play as ever
+pub fn off(prefs: &Value) -> Vec<String> {
+    prefs["playFromOff"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect()
+}
+
+/// The Play From page's switches: "on:<id>", on unless switched off
+pub fn list_values(prefs: &Value) -> serde_json::Map<String, Value> {
+    let off = off(prefs);
+    let mut m: serde_json::Map<String, Value> = sources(prefs).into_iter().map(|(id, _)| (format!("on:{id}"), Value::Bool(!off.contains(&id)))).collect();
+    m.insert("playFromOwn".into(), Value::Bool(own_first(prefs)));
+    m
+}
+
+/// The page saved: the ids switched off, to keep as prefs.playFromOff
+pub fn list_save(prefs: &Value, vals: &serde_json::Map<String, Value>) -> Value {
+    let ids: Vec<Value> = sources(prefs).into_iter().filter(|(id, _)| vals.get(&format!("on:{id}")).and_then(|v| v.as_bool()) == Some(false)).map(|(id, _)| Value::String(id)).collect();
+    forget_all();
+    Value::Array(ids)
 }
 
 /// The ids in order: yours first (those still here), then the rest as `all` has them
@@ -86,19 +108,33 @@ fn as_yt(c: &Track) -> omnipulse_core::youtube::YtTrack {
     omnipulse_core::youtube::YtTrack { id: c.key.clone(), title: c.title.clone(), artists: c.artist.clone(), album: c.album.clone(), duration_ms: c.ms, ..Default::default() }
 }
 
-/// The best of these for the song, if one's close enough
+/// The best of these for the song, if one's close enough: the same version, by them (a remix of it
+/// isn't it, however well the rest matches)
 pub fn best(t: &Track, found: Vec<Track>) -> Option<Track> {
     let mut ranked: Vec<(f32, Track)> = found.into_iter().filter(|c| c.key != t.key).map(|c| (versions::score(t, &as_yt(&c)), c)).collect();
     ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    ranked.into_iter().find(|(s, c)| *s >= GOOD && versions::artist_hit(t, &as_yt(c))).map(|(_, c)| c)
+    ranked.into_iter().find(|(s, c)| *s >= GOOD && versions::artist_hit(t, &as_yt(c)) && versions::same_version(t, &as_yt(c))).map(|(_, c)| c)
+}
+
+/// Where You Liked It (prefs.playFromOwn, on unless switched off): a song plays from its own source when
+/// it can; the order only steps in for one that plays from elsewhere anyway (`elsewhere`: a Go+ preview,
+/// a Spotify song without Premium...)
+pub fn own_first(prefs: &Value) -> bool {
+    prefs["playFromOwn"].as_bool().unwrap_or(true)
 }
 
 /// The song looked for in the sources above its own (`locals`: your files, for "local"); the first that
-/// has it is kept for the song and given back. Itself: None. Decided once.
-pub async fn find(t: &Track, prefs: &Value, locals: &[Track]) -> Option<Track> {
+/// has it is kept for the song and given back. Itself: None. Decided once. `elsewhere`: it can't play in
+/// full from its own source here, so another's looked for even with Where You Liked It on.
+pub async fn find(t: &Track, prefs: &Value, locals: &[Track], elsewhere: bool) -> Option<Track> {
     if let Some(d) = decided(&t.key) { return d; }
+    if own_first(prefs) && !elsewhere {
+        decide(&t.key, None);
+        return None;
+    }
     let own = source_of(t);
-    let ids: Vec<String> = sources(prefs).into_iter().map(|(i, _)| i).take_while(|i| *i != own).collect();
+    let off = off(prefs);
+    let ids: Vec<String> = sources(prefs).into_iter().map(|(i, _)| i).take_while(|i| *i != own).filter(|i| !off.contains(i)).collect();
     if ids.is_empty() || t.is_mix() {
         decide(&t.key, None);
         return None;
@@ -140,6 +176,17 @@ mod tests {
         let p = json!({ "playFrom": ["local", "soundcloud", "youtube"] });
         assert_eq!(moved_up(&p, "youtube"), vec!["local", "youtube", "soundcloud"]);
         assert_eq!(moved_up(&p, "local"), vec!["local", "soundcloud", "youtube"]);
+        // (switched off: still listed, and saved as off from the page's switches)
+        let p = json!({ "playFromOff": ["soundcloud"] });
+        assert_eq!(off(&p), vec!["soundcloud"]);
+        assert_eq!(list_values(&p).get("on:soundcloud"), Some(&json!(false)));
+        assert_eq!(list_values(&p).get("on:local"), Some(&json!(true)));
+        assert_eq!(list_values(&p).get("playFromOwn"), Some(&json!(true)));
+        assert!(own_first(&p) && !own_first(&json!({ "playFromOwn": false })));
+        let mut vals = list_values(&p);
+        vals.insert("on:youtube".into(), json!(false));
+        vals.insert("on:soundcloud".into(), json!(true));
+        assert_eq!(list_save(&p, &vals), json!(["youtube"]));
     }
 
     #[test]
@@ -150,6 +197,14 @@ mod tests {
         let other = Track::plugin("p", &json!({ "id": "c", "title": "Ghosts n Stuff", "artist": "deadmau5", "duration_ms": 200_000 })).unwrap();
         assert_eq!(best(&want, vec![other.clone(), edit.clone(), strobe.clone()]).map(|c| c.key), Some("plug:p:a".to_string()));
         assert!(best(&want, vec![other, edit]).is_none());
+        // (a remix on SoundCloud, titled "Artist - Song [X Remix]": the artist's name and the length match,
+        // the version doesn't: not it)
+        let starship = Track { key: "sp:2".into(), src: Src::Spotify("2".into()), title: "Nothing's Gonna Stop Us Now".into(), artist: "Starship".into(), ms: 270_000, ..Default::default() };
+        let remix = Track::soundcloud(&json!({ "id": 534827904, "title": "Starship - Nothing's Gonna Stop Us Now [Cole Remix]", "user": { "username": "ColeOfficial" }, "duration": 268_000 })).unwrap();
+        assert_eq!((remix.artist.as_str(), remix.title.as_str()), ("Starship", "Nothing's Gonna Stop Us Now [Cole Remix]"));
+        assert!(best(&starship, vec![remix]).is_none());
+        let original = Track::soundcloud(&json!({ "id": 1, "title": "Starship - Nothing's Gonna Stop Us Now", "user": { "username": "Starship" }, "duration": 270_000 })).unwrap();
+        assert_eq!(best(&starship, vec![original]).map(|c| c.key), Some("1".to_string()));
         assert_eq!(source_of(&want), "youtube");
         assert_eq!(source_of(&strobe), "plug:p");
         // (decided once, and itself till then)

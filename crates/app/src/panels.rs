@@ -202,6 +202,7 @@ pub fn values(name: &str, prefs: &Value) -> Map<String, Value> {
         return crate::requests::MSG_KEYS.iter().map(|(k, _)| (format!("msg:{k}"), json!(prefs["reqMsgs"][*k].as_str().unwrap_or("")))).collect();
     }
     if name == "alertlist" { return crate::alerts::list_values(prefs); }
+    if name == "playfrom" { return crate::playfrom::list_values(prefs); }
     if crate::docksets::page_of(name).is_some() { return crate::docksets::values(prefs, name); }
     if name == "safe" { return crate::streamsafe::panel_values(prefs); }
     if let Some(k) = name.strip_prefix("alert:") { return crate::alerts::edit_values(prefs, k); }
@@ -876,11 +877,14 @@ pub fn plug_access(m: &omnipulse_core::plugins::Manifest) -> (Vec<String>, Vec<S
     (can, cannot, warn)
 }
 
-/// Play From: every source that plays, in your order, each with Move Up (the first: a reset)
+/// Play From: every source that plays, in your order, each with its switch and Move Up (the first: a reset)
 fn playfrom_fields(prefs: &Value) -> Vec<Value> {
-    let mut f = vec![note("A song plays from the first source above its own that has it: your files, or a plugin with a better copy, over a stream of it. It stays as it is in your Library and the queue; only what you hear changes. Move a source up to prefer it. Nothing changes until you do.")];
+    let mut f = vec![
+        note("A song plays from the first source above its own that has it: your files, or a plugin with a better copy, over a stream of it. It stays as it is in your Library and the queue; only what you hear changes. Move a source up to prefer it. Switch one off and no song plays from it instead of its own; its own songs still play. Nothing changes until you do."),
+        tog("playFromOwn", "Where You Liked It", "On: a song plays from its own source when it can, a SoundCloud like from SoundCloud. The order below only steps in for one that can't play there in full: a Go+ song, or a Spotify song without Premium. Off: the order decides for every song."),
+    ];
     for (i, (id, name)) in crate::playfrom::sources(prefs).into_iter().enumerate() {
-        f.push(button(&format!("playFrom:{id}"), &format!("{}. {name}", i + 1), if i == 0 { "Reset Order" } else { "Move Up" }, if i == 0 { "First: nothing is looked for above it." } else { "" }));
+        f.push(json!({ "key": format!("on:{id}"), "label": format!("{}. {name}", i + 1), "note": if i == 0 { "First: nothing is looked for above it." } else { "" }, "type": "row", "actions": [format!("playFrom:{id}")], "labels": [if i == 0 { "Reset Order" } else { "Move Up" }] }));
     }
     f
 }
