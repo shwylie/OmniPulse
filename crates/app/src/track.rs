@@ -166,9 +166,11 @@ impl Track {
     pub fn plugin(plugin: &str, x: &Value) -> Option<Track> {
         let id = x["id"].as_str().map(String::from).or_else(|| x["id"].as_i64().map(|n| n.to_string()))?;
         let link = x["link"].as_str().filter(|l| l.starts_with("https://")).unwrap_or("").to_string();
+        let key = format!("plug:{plugin}:{id}");
+        crate::plugrun::remember(&key, plugin, &x.to_string());
         Some(Track {
             src: Src::Plugin(plugin.to_string(), x.to_string()),
-            key: format!("plug:{plugin}:{id}"),
+            key,
             title: x["title"].as_str().unwrap_or("Untitled").to_string(),
             artist: x["artist"].as_str().unwrap_or("Unknown artist").to_string(),
             album: x["album"].as_str().unwrap_or("").to_string(),

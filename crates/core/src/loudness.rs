@@ -201,7 +201,8 @@ fn decode_mono_at(source: Box<dyn MediaSource>, ext: Option<&str>, max_secs: f64
 }
 
 /// The start of a track, as mono samples, up to `max_secs` (for measuring its beat before it plays):
-/// `kind` "youtube" (a video id), "soundcloud" (a track id), "local" (a file's path) or "url"
+/// `kind` "youtube" (a video id), "soundcloud" (a track id), "local" (a file's path), "plugin" (a plugin
+/// track's key) or "url"
 pub async fn mono_start(kind: &str, id: &str, max_secs: f64) -> Result<(Vec<f32>, u32), String> {
     let fetched = match kind {
         "local" => {
@@ -213,6 +214,7 @@ pub async fn mono_start(kind: &str, id: &str, max_secs: f64) -> Result<(Vec<f32>
             }).await.map_err(|e| e.to_string())?;
         }
         "youtube" => fetch_audio(&crate::youtube::stream_url(id, false).await?, None).await?,
+        "plugin" => fetch_audio(&plugin_url(id).await?, None).await?,
         "soundcloud" => {
             let info = soundcloud::stream_url(id.to_string()).await?;
             let mut got = None;
@@ -226,6 +228,36 @@ pub async fn mono_start(kind: &str, id: &str, max_secs: f64) -> Result<(Vec<f32>
         _ => fetch_audio(id, None).await?,
     };
     tokio::task::spawn_blocking(move || decode_mono_half(Box::new(Cursor::new(fetched.bytes)), fetched.ext, max_secs)).await.map_err(|e| e.to_string())?
+}
+
+// ---------- plugins' tracks: their stream found by the app (the plugin's resolve), then measured as any ----------
+
+type Resolver = dyn Fn(String) -> futures::future::BoxFuture<'static, Result<String, String>> + Send + Sync;
+static PLUGIN_RESOLVER: Mutex<Option<std::sync::Arc<Resolver>>> = Mutex::new(None);
+
+/// How a plugin's track (by its key, "plug:<plugin>:<id>") becomes a stream address: set by the app,
+/// which runs the plugins
+pub fn set_plugin_resolver(f: std::sync::Arc<Resolver>) {
+    *PLUGIN_RESOLVER.lock().unwrap() = Some(f);
+}
+
+async fn plugin_url(key: &str) -> Result<String, String> {
+    let f = PLUGIN_RESOLVER.lock().unwrap().clone().ok_or("plugins' tracks can't be measured here")?;
+    f(key.to_string()).await
+}
+
+pub async fn analyse_plugin(key: &str) -> Result<Analysis, String> {
+    let ck = format!("{VERSION}:plug:{key}");
+    if let Some(a) = cached(&ck) {
+        return Ok(a);
+    }
+    let url = plugin_url(key).await?;
+    let f = fetch_audio(&url, None).await?;
+    let a = tokio::task::spawn_blocking(move || measure(Box::new(Cursor::new(f.bytes)), f.ext, f.duration_ms))
+        .await
+        .map_err(|e| e.to_string())??;
+    remember(ck, &a);
+    Ok(a)
 }
 
 // ---------- the cache ----------
@@ -595,7 +627,7 @@ pub fn ts_audio(ts: &[u8]) -> Option<(Vec<u8>, &'static str)> {
     (!out.is_empty()).then_some((out, ext))
 }
 
-/// For the app: measures a track ("local" or "soundcloud") and returns the Analysis as JSON
+/// For the app: measures a track ("local", "soundcloud", "youtube" or "plugin") and returns the Analysis as JSON
 pub async fn analyse(source: &str, id: &str) -> Result<Value, String> {
     let a = match source {
         "local" => analyse_local(id).await?,
@@ -606,7 +638,8 @@ pub async fn analyse(source: &str, id: &str) -> Result<Value, String> {
             analyse_soundcloud(id).await?
         }
         "youtube" => analyse_youtube(id).await?,
-        _ => return Err("only local files, SoundCloud and YouTube tracks are measured".into()),
+        "plugin" => analyse_plugin(id).await?,
+        _ => return Err("only local files, SoundCloud, YouTube and plugins' tracks are measured".into()),
     };
     serde_json::to_value(a).map_err(|e| e.to_string())
 }

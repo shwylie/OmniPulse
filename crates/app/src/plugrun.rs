@@ -24,6 +24,48 @@ use std::time::{Duration, Instant};
 const MEMORY: usize = 64 * 1024 * 1024;
 const CALL_SECS: u64 = 25;
 
+/// The plugins' tracks seen (by key: the plugin and the track as it gave it), so one can be resolved again
+/// by its key alone (measuring for Seamless Mix); the last few thousand
+static SEEN: Mutex<Option<std::collections::VecDeque<(String, String, String)>>> = Mutex::new(None);
+const SEEN_MAX: usize = 4000;
+
+pub fn remember(key: &str, plugin: &str, x: &str) {
+    let mut g = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    let q = g.get_or_insert_with(std::collections::VecDeque::new);
+    if let Some(i) = q.iter().position(|(k, _, _)| k == key) { q.remove(i); }
+    q.push_back((key.to_string(), plugin.to_string(), x.to_string()));
+    while q.len() > SEEN_MAX { q.pop_front(); }
+}
+
+fn seen(key: &str) -> Option<(String, String)> {
+    SEEN.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|q| q.iter().rev().find(|(k, _, _)| k == key).map(|(_, p, x)| (p.clone(), x.clone())))
+}
+
+/// A plugin track's stream: its address and format, as its plugin resolves it (an addon's from anywhere
+/// https; a plugin's from its own sites only)
+pub async fn stream_url(plugin: &str, x: &str) -> Result<(String, String), String> {
+    let p = get(plugin).ok_or("its plugin isn't running (Settings > Plugins)")?;
+    let r = p.call("resolve", vec![serde_json::from_str(x).unwrap_or_default()]).await?;
+    let url = r["url"].as_str().unwrap_or("").to_string();
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(format!("{} didn't give a playable address", p.name));
+    }
+    if !(p.addon && url.starts_with("https://")) && !core::plugins::host_allowed(&p.hosts, &url) {
+        return Err(format!("{} may only play from {}", p.name, p.hosts.join(", ")));
+    }
+    let known = |e: &str| ["mp3", "flac", "m4a", "ogg", "wav", "aac", "opus"].contains(&e);
+    let said = r["ext"].as_str().unwrap_or("").trim_start_matches('.').to_lowercase();
+    let ext = url.split(['?', '#']).next().unwrap_or("").rsplit('.').next().unwrap_or("mp3").to_lowercase();
+    let ext = if known(&said) { said } else if known(&ext) { ext } else { "mp3".to_string() };
+    Ok((url, ext))
+}
+
+/// The same, by a track's key alone (one seen since the app started)
+pub async fn stream_url_by_key(key: &str) -> Result<String, String> {
+    let (plugin, x) = seen(key).ok_or("that plugin track isn't known any more")?;
+    stream_url(&plugin, &x).await.map(|(url, _)| url)
+}
+
 /// A running plugin
 pub struct Plugin {
     pub id: String,
@@ -1425,9 +1467,28 @@ mod tests {
                     let text = String::from_utf8_lossy(&buf).to_string();
                     let path = text.lines().next().unwrap_or("").split(' ').nth(1).unwrap_or("").to_string();
                     asked.lock().unwrap().push(path.clone());
+                    // (a 3-second tone, as a WAV, for one song's stream: measured as a plugin's track)
+                    if path == "/tok/one.wav" {
+                        let rate = 44100u32;
+                        let mut pcm: Vec<u8> = Vec::new();
+                        for n in 0..(3 * rate) { let v = ((2.0 * std::f64::consts::PI * 440.0 * n as f64 / rate as f64).sin() * 12000.0) as i16; pcm.extend_from_slice(&v.to_le_bytes()); pcm.extend_from_slice(&v.to_le_bytes()); }
+                        let mut w = Vec::new();
+                        w.extend_from_slice(b"RIFF"); w.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes()); w.extend_from_slice(b"WAVEfmt ");
+                        w.extend_from_slice(&16u32.to_le_bytes()); w.extend_from_slice(&1u16.to_le_bytes()); w.extend_from_slice(&2u16.to_le_bytes()); w.extend_from_slice(&rate.to_le_bytes()); w.extend_from_slice(&(rate * 4).to_le_bytes()); w.extend_from_slice(&4u16.to_le_bytes()); w.extend_from_slice(&16u16.to_le_bytes());
+                        w.extend_from_slice(b"data"); w.extend_from_slice(&(pcm.len() as u32).to_le_bytes()); w.extend_from_slice(&pcm);
+                        let _ = tcp.write_all(format!("HTTP/1.1 200 OK
+Content-Type: audio/wav
+Content-Length: {}
+Connection: close
+
+", w.len()).as_bytes()).await;
+                        let _ = tcp.write_all(&w).await;
+                        return;
+                    }
                     let (status, body) = if path == "/tok/manifest.json" { ("200 OK", json!({ "id": "com.example.music", "name": "Example Music", "version": "1.0.0", "description": "Songs.", "types": ["track"], "resources": ["search", "stream"] }).to_string()) }
                         else if path.starts_with("/tok/search?") { ("200 OK", json!({ "tracks": [
                             { "id": "a1", "title": "One", "artist": { "name": "Ann" }, "album": "First", "duration": 200, "artworkURL": "https://img.example.com/a.jpg", "streamURL": "https://cdn.example.com/one.flac", "format": "flac" },
+                            { "id": "w3", "title": "Tone", "artist": "Wave", "duration": 3, "streamURL": format!("http://127.0.0.1:{wp}/tok/one.wav"), "format": "wav" },
                             { "id": "b2", "title": "Two", "artist": ["Bob", "Cy"], "duration": 180500 } ], "albums": [], "artists": [] }).to_string()) }
                         else if path == "/tok/stream/b2" { ("200 OK", json!({ "url": "https://cdn.example.com/two.mp3", "format": "mp3", "quality": "320" }).to_string()) }
                         else { ("404 Not Found", String::new()) };
@@ -1441,14 +1502,24 @@ mod tests {
         assert!(p.addon && p.can("search") && p.can("resolve"));
         let found = rt.block_on(p.call("search", vec![json!("one")])).unwrap();
         let rows: Vec<String> = found.as_array().unwrap().iter().map(|t| format!("{} | {} | {} | {} | {}", t["id"].as_str().unwrap(), t["title"].as_str().unwrap(), t["artist"].as_str().unwrap(), t["album"].as_str().unwrap(), t["duration_ms"])).collect();
-        assert_eq!(rows, vec!["a1 | One | Ann | First | 200000".to_string(), "b2 | Two | Bob, Cy |  | 180500".into()]);
+        assert_eq!(rows, vec!["a1 | One | Ann | First | 200000".to_string(), "w3 | Tone | Wave |  | 3000".into(), "b2 | Two | Bob, Cy |  | 180500".into()]);
         assert_eq!(found[0]["artwork"], json!("https://img.example.com/a.jpg"));
         assert!(asked.lock().unwrap().iter().any(|p| p.starts_with("/tok/search?q=one&limit=")));
         let r = rt.block_on(p.call("resolve", vec![found[0].clone()])).unwrap();
         assert_eq!((r["url"].as_str(), r["ext"].as_str()), (Some("https://cdn.example.com/one.flac"), Some("flac")));
-        let r = rt.block_on(p.call("resolve", vec![found[1].clone()])).unwrap();
+        let r = rt.block_on(p.call("resolve", vec![found[2].clone()])).unwrap();
         assert_eq!((r["url"].as_str(), r["ext"].as_str()), (Some("https://cdn.example.com/two.mp3"), Some("mp3")));
-        assert_eq!(asked.lock().unwrap().last().map(String::as_str), Some("/tok/stream/b2"));
+        // (measured for Seamless Mix, as a track of the app's: its stream found again by its key, through
+        // the plugin; the tone's 3 s heard)
+        let t = crate::track::Track::plugin(&p.id, &found[1]).unwrap();
+        assert_eq!(crate::sound::loud_source(&t, None), Some(("plugin", t.key.clone())));
+        core::loudness::set_plugin_resolver(Arc::new(|key: String| Box::pin(async move { stream_url_by_key(&key).await })));
+        let a = rt.block_on(core::loudness::analyse("plugin", &t.key)).unwrap();
+        assert!(a["lufs"].as_f64().is_some_and(|l| l < 0.0 && l > -40.0), "{a}");
+        assert!(a["audible_ms"].as_u64().is_some_and(|ms| (2500..=3100).contains(&ms)), "{a}");
+        let (mono, rate) = rt.block_on(core::loudness::mono_start("plugin", &t.key, 2.0)).unwrap();
+        assert!(rate > 0 && mono.len() as u32 >= rate * 3 / 2, "{} at {rate}", mono.len());
+        assert!(asked.lock().unwrap().iter().any(|p| p == "/tok/stream/b2"));
         // (its fetches: its own site only)
         assert!(core::plugins::host_allowed(&p.hosts, &format!("http://127.0.0.1:{wp}/tok/search")));
         assert!(!core::plugins::host_allowed(&p.hosts, "https://cdn.example.com/one.flac"));

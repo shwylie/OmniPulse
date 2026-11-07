@@ -117,6 +117,8 @@ pub fn loud_source(t: &Track, yt_version: Option<&str>) -> Option<(&'static str,
         Src::SoundCloud(id) if !t.go_plus => Some(("soundcloud", id.to_string())),
         Src::YouTube(id) => Some(("youtube", id.clone())),
         Src::Local(_) => Some(("local", t.key.trim_start_matches("local:").to_string())),
+        // (a plugin's or an addon's: by its key; its stream found again through the plugin when measured)
+        Src::Plugin(..) => Some(("plugin", t.key.clone())),
         _ => None,
     }
 }
@@ -142,6 +144,8 @@ mod tests {
         assert_eq!(spotify_norm(&json!({ "loudMatch": "off" })).0, false);
         assert_eq!(loud_source(&sc, None), Some(("soundcloud", "5".into())));
         assert_eq!(loud_source(&sc, Some("v1")), Some(("youtube", "v1".into())));
+        let plug = Track::plugin("demo", &json!({ "id": "t9", "title": "X", "artist": "Y" })).unwrap();
+        assert_eq!(loud_source(&plug, None), Some(("plugin", "plug:demo:t9".into())));
         let p = json!({ "eqOn": false, "eq": [1, 2, 3, 4, 5, 6, 7, 8, 9, 40] });
         assert_eq!(eq_heard(&p), [0.0; 10]);
         assert_eq!(eq_bands(&p)[9], 12.0);

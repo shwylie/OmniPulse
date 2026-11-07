@@ -14992,6 +14992,8 @@ fn main() -> Result<(), slint::PlatformError> {
     go_plus_set(&shared.borrow().web.prefs);
 
     SHARED.with(|s| *s.borrow_mut() = Some(shared.clone()));
+    // (plugins' tracks measured for Seamless Mix: their stream found through the plugin, by the track's key)
+    omnipulse_core::loudness::set_plugin_resolver(std::sync::Arc::new(|key: String| Box::pin(async move { plugrun::stream_url_by_key(&key).await })));
     // the plugins that are on, each started on its own thread
     // the plugins that come with OmniPulse (beside it, in plugins/): installed, or brought up to date
     // (not from the self-test: a test build never replaces your installed ones)

@@ -59,21 +59,7 @@ pub async fn open_source(t: &Track, rt: tokio::runtime::Handle) -> Result<Box<dy
         // (played as its YouTube Music version: crate::versions, in main.rs)
         Src::Catalog(_) => Err("it plays from YouTube Music".into()),
         Src::Plugin(id, x) => {
-            let p = crate::plugrun::get(id).ok_or("its plugin isn't running (Settings > Integrations)")?;
-            let r = p.call("resolve", vec![serde_json::from_str(x).unwrap_or_default()]).await?;
-            let url = r["url"].as_str().unwrap_or("").to_string();
-            if !(url.starts_with("https://") || url.starts_with("http://")) {
-                return Err(format!("{} didn't give a playable address", p.name));
-            }
-            // (an addon points at streams wherever they are; a plugin plays from its own sites only)
-            if !(p.addon && url.starts_with("https://")) && !core::plugins::host_allowed(&p.hosts, &url) {
-                return Err(format!("{} may only play from {}", p.name, p.hosts.join(", ")));
-            }
-            // (the format: as the plugin says, else from the address's end)
-            let known = |e: &str| ["mp3", "flac", "m4a", "ogg", "wav", "aac", "opus"].contains(&e);
-            let said = r["ext"].as_str().unwrap_or("").trim_start_matches('.').to_lowercase();
-            let ext = url.split(['?', '#']).next().unwrap_or("").rsplit('.').next().unwrap_or("mp3").to_lowercase();
-            let ext = if known(&said) { said } else if known(&ext) { ext } else { "mp3".to_string() };
+            let (url, ext) = crate::plugrun::stream_url(id, x).await?;
             tokio::task::spawn_blocking(move || omnipulse_audio::open_url(&url, &ext).map(|d| Box::new(d) as Box<dyn Source>)).await.map_err(|e| e.to_string())?
         }
         Src::Local(path) => {
