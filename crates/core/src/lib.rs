@@ -6,6 +6,7 @@ pub mod apple;
 #[cfg(feature = "desktop")]
 pub mod audius;
 pub mod diag;
+#[cfg(feature = "desktop")]
 pub mod docks;
 pub mod modsuite;
 pub mod emotes;
