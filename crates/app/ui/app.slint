@@ -2929,13 +2929,13 @@ component WidgetTile inherits Rectangle {
     }
 }
 
-/// A plugin, as a tile: its mark, a light (on, running), what it does, its settings, its switch; or (Add a Plugin)
-/// a dashed tile to add one
+/// A plugin, as a tile: its mark, a light (on, running), what it does, its settings, its switch; or (Add a Plugin,
+/// Play From: a row with a button label) a tile that's a button all over, opening its page
 component PluginTile inherits Rectangle {
     in property <SetRow> r;
     callback toggle(string);
     callback more(string);
-    property <bool> add: root.r.key == "plugAdd";
+    property <bool> add: root.r.button != "";
     height: 146px;
     border-radius: 14px;
     background: pta.has-hover && root.add ? Theme.elevated : Theme.panel;
@@ -2951,9 +2951,11 @@ component PluginTile inherits Rectangle {
             Rectangle {
                 width: 30px; height: 30px; border-radius: 9px;
                 background: root.add ? Theme.accent.with-alpha(0.15) : root.r.on ? Theme.accent.with-alpha(0.15) : Theme.elevated;
-                Glyph { d: root.add ? Icons.add : Icons.plugin; width: 18px; height: 18px; x: 6px; y: 6px; fill: root.add || root.r.on ? Theme.accent : Theme.muted; }
+                Glyph { d: root.r.key == "plugAdd" ? Icons.add : root.add ? Icons.queue : Icons.plugin; width: 18px; height: 18px; x: 6px; y: 6px; fill: root.add || root.r.on ? Theme.accent : Theme.muted; }
             }
             Text { text: root.r.label; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+            // (a button tile: what pressing it does, as its row's button says)
+            if root.add: Text { text: root.r.button + " ›"; color: Theme.accent; font-weight: 600; font-size: 13px; vertical-alignment: center; }
             if !root.add: VerticalLayout { alignment: center; Rectangle { width: 7px; height: 7px; border-radius: 4px; background: root.r.on ? #4ad295 : #4a5060; } }
         }
         Rectangle {
@@ -9925,12 +9927,15 @@ export component AppWindow inherits Window {
                              }
                              if f.kind != "note" && f.kind != "info" && f.kind != "output" && f.kind != "wave" && f.kind != "designpick" && f.kind != "themepick": HorizontalLayout {
                               spacing: 12px;
+                              // (the words take what's left of the row and wrap in it: a long note never pushes the control over)
                               VerticalLayout {
                                   horizontal-stretch: 1;
+                                  preferred-width: 0px;
+                                  min-width: 0px;
                                   alignment: center;
                                   spacing: 2px;
-                                  HorizontalLayout { spacing: 8px; alignment: start; Text { text: f.label; color: Theme.text; font-weight: 700; } VerticalLayout { alignment: center; CostTag { name: f.label; } } }
-                                  if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                  HorizontalLayout { spacing: 8px; alignment: start; Text { text: f.label; color: Theme.text; font-weight: 700; overflow: elide; min-width: 0px; } VerticalLayout { alignment: center; CostTag { name: f.label; } } }
+                                  if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-width: 0px; }
                               }
                               if f.kind == "toggle": CenterToggle { checked: f.value == "true"; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
                       // a list's row: its buttons, then its switch

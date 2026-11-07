@@ -7340,7 +7340,7 @@ fn paint_settings(a: &App) {
                 let m = &p.manifest;
                 let state = plugin_state(&a.web.prefs, m);
                 let home = if m.section.is_empty() { String::new() } else { format!("You'll find its settings in Settings > {}. Turning it off here removes it from there too. ", m.section) };
-                let note = format!("{}{}{}{home}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if m.addon.is_empty() { String::new() } else { format!("An addon at {}. ", m.addon) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
+                let note = format!("{}{}{}{home}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if m.addon.is_empty() { String::new() } else { format!("An addon at {}. ", omnipulse_core::plugins::addon_site(m)) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
                 // (its settings, from here too: a plugin with a page elsewhere (the chatbot's, in Streaming) goes there, once it's on)
                 let more = if m.section.is_empty() { m.settings.as_array().is_some_and(|l| !l.is_empty()) } else { plugin_on(&a.web.prefs, &m.id) };
                 list.push(SetRow { cost: "Plugin".into(), head: Default::default(), label: plugin_label(m).into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false, more, button: Default::default() });
@@ -10231,9 +10231,12 @@ fn plugins_start(shared: &Shared) {
             }
         }
         match plugrun::start(&p, &set, rt.clone()) {
-            Ok(_) => PLUG_ERR.with(|e| e.borrow_mut().remove(&id)),
-            Err(e) => PLUG_ERR.with(|x| x.borrow_mut().insert(id, e)),
+            Ok(_) => { PLUG_ERR.with(|e| e.borrow_mut().remove(&id)); }
+            Err(e) => { omnipulse_core::diag::note(&format!("plugin {id} couldn't start: {e}")); PLUG_ERR.with(|x| x.borrow_mut().insert(id, e)); }
         };
+    }
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() {
+        for p in omnipulse_core::plugins::list() { println!("selftest: plugin {}: {} (plays: {})", p.manifest.id, plugin_state(&prefs, &p.manifest), plugrun::get(&p.manifest.id).is_some_and(|x| x.can("search") && x.can("resolve"))); }
     }
     paint_settings(&shared.borrow());
 }

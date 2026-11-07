@@ -304,6 +304,11 @@ pub fn addon_package(source: &str, manifest_text: &str) -> Result<Option<Package
     Ok(Some(Package { manifest: m, code, digest, bundled: false }))
 }
 
+/// An addon's site, to show for it: the host of its address (never the address itself, which may carry a key)
+pub fn addon_site(m: &Manifest) -> String {
+    reqwest::Url::parse(&m.addon).ok().and_then(|u| u.host_str().map(|h| h.to_string())).unwrap_or_else(|| m.hosts.first().cloned().unwrap_or_default())
+}
+
 /// Installs what inspect() found and you agreed to: read again from the source, and only if it's
 /// still exactly what you saw
 pub async fn install(source: &str, digest: &str) -> Result<Manifest, String> {
@@ -528,6 +533,8 @@ mod tests {
         let text = r#"{ "id": "com.example.music", "name": "Example Music", "version": "1.2.0", "description": "Songs.", "icon": "https://x/icon.png", "types": ["track"], "resources": ["search", "stream", "lyrics"] }"#;
         let pkg = addon_package("https://addons.example.com/tok123/manifest.json", text).unwrap().unwrap();
         let m = &pkg.manifest;
+        // (shown by its site: the token in its path stays out of view)
+        assert_eq!(addon_site(m), "addons.example.com");
         assert_eq!((m.id.as_str(), m.name.as_str(), m.version.as_str(), m.description.as_str()), ("addon-com-example-music", "Example Music", "1.2.0", "Songs."));
         assert_eq!(m.hosts, vec!["addons.example.com".to_string()]);
         assert_eq!(m.addon, "https://addons.example.com/tok123");
