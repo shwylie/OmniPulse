@@ -8,6 +8,15 @@ to do; it's added only if you agree, and only if it's still exactly what you saw
 `internet-archive/` here is a working example, and `internet-archive.omniplugin` is the same plugin
 as one file.
 
+## Addons: a server with a manifest
+
+An **addon** is a server rather than a script: a `manifest.json` at its address with `resources` (the
+BeatBoss / Eclipse Music shape) and no script. Paste that address as a plugin's: OmniPulse reads it, shows
+what it is, and runs its own adapter for it (`crates/core/src/addon.js`): `GET /search?q=` for songs
+(`tracks` with `id`, `title`, `artist`, `album`, `duration`, `artworkURL`, `streamURL`, `format`), and
+`GET /stream/:id` for one without a `streamURL`. Its requests go to the addon's site only; what it plays
+may come from any https site the addon points to. Catalog, lyrics and library sync aren't used.
+
 ## One file: .omniplugin
 
 An `.omniplugin` file is a zip with `manifest.json` and the script, at the top or in one folder. To

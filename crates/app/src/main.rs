@@ -7327,7 +7327,7 @@ fn paint_settings(a: &App) {
                 let m = &p.manifest;
                 let state = plugin_state(&a.web.prefs, m);
                 let home = if m.section.is_empty() { String::new() } else { format!("You'll find its settings in Settings > {}. Turning it off here removes it from there too. ", m.section) };
-                let note = format!("{}{}{home}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
+                let note = format!("{}{}{}{home}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if m.addon.is_empty() { String::new() } else { format!("An addon at {}. ", m.addon) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
                 // (its settings, from here too: a plugin with a page elsewhere (the chatbot's, in Streaming) goes there, once it's on)
                 let more = if m.section.is_empty() { m.settings.as_array().is_some_and(|l| !l.is_empty()) } else { plugin_on(&a.web.prefs, &m.id) };
                 list.push(SetRow { cost: "Plugin".into(), head: Default::default(), label: plugin_label(m).into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false, more, button: Default::default() });

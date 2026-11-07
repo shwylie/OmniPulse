@@ -853,8 +853,10 @@ pub fn plug_access(m: &omnipulse_core::plugins::Manifest) -> (Vec<String>, Vec<S
         if !bare.contains(&b) { bare.push(b); }
     }
     let web: Vec<String> = bare.iter().map(|h| if m.hosts.iter().any(|x| *x == format!("*.{h}")) { format!("{h} (any part of it)") } else { h.clone() }).collect();
+    let addon = !m.addon.is_empty();
+    if addon { can.push(format!("Be asked for songs at {} (its script is OmniPulse's own; the address is the addon's)", m.addon)); }
     if caps.contains("search") || caps.is_empty() { can.push("Show its songs in your search results, so it sees what you search for".into()); }
-    if caps.contains("play") || caps.is_empty() { can.push("Play its songs, from its own sites, and know when you play one".into()); }
+    if caps.contains("play") || caps.is_empty() { can.push(if addon { "Play its songs from whatever sites the addon points to (https), and know when you play one".into() } else { "Play its songs, from its own sites, and know when you play one".into() }); }
     if caps.contains("library") { can.push("Add its saved songs to your Library".into()); }
     if caps.contains("sockets") { can.push("Keep live connections open to its sites (a chat, its events)".into()); }
     if caps.contains("app") { warn.push("Lets the plugin use the app: add songs to your queue as requests, show alerts, read what's playing, open its sign-in pages in your browser, and keep its own settings. Only allow this for plugins you trust.".into()); }

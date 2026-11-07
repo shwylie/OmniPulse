@@ -65,7 +65,8 @@ pub async fn open_source(t: &Track, rt: tokio::runtime::Handle) -> Result<Box<dy
             if !(url.starts_with("https://") || url.starts_with("http://")) {
                 return Err(format!("{} didn't give a playable address", p.name));
             }
-            if !core::plugins::host_allowed(&p.hosts, &url) {
+            // (an addon points at streams wherever they are; a plugin plays from its own sites only)
+            if !(p.addon && url.starts_with("https://")) && !core::plugins::host_allowed(&p.hosts, &url) {
                 return Err(format!("{} may only play from {}", p.name, p.hosts.join(", ")));
             }
             // (the format: as the plugin says, else from the address's end)

@@ -29,6 +29,8 @@ pub struct Plugin {
     pub id: String,
     pub name: String,
     pub hosts: Vec<String>,
+    /// an addon (core::plugins::Manifest::addon): what it plays may come from any https site
+    pub addon: bool,
     /// what it registered (search, resolve, library...)
     pub methods: Vec<String>,
     jobs: std::sync::mpsc::Sender<Msg>,
@@ -171,7 +173,7 @@ pub fn start(pkg: &core::plugins::Package, settings: &Value, rt: tokio::runtime:
         .spawn(move || run(pid, code, settings, caps, rt, tx, inbox, ready_tx))
         .map_err(|e| e.to_string())?;
     let methods = ready_rx.recv_timeout(Duration::from_secs(CALL_SECS)).map_err(|_| "it took too long to start".to_string())??;
-    let p = Arc::new(Plugin { id: id.clone(), name: pkg.manifest.name.clone(), hosts, methods, jobs });
+    let p = Arc::new(Plugin { id: id.clone(), name: pkg.manifest.name.clone(), hosts, addon: !pkg.manifest.addon.is_empty(), methods, jobs });
     RUNNING.lock().unwrap().get_or_insert_with(HashMap::new).insert(id, p.clone());
     // (a plugin that runs on its own, a chatbot: started once it's in)
     if p.can("start") {
@@ -1396,6 +1398,63 @@ mod tests {
     /// The chatbot's actions (crate::flows' JSON, run by the plugin), against the stand-in Twitch: a command
     /// that answers, a counter kept between uses, a chat message's, "only go on if" stopping one, a raid
     /// (with its least), and a song requested from a step
+    /// An addon (a server with a manifest.json), read from its address and run as a plugin: its songs
+    /// searched, one played by its streamURL, one by /stream/:id; its fetches to its own site only, what it
+    /// plays from anywhere https
+    #[test]
+    fn an_addon_is_read_searched_and_played() {
+        let _one = one_at_a_time();
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let web = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
+        let wp = web.local_addr().unwrap().port();
+        let asked: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let a2 = asked.clone();
+        rt.spawn(async move {
+            while let Ok((mut tcp, _)) = web.accept().await {
+                let asked = a2.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    loop {
+                        let n = tcp.read(&mut chunk).await.unwrap_or(0);
+                        if n == 0 { break; }
+                        buf.extend_from_slice(&chunk[..n]);
+                        if String::from_utf8_lossy(&buf).contains("\r\n\r\n") { break; }
+                    }
+                    let text = String::from_utf8_lossy(&buf).to_string();
+                    let path = text.lines().next().unwrap_or("").split(' ').nth(1).unwrap_or("").to_string();
+                    asked.lock().unwrap().push(path.clone());
+                    let (status, body) = if path == "/tok/manifest.json" { ("200 OK", json!({ "id": "com.example.music", "name": "Example Music", "version": "1.0.0", "description": "Songs.", "types": ["track"], "resources": ["search", "stream"] }).to_string()) }
+                        else if path.starts_with("/tok/search?") { ("200 OK", json!({ "tracks": [
+                            { "id": "a1", "title": "One", "artist": { "name": "Ann" }, "album": "First", "duration": 200, "artworkURL": "https://img.example.com/a.jpg", "streamURL": "https://cdn.example.com/one.flac", "format": "flac" },
+                            { "id": "b2", "title": "Two", "artist": ["Bob", "Cy"], "duration": 180500 } ], "albums": [], "artists": [] }).to_string()) }
+                        else if path == "/tok/stream/b2" { ("200 OK", json!({ "url": "https://cdn.example.com/two.mp3", "format": "mp3", "quality": "320" }).to_string()) }
+                        else { ("404 Not Found", String::new()) };
+                    let _ = tcp.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
+                });
+            }
+        });
+        let pkg = rt.block_on(core::plugins::inspect(&format!("http://127.0.0.1:{wp}/tok/manifest.json"))).unwrap();
+        assert_eq!((pkg.manifest.id.as_str(), pkg.manifest.name.as_str(), pkg.manifest.addon.as_str()), ("addon-com-example-music", "Example Music", &*format!("http://127.0.0.1:{wp}/tok")));
+        let p = start(&pkg, &json!({}), rt.handle().clone()).unwrap();
+        assert!(p.addon && p.can("search") && p.can("resolve"));
+        let found = rt.block_on(p.call("search", vec![json!("one")])).unwrap();
+        let rows: Vec<String> = found.as_array().unwrap().iter().map(|t| format!("{} | {} | {} | {} | {}", t["id"].as_str().unwrap(), t["title"].as_str().unwrap(), t["artist"].as_str().unwrap(), t["album"].as_str().unwrap(), t["duration_ms"])).collect();
+        assert_eq!(rows, vec!["a1 | One | Ann | First | 200000".to_string(), "b2 | Two | Bob, Cy |  | 180500".into()]);
+        assert_eq!(found[0]["artwork"], json!("https://img.example.com/a.jpg"));
+        assert!(asked.lock().unwrap().iter().any(|p| p.starts_with("/tok/search?q=one&limit=")));
+        let r = rt.block_on(p.call("resolve", vec![found[0].clone()])).unwrap();
+        assert_eq!((r["url"].as_str(), r["ext"].as_str()), (Some("https://cdn.example.com/one.flac"), Some("flac")));
+        let r = rt.block_on(p.call("resolve", vec![found[1].clone()])).unwrap();
+        assert_eq!((r["url"].as_str(), r["ext"].as_str()), (Some("https://cdn.example.com/two.mp3"), Some("mp3")));
+        assert_eq!(asked.lock().unwrap().last().map(String::as_str), Some("/tok/stream/b2"));
+        // (its fetches: its own site only)
+        assert!(core::plugins::host_allowed(&p.hosts, &format!("http://127.0.0.1:{wp}/tok/search")));
+        assert!(!core::plugins::host_allowed(&p.hosts, "https://cdn.example.com/one.flac"));
+        stop(&p.id);
+    }
+
     #[test]
     fn the_chatbots_actions_run_their_steps() {
         let _one = one_at_a_time();

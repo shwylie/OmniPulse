@@ -53,6 +53,11 @@ pub struct Manifest {
     /// still being built: "(WIP)" after its name
     #[serde(default)]
     pub wip: bool,
+    /// an addon (a server with a manifest.json at its address, the BeatBoss / Eclipse Music shape): that
+    /// address; its script is OmniPulse's own adapter (addon.js), its fetches go to that site only, and
+    /// what it plays may come from any https site the addon points to
+    #[serde(default)]
+    pub addon: String,
 }
 
 fn default_main() -> String {
@@ -215,6 +220,9 @@ pub async fn inspect(source: &str) -> Result<Package, String> {
     let source = source.trim().trim_matches('"');
     let (manifest_text, code) = if source.starts_with("https://") || source.starts_with("http://") {
         let manifest_text = get_text(source, 256 * 1024).await?;
+        if let Some(pkg) = addon_package(source, &manifest_text)? {
+            return Ok(pkg);
+        }
         let m: Manifest = serde_json::from_str(&manifest_text).map_err(|e| format!("That manifest.json isn't valid: {e}"))?;
         check_manifest(&m)?;
         let base = reqwest::Url::parse(source).map_err(|e| e.to_string())?;
@@ -245,6 +253,55 @@ pub async fn inspect(source: &str) -> Result<Package, String> {
     let manifest: Manifest = serde_json::from_str(&manifest_text).map_err(|e| e.to_string())?;
     let digest = digest_of(&manifest_text, &code);
     Ok(Package { manifest, code, digest, bundled: false })
+}
+
+/// OmniPulse's own script for an addon, with the addon's address in it
+const ADDON_JS: &str = include_str!("addon.js");
+
+/// An addon's manifest (the BeatBoss / Eclipse Music shape: `resources` and no script of its own), read
+/// from its address, as a plugin: its name and description, its site as its only host, search and play as
+/// it offers them, and the adapter as its script. Not an addon's: None.
+pub fn addon_package(source: &str, manifest_text: &str) -> Result<Option<Package>, String> {
+    let v: Value = serde_json::from_str(manifest_text).map_err(|e| format!("That manifest.json isn't valid: {e}"))?;
+    let resources: Vec<String> = v["resources"].as_array().into_iter().flatten().filter_map(|r| r.as_str().or_else(|| r["name"].as_str()).map(|s| s.to_ascii_lowercase())).collect();
+    if v["main"].is_string() || !v["resources"].is_array() {
+        return Ok(None);
+    }
+    if !resources.iter().any(|r| r == "search") {
+        return Err("That addon doesn't offer search, so there'd be nothing to find in it.".into());
+    }
+    let url = reqwest::Url::parse(source).map_err(|e| e.to_string())?;
+    let host = url.host_str().map(|h| h.to_ascii_lowercase()).ok_or("That address has no site in it.")?;
+    let local = host == "127.0.0.1" || host == "localhost";
+    if url.scheme() != "https" && !(url.scheme() == "http" && local) {
+        return Err("An addon's address must be https (or http on this PC).".into());
+    }
+    // (its base: the address without its manifest.json; the token some addons put in the path stays in it)
+    let base = source.trim_end_matches('/').rsplit_once('/').map(|(b, last)| if last.eq_ignore_ascii_case("manifest.json") { b.to_string() } else { source.trim_end_matches('/').to_string() }).unwrap_or_else(|| source.to_string());
+    let raw_id = v["id"].as_str().unwrap_or("").to_ascii_lowercase();
+    let mut id: String = raw_id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect::<String>().split('-').filter(|s| !s.is_empty()).collect::<Vec<_>>().join("-");
+    if id.is_empty() { id = host.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect(); }
+    let name = v["name"].as_str().unwrap_or("").trim().to_string();
+    if name.is_empty() {
+        return Err("That addon's manifest has no name.".into());
+    }
+    let m = Manifest {
+        id: format!("addon-{id}"),
+        name: name.chars().take(80).collect(),
+        version: v["version"].as_str().unwrap_or("").to_string(),
+        author: v["author"].as_str().unwrap_or("").to_string(),
+        description: v["description"].as_str().unwrap_or("").to_string(),
+        main: "main.js".into(),
+        hosts: vec![host],
+        capabilities: vec!["search".into(), "play".into()],
+        addon: base.clone(),
+        ..Default::default()
+    };
+    check_manifest(&m)?;
+    let code = ADDON_JS.replace("__BASE__", &serde_json::to_string(&base).unwrap_or_default());
+    let pretty = serde_json::to_string_pretty(&m).unwrap_or_default();
+    let digest = digest_of(&pretty, &code);
+    Ok(Some(Package { manifest: m, code, digest, bundled: false }))
 }
 
 /// Installs what inspect() found and you agreed to: read again from the source, and only if it's
@@ -462,6 +519,31 @@ mod tests {
         m.host_settings = vec!["apiKey".into()];
         m.settings = serde_json::json!([{ "key": "apiKey", "type": "password" }]);
         assert!(check_manifest(&m).is_err());
+    }
+
+    /// An addon's manifest (a server's, with resources and no script): a plugin of its own, with the
+    /// adapter as its script and the addon's site as its host; a plugin's own manifest isn't one
+    #[test]
+    fn an_addon_manifest_is_a_plugin_with_our_script() {
+        let text = r#"{ "id": "com.example.music", "name": "Example Music", "version": "1.2.0", "description": "Songs.", "icon": "https://x/icon.png", "types": ["track"], "resources": ["search", "stream", "lyrics"] }"#;
+        let pkg = addon_package("https://addons.example.com/tok123/manifest.json", text).unwrap().unwrap();
+        let m = &pkg.manifest;
+        assert_eq!((m.id.as_str(), m.name.as_str(), m.version.as_str(), m.description.as_str()), ("addon-com-example-music", "Example Music", "1.2.0", "Songs."));
+        assert_eq!(m.hosts, vec!["addons.example.com".to_string()]);
+        assert_eq!(m.addon, "https://addons.example.com/tok123");
+        assert_eq!(m.capabilities, vec!["search".to_string(), "play".into()]);
+        assert!(m.icon.is_empty() && m.settings.is_null());
+        assert!(pkg.code.contains(r#"const BASE = "https://addons.example.com/tok123";"#));
+        assert!(!pkg.digest.is_empty());
+        // (the same again: the same digest, so installing checks out)
+        assert_eq!(addon_package("https://addons.example.com/tok123/manifest.json", text).unwrap().unwrap().digest, pkg.digest);
+        // (a base without manifest.json at its end is taken as it is)
+        assert_eq!(addon_package("http://127.0.0.1:7000/api/", text).unwrap().unwrap().manifest.addon, "http://127.0.0.1:7000/api");
+        // (not an addon: a plugin's own manifest)
+        assert!(addon_package("https://x.example.com/manifest.json", r#"{ "id": "mine", "name": "Mine", "main": "main.js", "hosts": [] }"#).unwrap().is_none());
+        // (no search: nothing to do with it; plain http elsewhere: refused)
+        assert!(addon_package("https://x.example.com/manifest.json", r#"{ "id": "a", "name": "A", "resources": ["lyrics"] }"#).is_err());
+        assert!(addon_package("http://x.example.com/manifest.json", text).is_err());
         assert!(host_allowed(&["127.0.0.1".to_string()], "http://127.0.0.1:9/x"));
     }
 
