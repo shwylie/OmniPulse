@@ -3466,6 +3466,7 @@ fn start(shared: &Shared) {
         // so it mixes in and out like any other; Spotify's own playback if there's no version of it)
         let sp_free = matches!(t.src, track::Src::Spotify(_)) && (!sp_plays_here() || mix_on_now);
         let mb = (matches!(t.src, track::Src::Catalog(_)) || listen_needs_version(&t) || sp_free) && played_as.is_none();
+        let fresh = mixed.is_none();
         let (src, version) = if let Some((_, v)) = mixed {
             (Ok(None), v)
         } else if let Some(alt) = &played_as {
@@ -3489,6 +3490,18 @@ fn start(shared: &Shared) {
                 Ok(None) => false,
             };
             if preview { full_elsewhere(&t, h.clone()).await } else { (r, None) }
+        };
+        // (its own way failed (a preview, YouTube paused, no version of it): every source that's on is asked,
+        // below its own too, and the first with the song plays it)
+        let (src, version) = match src {
+            Err(e) if fresh => match playfrom::find_anywhere(&t, &pf_prefs, &locals).await {
+                Some(alt) => match player::open_source(&alt, h.clone()).await {
+                    Ok(s) => (Ok(Some(s)), None),
+                    Err(e2) => { omnipulse_core::diag::note(&format!("Play From: {} couldn't play \"{}\" either: {e2}", alt.plat(), t.title)); (Err(e), version) }
+                },
+                None => (Err(e), version),
+            },
+            src => (src, version),
         };
         // (YouTube couldn't play it, or has no version of it: the same song from Audius, if it's there)
         let mut from_audius: Option<String> = None;
@@ -3572,6 +3585,7 @@ fn start(shared: &Shared) {
                             engine.seek(at);
                         }
                         engine.play();
+                        FAILED.with(|f| f.borrow_mut().clear());
                         ui.set_playing(true);
                         ui.set_status("".into());
                         if let Some(named) = &from_audius {
@@ -3625,10 +3639,13 @@ fn start(shared: &Shared) {
                     // already); not past 3 in a row, as when you're offline: then it stops, saying so)
                     Err(e) => {
                         let run = START_FAILS.with(|f| { f.set(f.get() + 1); f.get() });
+                        FAILED.with(|f| f.borrow_mut().insert(t.key.clone()));
                         omnipulse_core::diag::note(&format!("couldn't play \"{}\": {e}", t.title));
                         // (YouTube paused, after it asked for its bot check: the next songs would fail too, so it
                         // stops here, saying when YouTube's back, instead of going through them)
-                        if let Some(wait) = omnipulse_core::yt_stream::bot_wait() {
+                        // (only when it's YouTube that failed: a song that fails for a reason of its own goes on
+                        // to the next, not into a swap with another that fails)
+                        if let Some(wait) = omnipulse_core::yt_stream::bot_wait().filter(|_| e.contains("YouTube")) {
                             START_FAILS.with(|f| f.set(0));
                             // (a song that doesn't need YouTube, or is looked up already: played in its place,
                             // this one straight after it)
@@ -4644,6 +4661,9 @@ thread_local! {
     static PRELOADED: RefCell<String> = const { RefCell::new(String::new()) };
     /// songs in a row that couldn't be played (skipped past, up to START_FAILS_MAX)
     static START_FAILS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// songs that didn't start since one last did: never moved up to play in another's place (two that
+    /// fail would swap for ever)
+    static FAILED: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
 }
 
 /// Songs in a row that don't play before it stops trying (offline, say)
@@ -4675,7 +4695,7 @@ fn ready_now(prefs: &serde_json::Value, t: &Track) -> bool {
 /// in its place (the one that was there comes straight after, by when YouTube may be back). The two's titles
 fn pull_ready(a: &mut App, at: usize) -> Option<(String, String)> {
     let was = a.queue.items.get(at)?.t.title.clone();
-    let j = (at + 1..a.queue.items.len().min(at + 1 + PULL_REACH)).find(|&j| ready_now(&a.web.prefs, &a.queue.items[j].t))?;
+    let j = (at + 1..a.queue.items.len().min(at + 1 + PULL_REACH)).find(|&j| ready_now(&a.web.prefs, &a.queue.items[j].t) && !FAILED.with(|f| f.borrow().contains(&a.queue.items[j].t.key)))?;
     let q = a.queue.items.remove(j);
     let title = q.t.title.clone();
     a.queue.items.insert(at, q);
@@ -10288,15 +10308,15 @@ fn nav_ids(prefs: &serde_json::Value) -> Vec<String> {
     // (Stream-Safe Music on: the Streamer Mode page stands in for Discover, Rediscover, the Library,
     // Favourites, Sets & Podcasts and Artists, which are hidden meanwhile, as the web app's)
     if streamsafe::on(prefs) { ids.retain(|id| id == "navDiscover" || id == "navStats"); }
-    // (the Stream Suite, while it's on: its page a click away)
-    if plugin_runs(prefs, BOT) { ids.push("navSuite".into()); }
-    if plugin_runs(prefs, MOD) { if prefs["modOnly"].as_bool() == Some(true) { ids.insert(0, "navMod".into()); } else { ids.push("navMod".into()); } }
+    // (the Stream Suite and Mod View aren't in the sidebar: the Suite's page is in Settings > Streaming, and
+    // Mod View is the sword in the title bar while its plugin is on)
     ids
 }
 
 fn nav_paint(shared: &Shared) {
     let ids = nav_ids(&shared.borrow().web.prefs);
     if let Some(ui) = shared.borrow().ui.upgrade() {
+        ui.set_mod_shown(plugin_runs(&shared.borrow().web.prefs, MOD));
         ui.set_nav_ids(ModelRc::from(Rc::new(VecModel::from(ids.into_iter().map(slint::SharedString::from).collect::<Vec<_>>()))));
     }
 }

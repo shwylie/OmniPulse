@@ -7238,6 +7238,8 @@ export component AppWindow inherits Window {
     in property <bool> suite-shown;
     in property <bool> suite-on;
     in property <string> suite-icon;
+    // Mod View's sword, beside it: shown while its plugin is on (Settings > Plugins), lit on its page
+    in property <bool> mod-shown;
     in property <bool> stream-safe;
     // the Library's order: "artist" / "title" (1 A to Z, -1 Z to A), or "" as you liked them
     in property <string> sort-by;
@@ -7560,6 +7562,14 @@ export component AppWindow inherits Window {
                             clicked => { Tips.on = false; root.plat-toggle("suite"); }
                             pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { Tips.on = false; root.title-settings("plugin:chatbot"); } }
                         }
+                    }
+                    // Mod View: the sword, while its plugin is on; lit on its page
+                    if root.mod-shown: Rectangle {
+                        width: 32px;
+                        Rectangle { width: 28px; height: 28px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 8px; background: sta-md.has-hover || root.page == "mod" ? Theme.elevated : transparent; }
+                        Glyph { d: Icons.sword; width: 16px; height: 16px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; fill: root.page == "mod" ? Theme.accent : Theme.muted; }
+                        TipSpot { hover: sta-md.has-hover; tip: root.page == "mod" ? "Mod View is open." : "Mod View: a channel you moderate, with its stream, chat and your mod tools side by side."; }
+                        sta-md := TouchArea { clicked => { Tips.on = false; root.nav("mod"); } }
                     }
                     // Seamless Mix: grey when off; on, its colour flows from one accent to the other, quicker while a
                     // mix is playing (still while it's parked): the icon alone, as Streamer Mode's
