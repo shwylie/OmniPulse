@@ -280,17 +280,20 @@ fn run(id: String, code: String, settings: String, caps: Caps, rt: tokio::runtim
         // sockets: only with "sockets", only to its sites (or OBS's, on this PC)
         let (rt3, tx3, nx, sk, allowed, hosts, lid) = (rt.clone(), tx.clone(), next.clone(), socks.clone(), caps.sockets, caps.hosts.clone(), id.clone());
         g.set("__host_socket_open", Function::new(ctx.clone(), move |url: String| -> u32 {
-            if !allowed || !socket_allowed(&hosts, &url) { eprintln!("[plugin {lid}] socket refused: {url}"); return 0; }
+            if !allowed || !socket_allowed(&hosts, &url) { core::diag::note(&format!("[plugin {lid}] socket refused: {url}")); return 0; }
             let n = nx();
             let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<Option<String>>();
             sk.lock().unwrap().insert(n, out_tx);
             let (tx, sk2) = (tx3.clone(), sk.clone());
+            core::diag::note(&format!("[plugin {lid}] socket {n} connecting: {url}"));
+            let lid2 = lid.clone();
             rt3.spawn(async move {
                 use futures_util::{SinkExt, StreamExt};
                 let ws = match tokio_tungstenite::connect_async(url.as_str()).await {
                     Ok((ws, _)) => ws,
-                    Err(e) => { sk2.lock().unwrap().remove(&n); let _ = tx.send(Msg::Socket(n, "close", e.to_string())); return; }
+                    Err(e) => { core::diag::note(&format!("[plugin {lid2}] socket {n} failed: {e}")); sk2.lock().unwrap().remove(&n); let _ = tx.send(Msg::Socket(n, "close", e.to_string())); return; }
                 };
+                core::diag::note(&format!("[plugin {lid2}] socket {n} open"));
                 let _ = tx.send(Msg::Socket(n, "open", String::new()));
                 let (mut w, mut r) = ws.split();
                 let why = loop {
@@ -336,7 +339,8 @@ fn run(id: String, code: String, settings: String, caps: Caps, rt: tokio::runtim
         let rp = replies.clone();
         g.set("__host_reply", Function::new(ctx.clone(), move |n: u32, r: String| { rp.lock().unwrap().push((n, r)); }).map_err(e)?).map_err(e)?;
         let lid = id.clone();
-        g.set("__host_log", Function::new(ctx.clone(), move |s: String| { eprintln!("[plugin {lid}] {}", s.chars().take(2000).collect::<String>()); }).map_err(e)?).map_err(e)?;
+        // (a plugin's log line: into the app's diag log, with the rest of what happened, not only the console)
+        g.set("__host_log", Function::new(ctx.clone(), move |s: String| { core::diag::note(&format!("[plugin {lid}] {}", s.chars().take(2000).collect::<String>())); }).map_err(e)?).map_err(e)?;
         ctx.eval::<(), _>(BOOT).map_err(|e| format!("its setup failed: {e}"))?;
         let set: Function = g.get("__settings").map_err(|e| e.to_string())?;
         set.call::<_, ()>((settings,)).map_err(|e| e.to_string())?;
