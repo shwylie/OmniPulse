@@ -116,7 +116,10 @@ pub fn best(t: &Track, found: Vec<Track>) -> Option<Track> {
     let t = &want;
     let mut ranked: Vec<(f32, Track)> = found.into_iter().filter(|c| c.key != t.key).map(|c| (versions::score(t, &as_yt(&c)), c)).collect();
     ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    ranked.into_iter().find(|(s, c)| *s >= GOOD && versions::artist_hit(t, &as_yt(c)) && versions::same_version(t, &as_yt(c))).map(|(_, c)| c)
+    // (or a remix titled exactly as the song is, whoever's credited: the remixer's name in the title is the
+    // identification, when its length agrees)
+    let titled = |c: &Track| { let y = as_yt(c); versions::same_titled_version(t, &y) && versions::same_version(t, &y) && versions::length_ok(t, &y) };
+    ranked.into_iter().find(|(s, c)| (*s >= GOOD && versions::artist_hit(t, &as_yt(c)) && versions::same_version(t, &as_yt(c))) || titled(c)).map(|(_, c)| c)
 }
 
 /// Where You Liked It (prefs.playFromOwn, on unless switched off): a song plays from its own source when
@@ -163,14 +166,31 @@ async fn search(id: &str, t: &Track, q: &str, locals: &[Track]) -> Vec<Track> {
     }
 }
 
-/// The song looked for in these sources, in order: the first with it
-async fn look_in(ids: &[String], t: &Track, locals: &[Track]) -> Option<Track> {
+/// What to ask a source for the song, in order: its artist and bare title; its title with its version
+/// alone ("Gold Dust Fox Stevenson Remix": an uploader's name as the artist, "DJFreshUK", finds nothing);
+/// then both in full
+pub fn queries(t: &Track) -> Vec<String> {
     let (artist, title) = versions::guess_names(t);
-    let q = format!("{artist} {title}").trim().to_string();
+    let full = versions::match_title(t);
+    let mut out: Vec<String> = Vec::new();
+    for q in [format!("{artist} {title}"), full.clone(), format!("{artist} {full}")] {
+        let q = q.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !q.is_empty() && !out.iter().any(|x| x.eq_ignore_ascii_case(&q)) { out.push(q); }
+    }
+    out
+}
+
+/// The song looked for in these sources, in order: the first with it (each asked up to three ways)
+async fn look_in(ids: &[String], t: &Track, locals: &[Track]) -> Option<Track> {
+    let qs = queries(t);
     for id in ids {
-        if let Some(c) = best(t, search(id, t, &q, locals).await) {
-            omnipulse_core::diag::note(&format!("Play From: {} - {} plays from {} ({})", t.artist, t.title, id, c.key));
-            return Some(c);
+        for q in &qs {
+            if let Some(c) = best(t, search(id, t, q, locals).await) {
+                omnipulse_core::diag::note(&format!("Play From: {} - {} plays from {} ({}), asked \"{q}\"", t.artist, t.title, id, c.key));
+                return Some(c);
+            }
+            // (your files and YouTube Music: one look is every look)
+            if matches!(id.as_str(), "local" | "youtube") { break; }
         }
     }
     None
@@ -247,6 +267,16 @@ mod tests {
         let goplus = Track { key: "9".into(), src: Src::SoundCloud(9), title: "Mountain Song".into(), artist: "Jane's Addiction".into(), ms: 185_129, go_plus: true, ..Default::default() };
         let full = Track::plugin("p", &json!({ "id": "m", "title": "Mountain Song", "artist": "Jane's Addiction", "album": "Nothing's Shocking", "duration_ms": 241_000 })).unwrap();
         assert_eq!(best(&goplus, vec![full]).map(|c| c.key), Some("plug:p:m".to_string()));
+        // (a SoundCloud upload with the uploader as its artist: asked by title and version too, and the
+        // uploader's name taken for the artist's when it's the same squashed together)
+        let gold = Track { key: "7".into(), src: Src::SoundCloud(7), title: "Gold Dust (Fox Stevenson Remix)".into(), artist: "DJFreshUK".into(), ms: 233_000, ..Default::default() };
+        assert_eq!(queries(&gold), vec!["DJFreshUK Gold Dust", "Gold Dust (Fox Stevenson Remix)", "DJFreshUK Gold Dust (Fox Stevenson Remix)"]);
+        let fox = Track::plugin("p", &json!({ "id": "g", "title": "Gold Dust (Fox Stevenson Remix)", "artist": "DJ Fresh", "duration_ms": 233_000 })).unwrap();
+        let shy = Track::plugin("p", &json!({ "id": "s", "title": "Gold Dust (SHY FX Re-Edit)", "artist": "DJ Fresh", "duration_ms": 183_000 })).unwrap();
+        assert_eq!(best(&gold, vec![shy.clone(), fox]).map(|c| c.key), Some("plug:p:g".to_string()));
+        // (the same remix title exactly, from someone else entirely: still it; the wrong remix never)
+        let other = Track::plugin("p", &json!({ "id": "o", "title": "Gold Dust (Fox Stevenson Remix)", "artist": "Some Uploader", "duration_ms": 234_000 })).unwrap();
+        assert_eq!(best(&gold, vec![shy, other]).map(|c| c.key), Some("plug:p:o".to_string()));
         assert_eq!(source_of(&want), "youtube");
         assert_eq!(source_of(&strobe), "plug:p");
         // (decided once, and itself till then)

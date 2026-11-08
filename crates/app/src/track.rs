@@ -141,11 +141,14 @@ impl Track {
         if t["kind"].as_str().is_some_and(|k| k != "track") {
             return None;
         }
-        Some(Track {
+        // (the artists as SoundCloud's metadata names them, "DJ Fresh, Fox Stevenson", over the uploader's
+        // username, "DJFreshUK", where it has them)
+        let meta_artist = t["metadata_artist"].as_str().map(str::trim).filter(|a| !a.is_empty()).map(String::from);
+        let mut made = Track {
             src: Src::SoundCloud(id),
             key: id.to_string(),
             title: t["title"].as_str().unwrap_or("Untitled").to_string(),
-            artist: t["user"]["username"].as_str().unwrap_or("").to_string(),
+            artist: meta_artist.clone().unwrap_or_else(|| t["user"]["username"].as_str().unwrap_or("").to_string()),
             album: String::new(),
             ms: t["full_duration"].as_u64().or(t["duration"].as_u64()).unwrap_or(0),
             art: t["artwork_url"].as_str().or(t["user"]["avatar_url"].as_str()).unwrap_or("").replace("-large", "-t200x200"),
@@ -159,7 +162,10 @@ impl Track {
             uploader: t["user"]["username"].as_str().unwrap_or("").to_string(),
             added_by: String::new(),
         }
-        .tidied())
+        .tidied();
+        // (the metadata's artists stay as they are: not an "Artist - Song" title's guess)
+        if let Some(a) = meta_artist { made.artist = lookalikes(&a); }
+        Some(made)
     }
 
     /// A plugin's track: { id, title, artist, album?, duration_ms?, artwork?, link?, license? }

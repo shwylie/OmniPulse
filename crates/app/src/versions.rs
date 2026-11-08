@@ -156,7 +156,29 @@ pub fn artist_hit(t: &Track, c: &YtTrack) -> bool {
     let (ga, _) = guess_names(t);
     let artist: Vec<String> = match_words(if ga.is_empty() { &t.artist } else { &ga }).into_iter().filter(|w| w != "the").collect();
     let place: HashSet<String> = match_words(&format!("{} {}", c.artists, c.title)).into_iter().collect();
-    artist.is_empty() || artist.iter().all(|w| place.contains(w))
+    if artist.is_empty() || artist.iter().all(|w| place.contains(w)) { return true; }
+    // (an uploader's name run together, "DJFreshUK" for DJ Fresh: the same once the spaces are gone, one
+    // holding the other, four letters at least)
+    let squash = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
+    let mine = squash(&artist.join(""));
+    let theirs = squash(&c.artists);
+    mine.len() >= 4 && theirs.len() >= 4 && (mine.contains(&theirs) || theirs.contains(&mine))
+}
+
+/// The same title, word for word (uploads' tags like "(Official Audio)" aside), and one that names a version
+/// ("Gold Dust (Fox Stevenson Remix)"): a remixer's name and the song's is identification enough on its own,
+/// whoever uploaded it or is credited
+pub fn same_titled_version(t: &Track, c: &YtTrack) -> bool {
+    let want = match_words(&match_title(t));
+    let got = match_words(&upload_title(&c.title));
+    !want.is_empty() && want == got && want.iter().any(|w| VERSION_WORDS.contains(&w.as_str()))
+}
+
+/// The lengths agree, where both are known: within a quarter
+pub fn length_ok(t: &Track, c: &YtTrack) -> bool {
+    let (d1, d2) = (t.ms as f32, c.duration_ms as f32);
+    if d1 <= 40_000.0 || d2 <= 0.0 { return true; }
+    (d1 - d2).abs() / d1 <= 0.25
 }
 
 /// The same version of the song: neither is a remix, edit, live take... the other isn't (a remix album's
