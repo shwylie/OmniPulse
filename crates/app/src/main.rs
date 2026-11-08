@@ -4657,6 +4657,8 @@ thread_local! {
 /// Whether a song is played from YouTube here (its own video, or its YouTube Music version: a catalogue song, a
 /// Go+ track, a Spotify song with a free account or Seamless Mix on)
 fn needs_youtube(prefs: &serde_json::Value, t: &Track) -> bool {
+    // (Play From has found it elsewhere: it plays from there)
+    if let Some(alt) = playfrom::played_as(&t.key) { return matches!(alt.src, track::Src::YouTube(_)); }
     let sp_yt = matches!(t.src, track::Src::Spotify(_)) && (!sp_plays_here() || smart_on(prefs));
     matches!(t.src, track::Src::YouTube(_)) || t.go_plus || matches!(t.src, track::Src::Catalog(_)) || listen_needs_version(t) || sp_yt
 }
@@ -4747,15 +4749,29 @@ fn preload_next(shared: &Shared) {
     }
     let yt_id = |t: &Track| if let track::Src::YouTube(id) = &t.src { Some(id.clone()) } else { None };
     // (a Spotify song from YouTube Music: with a free account, or Seamless Mix on)
-    let sp_yt = matches!(next.src, track::Src::Spotify(_)) && (!sp_plays_here() || smart_on(&shared.borrow().web.prefs));
-    let via_yt = next.go_plus || matches!(next.src, track::Src::Catalog(_)) || listen_needs_version(&next) || sp_yt;
-    if !via_yt && yt_id(&next).is_none() { return; }   // (the others start at once anyway)
+    let mix_on = smart_on(&shared.borrow().web.prefs);
+    let sp_yt = matches!(next.src, track::Src::Spotify(_)) && (!sp_plays_here() || mix_on);
+    let via_yt_itself = next.go_plus || matches!(next.src, track::Src::Catalog(_)) || listen_needs_version(&next) || sp_yt;
+    // (Play From: a source above its own may have it; decided ahead, below, before YouTube's asked anything)
+    let (pf_prefs, locals) = { let a = shared.borrow(); (a.web.prefs.clone(), a.library.iter().filter(|t| t.plat() == "local").cloned().collect::<Vec<_>>()) };
+    let pf_may = playfrom::sources(&pf_prefs).len() > 1;
+    if !via_yt_itself && yt_id(&next).is_none() && !pf_may { return; }   // (the others start at once anyway)
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
     if let Some(ui) = weak.upgrade() { ui.set_preloading(true); }
     // (what would play it if YouTube Music has no version: Spotify's own playback, if it plays here)
     let spotify_after = sp_plays_here() && (matches!(next.src, track::Src::Spotify(_)) || next.go_plus);
+    let needs_other = plays_elsewhere(&next, mix_on);
     rt.spawn(async move {
-        let id = if via_yt { versions::find(&next).await.map(|v| v.yt.id) } else { yt_id(&next) };
+        // (found in another source by Play From: that plays it, so YouTube isn't asked, paused or not; a
+        // YouTube Music source's copy: looked up as a YouTube song is)
+        let plays = playfrom::find(&next, &pf_prefs, &locals, needs_other).await;
+        let via_yt = plays.is_none() && via_yt_itself;
+        let as_played = plays.clone().unwrap_or_else(|| next.clone());
+        if !via_yt && yt_id(&as_played).is_none() {
+            let _ = weak.upgrade_in_event_loop(move |ui| ui.set_preloading(false));
+            return;
+        }
+        let id = if via_yt { versions::find(&next).await.map(|v| v.yt.id) } else { yt_id(&as_played) };
         // (no version to play it from: it would be silence when it came up (a mix fading the one playing out
         // into nothing, then nothing); left out now, the one after it got ready instead)
         let mut paused = false;
