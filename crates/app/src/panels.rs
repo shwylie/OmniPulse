@@ -105,7 +105,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "hidden" => vec![],
         "plugins" => vec![("plugSource", json!(""))],
         "playfrom" => vec![],
-        "dockchat" | "dockfeed" | "dockviewers" | "dockinfo" | "multichat" => vec![],
+        "dockchat" | "dockfeed" | "dockviewers" | "dockinfo" | "dockstats" | "multichat" => vec![],
         _ => vec![("recentWindow", json!("week"))],
     }
 }

@@ -14,6 +14,8 @@ use std::{
 pub const CHAT_HTML: &str = include_str!("../widget/dock-chat.html");
 pub const ACTIVITY_HTML: &str = include_str!("../widget/dock-activity.html");
 pub const INFO_HTML: &str = include_str!("../widget/dock-info.html");
+/// This session's numbers: live or not, uptime, viewers, followers and subs, on each platform
+pub const STATS_HTML: &str = include_str!("../widget/dock-stats.html");
 /// Who's watching: the chatbot's viewer list (Twitch's chatters, and who's chatted on Kick and YouTube)
 pub const VIEWERS_HTML: &str = include_str!("../widget/dock-viewers.html");
 /// The multichat, on stream: the same chat, see-through, for a Browser source
@@ -153,16 +155,36 @@ pub fn page_preview_set(v: Option<(String, Value)>) {
     if *g != v { *g = v; PAGE_PREVIEW_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
 }
 
+/// The Chat Dock's look, carried to another dock that follows it (its "follow", on unless switched off): its
+/// colours, accent, font, corners, spacing and design. A design the other hasn't is its nearest (the pages
+/// map Bubbles to Cards and Ribbon to Plain themselves)
+pub const LOOK_KEYS: [&str; 6] = ["look", "accent", "font", "corners", "density", "style"];
+
+pub fn with_chat_look(page: &str, opt: Value, chat: &Value) -> Value {
+    if page == "chat" || page.starts_with("multichat") || !chat.is_object() { return opt; }
+    let follows = opt.get("follow").map(|f| f != false).unwrap_or(true);
+    if !follows { return opt; }
+    let mut o = match opt { Value::Object(o) => o, _ => serde_json::Map::new() };
+    for k in LOOK_KEYS {
+        if let Some(v) = chat.get(k) { o.insert(k.to_string(), v.clone()); }
+    }
+    Value::Object(o)
+}
+
 /// One page's: { n, opt, theme } (opt null: none kept yet, the page's own are sent to be kept). A preview gets
-/// what's being changed, if it's this page's
+/// what's being changed, if it's this page's. A dock that follows the Chat Dock's look gets it in its opt
 pub fn page_settings(page: &str, preview: bool) -> Value {
+    let chat = PAGE_SETTINGS.lock().unwrap().as_ref().map(|a| a["chat"].clone()).unwrap_or(Value::Null);
     if preview {
         if let Some((_, opt)) = PAGE_PREVIEW.lock().unwrap().as_ref().filter(|x| x.0 == page) {
-            return json!({ "n": PAGE_PREVIEW_N.load(std::sync::atomic::Ordering::Relaxed), "opt": opt, "theme": APP_THEME.lock().unwrap().clone() });
+            return json!({ "n": PAGE_PREVIEW_N.load(std::sync::atomic::Ordering::Relaxed), "opt": with_chat_look(page, opt.clone(), &chat), "theme": APP_THEME.lock().unwrap().clone() });
         }
     }
     let opt = PAGE_SETTINGS.lock().unwrap().as_ref().map(|a| a[page].clone()).unwrap_or(Value::Null);
-    json!({ "n": PAGE_SETTINGS_N.load(std::sync::atomic::Ordering::Relaxed), "opt": opt, "theme": APP_THEME.lock().unwrap().clone() })
+    // (none kept yet: the chat's look alone, so a fresh dock matches it from the start)
+    let opt = if opt.is_null() && chat.is_object() { with_chat_look(page, json!({}), &chat) } else { with_chat_look(page, opt, &chat) };
+    let n = PAGE_SETTINGS_N.load(std::sync::atomic::Ordering::Relaxed);
+    json!({ "n": n, "opt": opt, "theme": APP_THEME.lock().unwrap().clone() })
 }
 
 /// Who may ask a dock to do something: a page of the widget's own server (OBS's dock), never another site
@@ -190,7 +212,7 @@ pub fn dock_do(cmd: Value) -> Result<String, String> {
             Ok("Cleared.".into())
         }
         // (its settings changed on the page itself, its gear in OBS: kept by OmniPulse, as its own page's)
-        "delete" | "timeout" | "ban" | "unban" | "say" | "rerun" | "settings" | "autoban" | "chatmode" | "shield" | "clearchat" | "lockdown" | "info" | "catsearch" | "setinfo" | "refund" => {
+        "delete" | "timeout" | "ban" | "unban" | "say" | "rerun" | "settings" | "autoban" | "chatmode" | "shield" | "clearchat" | "lockdown" | "info" | "catsearch" | "setinfo" | "refund" | "stats" => {
             let mut cmd = cmd;
             // (an action run again: the event as it was kept, from the feed)
             if cmd["do"] == "rerun" {
@@ -223,6 +245,18 @@ mod tests {
         let gone: Vec<u64> = j["gone"].as_array().unwrap().iter().filter_map(|x| x.as_u64()).collect();
         assert!(gone.contains(&(last - 2)) && !gone.contains(&(last - 1)) && !gone.contains(&last), "{j}");
         assert_eq!(chat_json(last)["items"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn a_dock_follows_the_chat_docks_look_unless_told_not_to() {
+        let chat = json!({ "look": "classic", "accent": "fire", "font": "theme", "corners": "square", "density": "roomy", "style": "neon", "twitch": true });
+        let v = with_chat_look("stats", json!({ "layout": "row", "accent": "mint", "style": "plain" }), &chat);
+        assert_eq!((v["accent"].as_str(), v["style"].as_str(), v["layout"].as_str(), v["look"].as_str()), (Some("fire"), Some("neon"), Some("row"), Some("classic")));
+        assert!(v.get("twitch").is_none());
+        let own = with_chat_look("viewers", json!({ "follow": false, "accent": "mint" }), &chat);
+        assert_eq!(own["accent"], "mint");
+        assert_eq!(with_chat_look("chat", json!({ "accent": "mint" }), &chat)["accent"], "mint");
+        assert_eq!(with_chat_look("stats", json!({}), &Value::Null), json!({}));
     }
 
     #[test]

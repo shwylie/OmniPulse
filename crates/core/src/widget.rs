@@ -360,6 +360,7 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                     p if p == "/chat" || p.strip_prefix("/chat/").is_some_and(|n| !n.is_empty() && n.len() < 4 && n.bytes().all(|b| b.is_ascii_digit())) => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::MULTICHAT_HTML.as_bytes()),
                     "/dock/activity" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::ACTIVITY_HTML.as_bytes()),
                     "/dock/info" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::INFO_HTML.as_bytes()),
+                    "/dock/stats" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::STATS_HTML.as_bytes()),
                     "/dock/viewers" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::VIEWERS_HTML.as_bytes()),
                     "/dock/viewers.json" => reply_own(&mut stream, "200 OK", "application/json", crate::docks::viewers_json().to_string().as_bytes()),
                     "/dock/chat.json" | "/dock/activity.json" => {

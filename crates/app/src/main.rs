@@ -8290,7 +8290,7 @@ fn bot_act(shared: &Shared, act: &str) {
     // (a dock, as it'll be in OBS: the real one, in a window of its own, the size of a dock)
     if let Some(path) = act.strip_prefix("dockprev:") {
         let port = shared.borrow().web.prefs["widgetPort"].as_u64().unwrap_or(7878);
-        let title = match path { "/dock/chat" => "Chat Dock", "/dock/activity" => "Activity Feed", "/dock/mod" => "Moderation Dock", "/dock/info" => "Stream Info", _ => "Viewer List" };
+        let title = match path { "/dock/chat" => "Chat Dock", "/dock/activity" => "Activity Feed", "/dock/mod" => "Moderation Dock", "/dock/info" => "Stream Info", "/dock/stats" => "Session Stats", _ => "Viewer List" };
         if path.starts_with("/dock/") { if let Err(e) = web_preview(&format!("dock{}", path.replace('/', "-")), &format!("{title} Preview"), &format!("http://127.0.0.1:{port}{path}"), 440, 720) { say(&e); } }
         return;
     }
@@ -8592,7 +8592,7 @@ fn panel_open(shared: &Shared, name: &str) {
         let output = panels::output_of(name).map(|(k, _)| k.to_string());
         let name = output.as_deref().unwrap_or(name);
         let cat = match name {
-            "requests" | "replies" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" | "lyricsw" | "socials" | "dockchat" | "dockfeed" | "dockviewers" | "dockinfo" | "multichat" => "Streaming",
+            "requests" | "replies" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" | "lyricsw" | "socials" | "dockchat" | "dockfeed" | "dockviewers" | "dockinfo" | "dockstats" | "multichat" => "Streaming",
             n if n.starts_with("social:") => "Streaming",
             "youtube" => "Integrations",
             n if n.starts_with("alert:") => "Streaming",
@@ -8602,7 +8602,7 @@ fn panel_open(shared: &Shared, name: &str) {
             _ => "Library",
         };
         let mut path = vec![("Settings".to_string(), "root".to_string()), (cat.to_string(), format!("cat:{cat}"))];
-        let widgety = matches!(name, "widget" | "lyricsw" | "alerts" | "alertlist" | "requests" | "replies" | "socials" | "dockchat" | "dockfeed" | "dockviewers" | "dockinfo" | "multichat") || name.starts_with("alert:") || name.starts_with("social:");
+        let widgety = matches!(name, "widget" | "lyricsw" | "alerts" | "alertlist" | "requests" | "replies" | "socials" | "dockchat" | "dockfeed" | "dockviewers" | "dockinfo" | "dockstats" | "multichat") || name.starts_with("alert:") || name.starts_with("social:");
         if widgety && plugin_on(&shared.borrow().web.prefs, botpage::BOT) {
             if let Some(m) = bot_manifest() { path.push((place_label(&m), format!("plugin:{}", botpage::BOT))); }
             let which = BOT_WIDGETS.with(|w| w.borrow().clone());
@@ -9515,6 +9515,7 @@ fn live_path(ui: &AppWindow) -> Option<String> {
         "dockfeed" => "/dock/activity?preview=1".to_string(),
         "dockviewers" => "/dock/viewers?preview=1".to_string(),
         "dockinfo" => "/dock/info?preview=1".to_string(),
+        "dockstats" => "/dock/stats?preview=1".to_string(),
         // (with no platforms added, the drawing's sample ones: the real one would be empty)
         "socials" if !ui.get_pf_social().sample => format!("/socials?{q}"),
         // (its look is in its address, as an OBS source's is: the page's settings put there)

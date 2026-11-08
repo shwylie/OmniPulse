@@ -2481,8 +2481,8 @@ async function start() {
   setPoints();
   // (the Viewer List dock: read now, then every minute)
   if (viewersTimer) clearInterval(viewersTimer);
-  viewersTimer = setInterval(() => { viewersRefresh().catch(() => {}); }, 60000);
-  setTimeout(() => { viewersRefresh().catch(() => {}); }, 5000);
+  viewersTimer = setInterval(() => { viewersRefresh().catch(() => {}); statsRefresh().catch(() => {}); }, 60000);
+  setTimeout(() => { viewersRefresh().catch(() => {}); statsRefresh().catch(() => {}); }, 5000);
   obsConnect();
   meldConnect();
   slobsConnect();
@@ -2608,6 +2608,7 @@ function suitePush() {
       creators: [camOverlay(), panelSet(), hudSet()],
       sponsors: sponsorPlug(),
       // (moderation, for the Chat Dock's panel: Auto-Ban's terms, Twitch's chat modes and Shield Mode, a lockdown)
+      stats: sessionStats,
       info: { twitch: streamInfo.twitch, kick: streamInfo.kick, found: streamInfo.found, said: streamInfo.said, at: streamInfo.at, canTwitch: !!(S().userId && apiToken), canKick: !!(S().kickToken && S().kickUserId) },
       mod: { autoban: { on: yes(x.abOn), terms: String(x.abTerms || "").split(/\r?\n|\|/).map((t) => t.trim()).filter(Boolean) }, chat: modState.chat, shield: modState.shield, lock: !!modState.lock, twitch: !!(S().userId && apiToken) },
       gifs: { goals: x.gifGoals || "", timer: x.gifTimer || "", latest: x.gifLatest || "", raid: x.gifRaid || "", hype: x.gifHype || "", voteskip: x.gifVoteskip || "", wheel: x.gifWheel || "", leaderboard: x.gifLeaderboard || "", tune: x.gifTune || "" },
@@ -3158,6 +3159,48 @@ function modeBody(mode, on, secs, mins) {
   if (mode === "unique") return { unique_chat_mode: !!on };
   return {};
 }
+// ---------- the Session Stats dock: live or not, for how long, who's watching, followers and subs, on each
+// platform (Twitch's by its API; Kick's by its API when signed in, else its public channel page; Kick shares
+// no sub count) ----------
+const sessionStats = { twitch: null, kick: null, at: 0 };
+async function statsRefresh() {
+  if (S().userId && apiToken) {
+    const t = { on: true, live: false, started: 0, viewers: null, followers: null, subs: null, note: "" };
+    try {
+      const st = ((await helix("GET", "streams?user_id=" + S().userId)).data || [])[0];
+      if (st) { t.live = st.type === "live"; t.viewers = num(st.viewer_count); t.started = Date.parse(st.started_at) || 0; }
+    } catch (e) { t.note = "Couldn't read the stream."; }
+    try { t.followers = num((await helix("GET", "channels/followers?broadcaster_id=" + S().userId + "&first=1")).total); } catch (e) {}
+    try { t.subs = num((await helix("GET", "subscriptions?broadcaster_id=" + S().userId + "&first=1")).total); } catch (e) { t.subs = null; if (/40[13]/.test(e.message)) t.note = "Sign in to Twitch again to see subs."; }
+    sessionStats.twitch = t;
+  } else sessionStats.twitch = null;
+  const slug = String(S().kickChannel || "").trim().toLowerCase().replace(/_/g, "-");
+  if ((yes(S().kickOn) && slug) || (S().kickToken && S().kickUserId)) {
+    const k = { on: true, live: false, started: 0, viewers: null, followers: null, subs: null, note: "Kick doesn't share sub counts." };
+    let got = false;
+    if (S().kickToken && S().kickUserId) {
+      try {
+        const c = ((await kickApi("GET", "channels?broadcaster_user_id=" + encodeURIComponent(S().kickUserId))).data || [])[0] || {};
+        const s = c.stream || {};
+        k.live = !!s.is_live; k.viewers = s.is_live ? num(s.viewer_count) : null; k.started = s.is_live ? (Date.parse(s.start_time) || 0) : 0; got = true;
+      } catch (e) {}
+    }
+    if (slug) {
+      try {
+        const r = await OmniPulse.fetch("https://kick.com/api/v2/channels/" + encodeURIComponent(slug), { headers: { Accept: "application/json", "User-Agent": "OmniPulse" } });
+        if (r.ok) {
+          const ch = await r.json();
+          k.followers = num(ch.followers_count);
+          if (!got) { k.live = !!ch.livestream; k.viewers = ch.livestream ? num(ch.livestream.viewer_count) : null; k.started = ch.livestream ? (Date.parse(ch.livestream.start_time || ch.livestream.created_at) || 0) : 0; }
+        }
+      } catch (e) {}
+    }
+    sessionStats.kick = k;
+  } else sessionStats.kick = null;
+  sessionStats.at = Date.now();
+  suitePush();
+}
+
 // ---------- the Stream Info dock: your title and category on Twitch and Kick, read and changed ----------
 const streamInfo = { twitch: null, kick: null, found: { q: "", list: [] }, said: "", at: 0 };
 async function infoRead() {
@@ -3194,6 +3237,8 @@ async function dockDo(cmd) {
     }
     // (the Stream Info dock: read again; categories found as it's typed; the title and category set)
     case "info": await infoRead(); return "";
+    // (the Session Stats dock: read again)
+    case "stats": await statsRefresh(); return "";
     case "catsearch": {
       const q = String(cmd.q || "").trim().slice(0, 80);
       const list = [];

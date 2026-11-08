@@ -6375,7 +6375,8 @@ component BotPage inherits Rectangle {
                             { n: "Activity Feed", t: "Follows, subs, bits, raids, rewards and the rest in OBS, each alert replayed with a click.", p: "/dock/activity", i: Icons.bell, k: "dockfeed" },
                             { n: "Moderation Dock", t: "Pile-Up, Raid Lockdown, chat modes, Shield Mode and Auto-Ban on their own, beside your chat. You change it in the Chat Dock's settings.", p: "/dock/mod", i: Icons.shield, k: "dockchat" }],
                         [{ n: "Stream Info", t: "Your title and category on Twitch and Kick, changed on both at once, without opening their dashboards.", p: "/dock/info", i: Icons.broadcast, k: "dockinfo" },
-                            { n: "Viewer List", t: "Who's in your chat, with moderators, VIPs and subscribers first, and a time-out or ban a click away.", p: "/dock/viewers", i: Icons.person, k: "dockviewers" }],
+                            { n: "Viewer List", t: "Who's in your chat, with moderators, VIPs and subscribers first, and a time-out or ban a click away.", p: "/dock/viewers", i: Icons.person, k: "dockviewers" },
+                            { n: "Session Stats", t: "Live or not, uptime, viewers, followers and subs, Twitch and Kick each in a block of their own.", p: "/dock/stats", i: Icons.stats, k: "dockstats" }],
                     ]: HorizontalLayout {
                         spacing: 10px;
                         for d[di] in row: WidgetTile {
@@ -7392,8 +7393,8 @@ export component AppWindow inherits Window {
     // (Mod View's page: covered by the same, the queue aside (it sits beside the page, not over it))
     out property <bool> mod-covered: root.flow-open || root.setup-open || root.taste-open || root.ks-open || root.tp-open || root.la-open || root.name-open || root.ask-open || root.jam-open || root.viz-full || WEdit.open;
     /// (a dock's settings page: its preview is the real dock)
-    property <bool> pf-dock: root.pf-preview == "dockchat" || root.pf-preview == "dockfeed" || root.pf-preview == "dockviewers" || root.pf-preview == "dockinfo";
-    property <string> pf-dock-name: root.pf-preview == "dockchat" ? "Chat Dock" : root.pf-preview == "dockfeed" ? "Activity Feed" : root.pf-preview == "dockviewers" ? "Viewer List" : "Stream Info";
+    property <bool> pf-dock: root.pf-preview == "dockchat" || root.pf-preview == "dockfeed" || root.pf-preview == "dockviewers" || root.pf-preview == "dockinfo" || root.pf-preview == "dockstats";
+    property <string> pf-dock-name: root.pf-preview == "dockchat" ? "Chat Dock" : root.pf-preview == "dockfeed" ? "Activity Feed" : root.pf-preview == "dockviewers" ? "Viewer List" : root.pf-preview == "dockstats" ? "Session Stats" : "Stream Info";
     out property <bool> covered: root.setup-open || root.taste-open || root.ks-open || root.tp-open || root.la-open || root.name-open || root.ask-open || root.jam-open || root.viz-full || root.queue-open || WEdit.open;
     in property <int> setup-at;
     in property <bool> setup-web;

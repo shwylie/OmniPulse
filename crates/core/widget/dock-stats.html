@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmniPulse Session Stats</title>
+<style>
+  /* OmniPulse's Session Stats dock, for OBS (Docks > Custom Browser Docks): whether you're live, for how long,
+     who's watching, your followers and subs, on each platform in a block of its own */
+  :root {
+    --bg: #1b1d24; --panel: #23262f; --line: #2e323d; --text: #e6e8ee; --dim: #8b91a1; --accent: #7aa2ff;
+    --twitch: #a970ff; --kick: #53fc18; --live: #ff4d6d; --fs: 13px; --accent2: #c08bff; --pad: 1;
+  }
+  * { box-sizing: border-box; }
+  * { scrollbar-width: thin; scrollbar-color: var(--dim) transparent; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 4px; border: 2px solid var(--bg); }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: var(--fs) / 1.4 "Segoe UI", system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  button { font: inherit; color: inherit; }
+  header { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
+  header h1 { margin: 0 auto 0 2px; font-size: 13px; font-weight: 600; }
+  .icon { border: 0; background: transparent; color: var(--dim); padding: 2px 6px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  .icon:hover { color: var(--text); background: var(--line); }
+  main { flex: 1; overflow: auto; padding: calc(10px * var(--pad)); display: flex; flex-direction: column; gap: calc(10px * var(--pad)); }
+  /* one platform: its name, then its numbers */
+  .plat { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--c, var(--line)); border-radius: 10px; padding: calc(8px * var(--pad)) 10px; display: flex; flex-direction: column; gap: calc(8px * var(--pad)); min-width: 0; }
+  .plat h2 { margin: 0; font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 6px; color: var(--c, var(--text)); }
+  .plat h2 svg { width: 14px; height: 14px; fill: currentColor; flex: none; }
+  .plat h2 .state { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--dim); display: inline-flex; align-items: center; gap: 5px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .plat h2 .state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+  .plat.live h2 .state { color: var(--live); }
+  .plat.live h2 .state::before { background: var(--live); box-shadow: 0 0 6px var(--live); }
+  .nums { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: calc(6px * var(--pad)); }
+  .n { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; }
+  .n b { display: block; font-size: calc(var(--fs) * 1.45); font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .n span { display: block; font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+  .n.off b { color: var(--dim); font-weight: 500; }
+  .note { color: var(--dim); font-size: 11px; }
+  .note:empty { display: none; }
+  /* Across: the platforms side by side, each one's numbers in a row (a wide, short dock) */
+  body.h-row main { flex-direction: row; align-items: stretch; }
+  body.h-row .plat { flex: 1 1 0; }
+  body.h-row .nums { grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); }
+  /* spacing */
+  body.d-compact { --pad: 0.6; } body.d-roomy { --pad: 1.6; }
+  /* Glass */
+  body.st-glass { background: radial-gradient(90% 60% at 0% 0%, color-mix(in srgb, var(--accent2) 22%, transparent), transparent 70%), radial-gradient(90% 60% at 100% 100%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%), var(--bg); }
+  body.st-glass header { background: color-mix(in srgb, var(--panel) 70%, transparent); border-color: #ffffff1c; }
+  body.st-glass header h1 { font-size: 15px; font-weight: 800; background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  body.st-glass .plat { background: color-mix(in srgb, var(--panel) 60%, transparent); border-color: #ffffff1c; border-left-color: var(--c); }
+  body.st-glass .n { background: color-mix(in srgb, var(--bg) 55%, transparent); border-color: #ffffff14; border-radius: 12px; }
+  /* Neon */
+  body.st-neon header { border-bottom: 1px solid var(--accent); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 55%, transparent); }
+  body.st-neon header h1 { color: var(--accent); text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); letter-spacing: 0.08em; text-transform: uppercase; }
+  body.st-neon .plat { background: transparent; box-shadow: -3px 0 8px -3px var(--c); }
+  body.st-neon .n { background: transparent; border-color: color-mix(in srgb, var(--c) 45%, var(--line)); }
+  body.st-neon .n b { color: var(--c); text-shadow: 0 0 8px color-mix(in srgb, var(--c) 60%, transparent); }
+  /* Cards */
+  body.st-cards header { border-bottom: 2px solid var(--accent); }
+  body.st-cards .plat { border-left-width: 1px; border-top: 3px solid var(--c); }
+  /* what it shows */
+  body.no-uptime .k-uptime, body.no-viewers .k-viewers, body.no-followers .k-followers, body.no-subs .k-subs, body.no-live .state, body.no-twitch #twitch, body.no-kick #kick { display: none; }
+  body.sq *, body.sq *::after { border-radius: 0 !important; }
+  #tip { position: fixed; left: 0; top: 0; display: none; max-width: calc(100vw - 8px); background: #000c; color: #fff; font-size: 11px; line-height: 1.35; padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 1000; }
+  #tip.show { display: block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Session Stats</h1>
+  <button class="icon" id="again" type="button" title="Read them again from Twitch and Kick">&#x21bb;</button>
+</header>
+<main>
+  <section class="plat" id="twitch" style="--c: var(--twitch)">
+    <h2><svg viewBox="0 0 24 24"><path d="M4.3 2 3 5.4v13.8h4.7V22h2.7l2.6-2.8h3.8l5.2-5.3V2zm16 11-2.9 3h-4.7l-2.6 2.6V16H6.3V3.7h14zm-2.9-6v5.3h-1.8V7zm-4.8 0v5.3h-1.8V7z"/></svg>Twitch<span class="state">Offline</span></h2>
+    <div class="nums">
+      <div class="n k-uptime"><b data-k="uptime">—</b><span>Uptime</span></div>
+      <div class="n k-viewers"><b data-k="viewers">—</b><span>Viewers</span></div>
+      <div class="n k-followers"><b data-k="followers">—</b><span>Followers</span></div>
+      <div class="n k-subs"><b data-k="subs">—</b><span>Subs</span></div>
+    </div>
+    <div class="note"></div>
+  </section>
+  <section class="plat" id="kick" style="--c: var(--kick)">
+    <h2><svg viewBox="0 0 24 24"><path d="M3 2h6v6h2V5h2V2h8v8h-2v2h-2v2h2v2h2v6h-8v-3h-2v-3H9v6H3z"/></svg>Kick<span class="state">Offline</span></h2>
+    <div class="nums">
+      <div class="n k-uptime"><b data-k="uptime">—</b><span>Uptime</span></div>
+      <div class="n k-viewers"><b data-k="viewers">—</b><span>Viewers</span></div>
+      <div class="n k-followers"><b data-k="followers">—</b><span>Followers</span></div>
+      <div class="n k-subs"><b data-k="subs">—</b><span>Subs</span></div>
+    </div>
+    <div class="note"></div>
+  </section>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  // (?preview=1: its settings page's preview in OmniPulse: it follows the page as it's changed and shows
+  // made-up numbers if there's nothing real yet)
+  const PV = /[?&]preview=1/.test(location.search);
+  const DEF = { twitch: true, kick: true, live: true, uptime: true, viewers: true, followers: true, subs: true, layout: "stack", size: "13", look: "app", style: "plain", accent: "app", font: "app", corners: "app", density: "normal", follow: true };
+  let opt = Object.assign({}, DEF), appTheme = null, fontOn = "", setN = -1;
+  const CLASSIC = { bg: "#1b1d24", panel: "#23262f", line: "#2e323d", text: "#e6e8ee", muted: "#8b91a1", accent: "#7aa2ff", accent2: "#c08bff", light: false, rounded: true, font: "" };
+  const PALS = { sunset: ["#ff8a5c", "#ff5c8a"], ocean: ["#3ec7ff", "#5c7cff"], candy: ["#ff8fd8", "#a78bff"], mint: ["#5ef2b8", "#3ec7ff"], fire: ["#ffb03a", "#ff5c3a"], gold: ["#ffd76e", "#ffa53a"], mono: ["#f2f2f2", "#a8a8a8"] };
+  function applyLook() {
+    const t = opt.look === "classic" || !appTheme ? CLASSIC : appTheme, r = document.documentElement.style, pal = PALS[opt.accent];
+    r.setProperty("--bg", t.bg); r.setProperty("--panel", t.panel); r.setProperty("--line", t.line); r.setProperty("--text", t.text); r.setProperty("--dim", t.muted);
+    r.setProperty("--accent", pal ? pal[0] : t.accent); r.setProperty("--accent2", pal ? pal[1] : t.accent2 || t.accent);
+    r.setProperty("--fs", (Number(opt.size) || 13) + "px");
+    const c = document.body.classList;
+    c.toggle("light", !!t.light);
+    c.toggle("sq", opt.corners === "square" || (opt.corners !== "rounded" && !t.rounded));
+    ["compact", "roomy"].forEach((d) => c.toggle("d-" + d, opt.density === d));
+    // (the Chat Dock's designs it hasn't: Bubbles as Cards, Ribbon as Plain)
+    const st = opt.style === "bubbles" ? "cards" : opt.style === "ribbon" ? "plain" : opt.style;
+    ["glass", "cards", "neon"].forEach((s) => c.toggle("st-" + s, st === s));
+    c.toggle("h-row", opt.layout === "row");
+    const f = opt.font === "theme" ? t.font || "" : "";
+    if (f && f !== fontOn) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(f).replace(/%20/g, "+") + ":wght@400;600;700&display=swap"; document.head.append(l); }
+    fontOn = f;
+    document.body.style.fontFamily = f ? '"' + f + '", "Segoe UI", system-ui, sans-serif' : "";
+    ["twitch", "kick", "live", "uptime", "viewers", "followers", "subs"].forEach((k) => c.toggle("no-" + k, !opt[k]));
+  }
+  async function look() {
+    try {
+      const j = await (await fetch("/dock/settings.json?page=stats" + (PV ? "&preview=1" : ""), { cache: "no-store" })).json();
+      const themed = JSON.stringify(j.theme || null) !== JSON.stringify(appTheme);
+      if (themed) appTheme = j.theme || null;
+      if (j.n !== setN) { setN = j.n; opt = Object.assign({}, DEF, j.opt && typeof j.opt === "object" ? j.opt : {}); applyLook(); }
+      else if (themed) applyLook();
+    } catch (e) {}
+    setTimeout(look, PV ? 500 : 3000);
+  }
+  const act = (cmd) => PV ? Promise.resolve({ ok: true }) : fetch("/dock/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cmd) }).then((r) => r.json()).catch(() => ({ ok: false }));
+  $("again").onclick = () => act({ do: "stats" });
+  const fmt = (n) => n == null ? "—" : Number(n) >= 1e6 ? (Number(n) / 1e6).toFixed(1).replace(/\.0$/, "") + "M" : Number(n) >= 10000 ? (Number(n) / 1000).toFixed(1).replace(/\.0$/, "") + "K" : String(Math.round(Number(n)));
+  const span = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return (h ? h + ":" : "") + String(m).padStart(h ? 2 : 1, "0") + ":" + String(x).padStart(2, "0"); };
+  // (what was last read, and when, so the uptime ticks between reads)
+  let stats = null, readAt = 0;
+  function drawOne(id, p) {
+    const el = $(id);
+    const on = p && p.on;
+    el.classList.toggle("live", !!(on && p.live));
+    el.querySelector(".state").textContent = !on ? "Not signed in" : p.live ? "Live" : "Offline";
+    const v = (k) => el.querySelector('[data-k="' + k + '"]');
+    const set = (k, text, off) => { const b = v(k); b.textContent = text; b.parentElement.classList.toggle("off", !!off); };
+    const live = !!(on && p.live);
+    set("uptime", live && p.started ? span(Date.now() - p.started) : "—", !live);
+    set("viewers", live ? fmt(p.viewers) : "—", !live);
+    set("followers", on ? fmt(p.followers) : "—", !on);
+    set("subs", on && p.subs != null ? fmt(p.subs) : "—", !(on && p.subs != null));
+    el.querySelector(".note").textContent = on && p.note ? p.note : "";
+  }
+  function draw() {
+    const s = stats || {};
+    drawOne("twitch", s.twitch);
+    drawOne("kick", s.kick);
+  }
+  const SAMPLE = { twitch: { on: true, live: true, started: Date.now() - 83 * 60000, viewers: 142, followers: 12840, subs: 96 }, kick: { on: true, live: true, started: Date.now() - 83 * 60000, viewers: 37, followers: 2310, subs: null, note: "Kick doesn't share sub counts." } };
+  async function poll() {
+    try {
+      const s = await (await fetch("/now.json", { cache: "no-store" })).json();
+      const st = s.suite && s.suite.stats;
+      const sample = PV && !(st && (st.twitch || st.kick));
+      stats = sample ? SAMPLE : st || null;
+      readAt = Date.now();
+    } catch (e) { if (PV) stats = SAMPLE; }
+    draw();
+    setTimeout(poll, 2000);
+  }
+  // (the uptime ticks every second)
+  setInterval(() => { if (stats) draw(); }, 1000);
+  look();
+  act({ do: "stats" });
+  poll();
+})();
+</script>
+<div id="tip" role="tooltip"></div>
+<script>
+  (() => {
+    const tip = document.getElementById("tip");
+    let on = null;
+    const place = () => {
+      if (!on || !on.isConnected || !on.dataset.tip) { tip.classList.remove("show"); on = null; return; }
+      if (tip.textContent !== on.dataset.tip) tip.textContent = on.dataset.tip;
+      tip.classList.add("show");
+      const r = on.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight, gap = 6, edge = 4;
+      let y = r.bottom + gap;
+      if (y + h > innerHeight - edge) y = r.top - gap - h;
+      y = Math.min(Math.max(edge, y), innerHeight - h - edge);
+      const x = Math.min(Math.max(edge, r.right - w), innerWidth - w - edge);
+      tip.style.left = Math.max(edge, x) + "px"; tip.style.top = Math.max(edge, y) + "px";
+    };
+    document.addEventListener("mouseover", (e) => {
+      const t = e.target.closest ? e.target.closest("[title],[data-tip]") : null;
+      if (t && t.hasAttribute("title")) { if (t.title) { t.dataset.tip = t.title; if (!t.hasAttribute("aria-label")) t.setAttribute("aria-label", t.title); } t.removeAttribute("title"); }
+      const next = t && t.dataset.tip ? t : null;
+      if (next !== on) { on = next; place(); }
+    });
+    document.addEventListener("mouseout", (e) => { if (on && !on.contains(e.relatedTarget)) { on = null; place(); } });
+    addEventListener("scroll", () => { if (on) place(); }, true);
+    addEventListener("blur", () => { on = null; place(); });
+  })();
+</script>
+</body>
+</html>

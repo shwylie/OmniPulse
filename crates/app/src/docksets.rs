@@ -1,22 +1,22 @@
-// The Chat Dock's, the Activity Feed's, the Viewer List's, Stream Info's and the Multichat Overlay's settings, on
-// pages of their own (Settings > Streaming > Suite, each one's gear). Kept in prefs.dockSet by page ("chat",
-// "activity", "viewers", "info", "multichat"), handed
+// The Chat Dock's, the Activity Feed's, the Viewer List's, Stream Info's, Session Stats' and the Multichat
+// Overlay's settings, on pages of their own (Settings > Streaming > Suite, each one's gear). Kept in prefs.dockSet
+// by page ("chat", "activity", "viewers", "info", "stats", "multichat"), handed
 // to the widget server for the pages to follow, and taken back when they're changed on the page itself (its
 // gear in OBS), so the two never differ.
 
 use serde_json::{json, Map, Value};
 
-/// A panel's page: dockchat, dockfeed, dockviewers, dockinfo, multichat
+/// A panel's page: dockchat, dockfeed, dockviewers, dockinfo, dockstats, multichat
 pub fn page_of(panel: &str) -> Option<&'static str> {
-    Some(match panel { "dockchat" => "chat", "dockfeed" => "activity", "dockviewers" => "viewers", "dockinfo" => "info", "multichat" => "multichat", _ => return None })
+    Some(match panel { "dockchat" => "chat", "dockfeed" => "activity", "dockviewers" => "viewers", "dockinfo" => "info", "dockstats" => "stats", "multichat" => "multichat", _ => return None })
 }
 
 pub fn title(panel: &str) -> &'static str {
-    match panel { "dockchat" => "Chat Dock", "dockfeed" => "Activity Feed", "dockviewers" => "Viewer List", "dockinfo" => "Stream Info", _ => "Multichat Overlay" }
+    match panel { "dockchat" => "Chat Dock", "dockfeed" => "Activity Feed", "dockviewers" => "Viewer List", "dockinfo" => "Stream Info", "dockstats" => "Session Stats", _ => "Multichat Overlay" }
 }
 
 /// Whether a panel is a dock with a preview of the real thing on its page
-pub fn is_dock(panel: &str) -> bool { matches!(panel, "dockchat" | "dockfeed" | "dockviewers" | "dockinfo") }
+pub fn is_dock(panel: &str) -> bool { matches!(panel, "dockchat" | "dockfeed" | "dockviewers" | "dockinfo" | "dockstats") }
 
 /// Each page's settings as the page starts them
 fn defaults(page: &str) -> Map<String, Value> {
@@ -25,9 +25,10 @@ fn defaults(page: &str) -> Map<String, Value> {
             "modPile": true, "lkPile": true, "pileMin": "3", "modLock": true, "modModes": true, "modShield": true, "modAb": true, "lkShield": true, "lkFollow": true, "lkSlow": true, "lkEmote": false, "lkSub": false,
             "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         "viewers" => json!({ "mods": true, "vips": true, "subs": true, "viewers": true, "counts": true, "search": true, "marks": true, "colors": true, "ago": true, "dot": true, "sort": "active", "size": "13",
-            "secs": "600", "hover": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
-        "info" => json!({ "now": true, "count": true, "art": true, "hint": true, "size": "13", "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
-        "activity" => json!({ "hidden": ["firstwords"], "newest": true, "compact": false, "platform": true, "msg": true, "cmds": false, "size": "13", "from": "all", "look": "app", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
+            "secs": "600", "hover": true, "follow": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
+        "info" => json!({ "now": true, "count": true, "art": true, "hint": true, "size": "13", "follow": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
+        "stats" => json!({ "twitch": true, "kick": true, "live": true, "uptime": true, "viewers": true, "followers": true, "subs": true, "layout": "stack", "size": "13", "follow": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
+        "activity" => json!({ "hidden": ["firstwords"], "newest": true, "compact": false, "platform": true, "msg": true, "cmds": false, "size": "13", "from": "all", "follow": true, "look": "app", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         _ => json!({ "from": "all", "cmds": false, "bot": true, "badges": true, "marks": true, "style": "plain", "size": 20, "bg": "0", "shadow": true, "dir": "bottom", "align": "left", "flow": "stack", "out": "fade", "speed": "normal", "rcol": "sunset", "ricon": "chat", "rdots": true, "rglow": false, "rshine": false, "fade": 0, "max": 30, "bttv": true, "ffz": true, "stv": true, "name": "beside", "anim": "rise", "events": false, "pronouns": false, "first": true }),
     };
     v.as_object().cloned().unwrap_or_default()
@@ -80,7 +81,7 @@ pub fn saved(prefs: &Value, panel: &str, vals: &Map<String, Value>) -> Value {
 pub fn from_page(prefs: &Value, page: &str, opt: &Value) -> Value {
     let mut all = prefs["dockSet"].as_object().cloned().unwrap_or_default();
     let base = page.trim_end_matches(|c: char| c.is_ascii_digit());
-    if !matches!(base, "chat" | "activity" | "viewers" | "info" | "multichat") { return Value::Object(all); }
+    if !matches!(base, "chat" | "activity" | "viewers" | "info" | "stats" | "multichat") { return Value::Object(all); }
     let mut m = defaults(base);
     if let Some(o) = opt.as_object() { for (k, v) in o { if m.contains_key(k) { m.insert(k.clone(), v.clone()); } } }
     all.insert(page.into(), Value::Object(m));
@@ -94,15 +95,18 @@ fn sel(key: &str, label: &str, n: &str, opts: &[(Value, &str)]) -> Value {
     json!({ "key": key, "label": label, "note": n, "type": "select", "options": opts.iter().map(|o| o.0.clone()).collect::<Vec<_>>(), "labels": opts.iter().map(|o| o.1).collect::<Vec<_>>() })
 }
 
-/// A dock's look: the app theme's, or Classic; its accent, font, corners and spacing
-fn look(spacing: bool) -> Vec<Value> {
-    let mut v = vec![
-        note("Look"),
+/// A dock's look: the app theme's, or Classic; its accent, font, corners and spacing. A dock other than the
+/// chat's follows the Chat Dock's look unless its switch is off; the rest apply when it's off
+fn look(spacing: bool) -> Vec<Value> { look_for(spacing, true) }
+fn look_for(spacing: bool, follows: bool) -> Vec<Value> {
+    let mut v = vec![note("Look")];
+    if follows { v.push(tog("follow", "Same Look as the Chat Dock", "On, this dock takes the Chat Dock's colours, accent, font, corners, spacing and design, so every dock matches. Off, the choices below are its own.")); }
+    v.extend([
         sel("look", "Colours", "Your App Theme follows your theme in App & Look as you change it. Classic is the dock's own dark grey.", &[(json!("app"), "Your App Theme"), (json!("classic"), "Classic")]),
         sel("accent", "Accent", "The colour of links, highlights and pressed buttons.", &[(json!("app"), "Your Theme's"), (json!("sunset"), "Sunset"), (json!("ocean"), "Ocean"), (json!("candy"), "Candy"), (json!("mint"), "Mint"), (json!("fire"), "Fire"), (json!("gold"), "Gold"), (json!("mono"), "Mono")]),
         sel("font", "Font", "Your Theme's uses your theme's heading font.", &[(json!("app"), "Standard"), (json!("theme"), "Your Theme's")]),
         sel("corners", "Corners", "As Set in App follows Rounded Corners in Settings > App.", &[(json!("app"), "As Set in App"), (json!("rounded"), "Rounded"), (json!("square"), "Square")]),
-    ];
+    ]);
     if spacing { v.push(sel("density", "Spacing", "How much room each line gets.", &[(json!("compact"), "Tight"), (json!("normal"), "Normal"), (json!("roomy"), "Roomy")])); }
     v
 }
@@ -118,8 +122,8 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             tog("badges", "Badges", "Subscriber, moderator and VIP badges next to names."),
             tog("time", "Times", "When each message was sent."),
             sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large"), (json!("17"), "Larger")]),
-        ].into_iter().chain(look(true)).chain([
-            sel("style", "Design", "How the dock is drawn, in the colours above. Each one keeps every message on a band of its own so chat is easy to read, and dresses the Moderation panel to match.", &[(json!("plain"), "Plain"), (json!("glass"), "Glass"), (json!("bubbles"), "Bubbles"), (json!("neon"), "Neon"), (json!("ribbon"), "Ribbon")]),
+        ].into_iter().chain(look_for(true, false)).chain([
+            sel("style", "Design", "How the dock is drawn, in the colours above. Each one keeps every message on a band of its own so chat is easy to read, and dresses the Moderation panel to match. The other docks follow it unless told not to.", &[(json!("plain"), "Plain"), (json!("glass"), "Glass"), (json!("bubbles"), "Bubbles"), (json!("neon"), "Neon"), (json!("ribbon"), "Ribbon")]),
             note("Emotes"),
             tog("stv", "7TV Emotes", "Your channel's and 7TV's global ones, on Twitch and Kick."),
             tog("bttv", "BetterTTV Emotes", "Your channel's and BetterTTV's global ones."),
@@ -181,6 +185,23 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             sel("style", "Design", "How the dock is drawn, in the colours above.", &[(json!("plain"), "Plain"), (json!("glass"), "Glass"), (json!("cards"), "Cards"), (json!("neon"), "Neon")]),
             note("In OBS"),
             info("Address", &format!("{base}/dock/info"), "In OBS, open Docks > Custom Browser Docks, give it a name and paste this address. Changes here show there within a few seconds."),
+        ]).collect(),
+        "dockstats" => vec![
+            note("What It Shows"),
+            tog("twitch", "Twitch", ""),
+            tog("kick", "Kick", ""),
+            tog("live", "Live or Not", "Each platform's state, with a red light while you're live."),
+            tog("uptime", "Uptime", "How long you've been live, ticking."),
+            tog("viewers", "Viewers", "Who's watching right now."),
+            tog("followers", "Followers", "Your follower count on each."),
+            tog("subs", "Subs", "Your subscriber count. Kick doesn't share it."),
+            note("How It Looks"),
+            sel("layout", "Layout", "Stacked suits a tall, narrow dock. Across puts the platforms side by side, for a wide, short one along the top or bottom of OBS.", &[(json!("stack"), "Stacked"), (json!("row"), "Across")]),
+            sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large"), (json!("17"), "Larger")]),
+        ].into_iter().chain(look(true)).chain([
+            sel("style", "Design", "How the dock is drawn, in the colours above.", &[(json!("plain"), "Plain"), (json!("glass"), "Glass"), (json!("cards"), "Cards"), (json!("neon"), "Neon")]),
+            note("In OBS"),
+            info("Address", &format!("{base}/dock/stats"), "In OBS, open Docks > Custom Browser Docks, give it a name and paste this address. Changes here show there within a few seconds. The numbers are read every minute while the Stream Suite is on."),
         ]).collect(),
         "dockfeed" => {
             let mut f = vec![
@@ -284,7 +305,7 @@ mod tests {
     }
     #[test]
     fn the_viewer_list_and_stream_info_have_pages_of_their_own() {
-        for (panel, page, key) in [("dockviewers", "viewers", "sort"), ("dockinfo", "info", "now")] {
+        for (panel, page, key) in [("dockviewers", "viewers", "sort"), ("dockinfo", "info", "now"), ("dockstats", "stats", "layout")] {
             assert_eq!(page_of(panel), Some(page));
             let v = values(&json!({}), panel);
             let f = fields(panel, &v, 7878);
