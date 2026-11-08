@@ -3166,7 +3166,7 @@ function modeBody(mode, on, secs, mins) {
 // platform (Twitch's by its API; Kick's by its API when signed in, else its public channel page; Kick shares
 // no sub count) ----------
 const sessionStats = { twitch: null, kick: null, at: 0 };
-// (subs this stream, counted as they're heard: Kick's API gives no total, so its tile shows these)
+// (subs this stream, counted as they're heard: Kick's tile shows these when its API gives no total (not signed in))
 const sessionSubs = { twitch: 0, kick: 0 };
 let kickWasLive = false;
 async function statsRefresh() {
@@ -3182,13 +3182,16 @@ async function statsRefresh() {
   } else sessionStats.twitch = null;
   const slug = String(S().kickChannel || "").trim().toLowerCase().replace(/_/g, "-");
   if ((yes(S().kickOn) && slug) || (S().kickToken && S().kickUserId)) {
-    const k = { on: true, live: false, started: 0, viewers: null, followers: null, subs: null, subsLabel: "Subs this stream", note: "Kick shares no sub total, so this counts the stream's." };
-    let got = false;
+    const k = { on: true, live: false, started: 0, viewers: null, followers: null, subs: null, subsLabel: "Subs this stream", note: "Sign in to Kick (Settings > Streaming > Suite) for your sub total; this counts the stream's." };
+    let got = false, total = null;
     if (S().kickToken && S().kickUserId) {
       try {
         const c = ((await kickApi("GET", "channels?broadcaster_user_id=" + encodeURIComponent(S().kickUserId))).data || [])[0] || {};
         const s = c.stream || {};
         k.live = !!s.is_live; k.viewers = s.is_live ? num(s.viewer_count) : null; k.started = s.is_live ? (Date.parse(s.start_time) || 0) : 0; got = true;
+        // (Kick's API gives the subscriber total since January 2026: active_subscribers_count, gifted ones among them)
+        if (c.active_subscribers_count != null) total = num(c.active_subscribers_count);
+        if (c.followers_count != null) k.followers = num(c.followers_count);
       } catch (e) {}
     }
     if (slug) {
@@ -3204,7 +3207,7 @@ async function statsRefresh() {
     // (a new stream on Kick: its count starts again)
     if (k.live && !kickWasLive) sessionSubs.kick = 0;
     kickWasLive = k.live;
-    k.subs = sessionSubs.kick;
+    if (total != null) { k.subs = total; k.subsLabel = ""; k.note = ""; } else k.subs = sessionSubs.kick;
     sessionStats.kick = k;
   } else sessionStats.kick = null;
   sessionStats.at = Date.now();

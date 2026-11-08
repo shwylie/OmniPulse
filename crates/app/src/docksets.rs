@@ -199,7 +199,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             tog("uptime", "Uptime", "How long you've been live, ticking."),
             tog("viewers", "Viewers", "Who's watching right now."),
             tog("followers", "Followers", "Your follower count on each."),
-            tog("subs", "Subs", "Your subscriber count on Twitch. Kick shares no total, so its tile counts the subs of this stream."),
+            tog("subs", "Subs", "Your subscriber count on each. Kick's needs your Kick sign-in in the Suite; without it, its tile counts the subs of this stream."),
             note("How It Looks"),
             sel("layout", "Layout", "Stacked suits a tall, narrow dock. Across puts the platforms side by side, for a wide, short one along the top or bottom of OBS.", &[(json!("stack"), "Stacked"), (json!("row"), "Across")]),
             sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large"), (json!("17"), "Larger")]),

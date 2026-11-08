@@ -204,7 +204,7 @@
     drawOne("twitch", s.twitch);
     drawOne("kick", s.kick);
   }
-  const SAMPLE = { twitch: { on: true, live: true, started: Date.now() - 83 * 60000, viewers: 142, followers: 12840, subs: 96 }, kick: { on: true, live: true, started: Date.now() - 83 * 60000, viewers: 37, followers: 2310, subs: 3, subsLabel: "Subs this stream", note: "Kick shares no sub total, so this counts the stream's." } };
+  const SAMPLE = { twitch: { on: true, live: true, started: Date.now() - 83 * 60000, viewers: 142, followers: 12840, subs: 96 }, kick: { on: true, live: true, started: Date.now() - 83 * 60000, viewers: 37, followers: 2310, subs: 41 } };
   async function poll() {
     try {
       const s = await (await fetch("/now.json", { cache: "no-store" })).json();
