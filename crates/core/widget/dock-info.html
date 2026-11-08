@@ -30,6 +30,9 @@
   input[type=text] { width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; }
   input[type=text]:focus { outline: none; border-color: var(--accent); }
   .count { align-self: flex-end; font-size: 11px; color: var(--dim); }
+  /* Co-Stream: a title for each guest's stream too, the category shared */
+  #guestTitles { display: flex; flex-direction: column; gap: calc(12px * var(--pad)); }
+  #guestTitles:empty { display: none; }
   /* where it goes: Twitch, Kick */
   .to { display: flex; gap: 6px; flex-wrap: wrap; }
   .to button { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 3px 12px; color: var(--dim); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
@@ -132,7 +135,8 @@
   <button class="icon" id="again" type="button" title="Read them again from Twitch and Kick">&#x21bb;</button>
 </header>
 <main>
-  <label class="f">Title <input type="text" id="title" maxlength="140" placeholder="Your stream's title" autocomplete="off"><span class="count" id="count">0 / 140</span></label>
+  <label class="f"><span id="titleLabel">Title</span> <input type="text" id="title" maxlength="140" placeholder="Your stream's title" autocomplete="off"><span class="count" id="count">0 / 140</span></label>
+  <div id="guestTitles"></div>
   <label class="f">Category <input type="text" id="cat" placeholder="Search for a game or category" autocomplete="off"></label>
   <div class="found" id="found"></div>
   <div class="to">
@@ -146,7 +150,7 @@
     <div class="card" id="nowTwitch" style="--c: var(--twitch)"><b>Twitch</b><span id="nowTwitchT">Reading...</span></div>
     <div class="card" id="nowKick" style="--c: var(--kick)"><b>Kick</b><span id="nowKickT">Reading...</span></div>
   </div>
-  <p class="note">Leave the title or the category empty to keep it as it is. Twitch and Kick don't let other apps change go-live notifications, and YouTube's title is changed in YouTube Studio.</p>
+  <p class="note">Leave the title or the category empty to keep it as it is. With Co-Stream on, each stream has its own title and they all take the one category. Twitch and Kick don't let other apps change go-live notifications, and YouTube's title is changed in YouTube Studio.</p>
 </main>
 <script>
 (() => {
@@ -201,9 +205,27 @@
   // (categories found as it's typed, a moment after you stop)
   let wait = null;
   $("cat").oninput = () => { clearTimeout(wait); const q = $("cat").value.trim(); if (!q) { $("found").textContent = ""; return; } wait = setTimeout(() => act({ do: "catsearch", q }), 350); };
+  // (Co-Stream: each guest's title box, by "plat:name"; made as the guests come)
+  const guestBoxes = new Map();
+  function guestsDraw(list) {
+    const want = new Set((list || []).map((g) => g.plat + ":" + g.name));
+    for (const [k, el] of guestBoxes) { if (!want.has(k)) { el.parentElement.remove(); guestBoxes.delete(k); } }
+    for (const g of list || []) {
+      const k = g.plat + ":" + g.name;
+      if (guestBoxes.has(k)) { if (!guestBoxes.get(k).dataset.filled && g.title) { guestBoxes.get(k).value = g.title; guestBoxes.get(k).dataset.filled = "1"; } continue; }
+      const lab = document.createElement("label"); lab.className = "f";
+      lab.append(document.createTextNode((g.label || g.name) + "'s title (" + (g.plat === "kick" ? "Kick" : "Twitch") + ") "));
+      const inp = document.createElement("input"); inp.type = "text"; inp.maxLength = 140; inp.autocomplete = "off"; inp.placeholder = "Their stream's title";
+      if (g.title) { inp.value = g.title; inp.dataset.filled = "1"; }
+      lab.append(inp); $("guestTitles").append(lab); guestBoxes.set(k, inp);
+    }
+    $("titleLabel").textContent = guestBoxes.size ? "Your title" : "Title";
+  }
   $("go").onclick = async () => {
     $("go").disabled = true; $("said").textContent = "Updating...";
-    const r = await act({ do: "setinfo", title: $("title").value, category: $("cat").value, twitch: to.twitch && can.twitch, kick: to.kick && can.kick });
+    const titles = {};
+    for (const [k, inp] of guestBoxes) titles[k] = inp.value;
+    const r = await act({ do: "setinfo", title: $("title").value, category: $("cat").value, twitch: to.twitch && can.twitch, kick: to.kick && can.kick, titles });
     if (!r.ok) $("said").textContent = r.error || "Couldn't.";
     setTimeout(() => { $("go").disabled = false; }, 1500);
   };
@@ -211,6 +233,16 @@
   function draw(info) {
     can = { twitch: !!info.canTwitch, kick: !!info.canKick };
     pressed();
+    guestsDraw(info.guests || []);
+    // (each guest's channel as it is now, under yours)
+    const now = document.querySelector(".now");
+    for (const old of now.querySelectorAll(".card.guest")) old.remove();
+    for (const g of info.guests || []) {
+      const c = document.createElement("div"); c.className = "card guest"; c.style.setProperty("--c", g.plat === "kick" ? "var(--kick)" : "var(--twitch)");
+      const b = document.createElement("b"); b.textContent = (g.label || g.name) + " on " + (g.plat === "kick" ? "Kick" : "Twitch");
+      const sp = document.createElement("span"); sp.textContent = g.error ? "Couldn't read it: " + g.error : (g.title || "(no title)") + " · " + (g.category || "no category");
+      c.append(b, sp); now.append(c);
+    }
     const line = (x, ok) => !ok ? "Not signed in (Settings > Streaming > Suite)." : !x ? "Couldn't read it." : (x.title || "(no title)") + " · " + (x.category || "no category");
     $("nowTwitchT").textContent = line(info.twitch, can.twitch);
     $("nowKickT").textContent = line(info.kick, can.kick);
