@@ -376,7 +376,15 @@ pub async fn search(q: &str) -> Vec<Track> {
             .map(|v| v["tracks"]["items"].as_array().cloned().unwrap_or_default().iter().filter_map(Track::spotify).collect())
             .unwrap_or_default()
     };
-    let yt = async { core::youtube::search(q).await.map(|l| l.iter().map(Track::youtube).collect()).unwrap_or_default() };
+    // (YouTube Music's songs, then its videos that aren't among them: a song only uploaded as its video, a lyric
+    // video of a remix, say, found all the same; they play as any YouTube track does)
+    let yt = async {
+        let (songs, videos) = tokio::join!(core::youtube::search(q), core::youtube::search_videos(q));
+        let mut out: Vec<Track> = songs.map(|l| l.iter().map(Track::youtube).collect()).unwrap_or_default();
+        let have: std::collections::HashSet<String> = out.iter().map(|t| t.key.clone()).collect();
+        out.extend(videos.unwrap_or_default().iter().filter(|v| !have.contains(&format!("yt:{}", v.id)) && !have.contains(&v.id)).take(10).map(|v| { let mut t = Track::youtube(v); if t.album.is_empty() { t.album = "Video".into(); } t }));
+        out
+    };
     // MusicBrainz: its songs play from YouTube Music, so only while that can play (yt-dlp here)
     let mb = async {
         if !MUSICBRAINZ.load(std::sync::atomic::Ordering::Relaxed) || core::tools::ytdlp_path().is_none() {
