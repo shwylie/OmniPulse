@@ -107,7 +107,7 @@
   body.st-ribbon .n { background: var(--panel); }
   body.st-cards .plat { border-left-width: 1px; border-top: 3px solid var(--c); margin-bottom: 0; }
   /* what it shows */
-  body.no-uptime .k-uptime, body.no-viewers .k-viewers, body.no-followers .k-followers, body.no-subs .k-subs, body.no-live .state, body.no-twitch #twitch, body.no-kick #kick { display: none; }
+  body.no-uptime .k-uptime, body.no-viewers .k-viewers, body.no-followers .k-followers, body.no-subs .k-subs, body.no-clips .k-clips, body.no-live .state, body.no-twitch #twitch, body.no-kick #kick { display: none; }
   body.sq *, body.sq *::after { border-radius: 0 !important; }
   #tip { position: fixed; left: 0; top: 0; display: none; max-width: calc(100vw - 8px); background: #000c; color: #fff; font-size: 11px; line-height: 1.35; padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 1000; }
   #tip.show { display: block; }
@@ -126,6 +126,7 @@
       <div class="n k-viewers"><b data-k="viewers">—</b><span>Viewers</span></div>
       <div class="n k-followers"><b data-k="followers">—</b><span>Followers</span></div>
       <div class="n k-subs"><b data-k="subs">—</b><span>Subs</span></div>
+      <div class="n k-clips"><b data-k="clips">—</b><span>Clips</span></div>
     </div>
     <div class="note"></div>
   </section>
@@ -136,6 +137,7 @@
       <div class="n k-viewers"><b data-k="viewers">—</b><span>Viewers</span></div>
       <div class="n k-followers"><b data-k="followers">—</b><span>Followers</span></div>
       <div class="n k-subs"><b data-k="subs">—</b><span>Subs</span></div>
+      <div class="n k-clips"><b data-k="clips">—</b><span>Clips</span></div>
     </div>
     <div class="note"></div>
   </section>
@@ -146,7 +148,7 @@
   // (?preview=1: its settings page's preview in OmniPulse: it follows the page as it's changed and shows
   // made-up numbers if there's nothing real yet)
   const PV = /[?&]preview=1/.test(location.search);
-  const DEF = { twitch: true, kick: true, live: true, uptime: true, viewers: true, followers: true, subs: true, layout: "stack", size: "13", look: "app", style: "plain", accent: "app", font: "app", corners: "app", density: "normal", follow: true };
+  const DEF = { twitch: true, kick: true, live: true, uptime: true, viewers: true, followers: true, subs: true, clips: true, layout: "stack", size: "13", look: "app", style: "plain", accent: "app", font: "app", corners: "app", density: "normal", follow: true };
   let opt = Object.assign({}, DEF), appTheme = null, fontOn = "", setN = -1;
   const CLASSIC = { bg: "#1b1d24", panel: "#23262f", line: "#2e323d", text: "#e6e8ee", muted: "#8b91a1", accent: "#7aa2ff", accent2: "#c08bff", light: false, rounded: true, font: "" };
   const PALS = { sunset: ["#ff8a5c", "#ff5c8a"], ocean: ["#3ec7ff", "#5c7cff"], candy: ["#ff8fd8", "#a78bff"], mint: ["#5ef2b8", "#3ec7ff"], fire: ["#ffb03a", "#ff5c3a"], gold: ["#ffd76e", "#ffa53a"], mono: ["#f2f2f2", "#a8a8a8"] };
@@ -166,7 +168,7 @@
     if (f && f !== fontOn) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(f).replace(/%20/g, "+") + ":wght@400;600;700&display=swap"; document.head.append(l); }
     fontOn = f;
     document.body.style.fontFamily = f ? '"' + f + '", "Segoe UI", system-ui, sans-serif' : "";
-    ["twitch", "kick", "live", "uptime", "viewers", "followers", "subs"].forEach((k) => c.toggle("no-" + k, !opt[k]));
+    ["twitch", "kick", "live", "uptime", "viewers", "followers", "subs", "clips"].forEach((k) => c.toggle("no-" + k, !opt[k]));
   }
   async function look() {
     try {
@@ -197,6 +199,7 @@
     set("followers", on ? fmt(p.followers) : "—", !on);
     set("subs", on && p.subs != null ? fmt(p.subs) : "—", !(on && p.subs != null));
     el.querySelector(".k-subs span").textContent = on && p.subsLabel ? p.subsLabel : "Subs";
+    set("clips", live && p.clips != null ? fmt(p.clips) : "—", !(live && p.clips != null));
     el.querySelector(".note").textContent = on && p.note ? p.note : "";
   }
   function draw() {
@@ -204,7 +207,7 @@
     drawOne("twitch", s.twitch);
     drawOne("kick", s.kick);
   }
-  const SAMPLE = { twitch: { on: true, live: true, started: Date.now() - 83 * 60000, viewers: 142, followers: 12840, subs: 96 }, kick: { on: true, live: true, started: Date.now() - 83 * 60000, viewers: 37, followers: 2310, subs: 41 } };
+  const SAMPLE = { twitch: { on: true, live: true, started: Date.now() - 83 * 60000, viewers: 142, followers: 12840, subs: 96, clips: 6 }, kick: { on: true, live: true, started: Date.now() - 83 * 60000, viewers: 37, followers: 2310, subs: 41, clips: 2 } };
   async function poll() {
     try {
       const s = await (await fetch("/now.json", { cache: "no-store" })).json();

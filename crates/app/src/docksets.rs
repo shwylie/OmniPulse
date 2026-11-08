@@ -27,7 +27,7 @@ fn defaults(page: &str) -> Map<String, Value> {
         "viewers" => json!({ "mods": true, "vips": true, "subs": true, "viewers": true, "counts": true, "search": true, "marks": true, "colors": true, "ago": true, "dot": true, "sort": "active", "size": "13",
             "secs": "600", "hover": true, "follow": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         "info" => json!({ "now": true, "count": true, "art": true, "hint": true, "size": "13", "follow": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
-        "stats" => json!({ "twitch": true, "kick": true, "live": true, "uptime": true, "viewers": true, "followers": true, "subs": true, "layout": "stack", "size": "13", "follow": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
+        "stats" => json!({ "twitch": true, "kick": true, "live": true, "uptime": true, "viewers": true, "followers": true, "subs": true, "clips": true, "layout": "stack", "size": "13", "follow": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         "activity" => json!({ "hidden": ["firstwords"], "newest": true, "compact": false, "platform": true, "msg": true, "cmds": false, "size": "13", "from": "all", "follow": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         _ => json!({ "from": "all", "cmds": false, "bot": true, "badges": true, "marks": true, "style": "plain", "size": 20, "bg": "0", "shadow": true, "dir": "bottom", "align": "left", "flow": "stack", "out": "fade", "speed": "normal", "rcol": "sunset", "ricon": "chat", "rdots": true, "rglow": false, "rshine": false, "fade": 0, "max": 30, "bttv": true, "ffz": true, "stv": true, "name": "beside", "anim": "rise", "events": false, "pronouns": false, "first": true }),
     };
@@ -200,6 +200,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             tog("viewers", "Viewers", "Who's watching right now."),
             tog("followers", "Followers", "Your follower count on each."),
             tog("subs", "Subs", "Your subscriber count on each. Kick's needs your Kick sign-in in the Suite; without it, its tile counts the subs of this stream."),
+            tog("clips", "Clips", "How many clips have been made of this stream, on each."),
             note("How It Looks"),
             sel("layout", "Layout", "Stacked suits a tall, narrow dock. Across puts the platforms side by side, for a wide, short one along the top or bottom of OBS.", &[(json!("stack"), "Stacked"), (json!("row"), "Across")]),
             sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large"), (json!("17"), "Larger")]),

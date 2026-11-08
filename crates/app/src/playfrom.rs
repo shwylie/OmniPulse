@@ -109,8 +109,11 @@ fn as_yt(c: &Track) -> omnipulse_core::youtube::YtTrack {
 }
 
 /// The best of these for the song, if one's close enough: the same version, by them (a remix of it
-/// isn't it, however well the rest matches)
+/// isn't it, however well the rest matches). A Go+ track's length isn't judged: SoundCloud's figure for one
+/// is its preview's, or an edit's, not the song's
 pub fn best(t: &Track, found: Vec<Track>) -> Option<Track> {
+    let want = if t.go_plus { Track { ms: 0, ..t.clone() } } else { t.clone() };
+    let t = &want;
     let mut ranked: Vec<(f32, Track)> = found.into_iter().filter(|c| c.key != t.key).map(|c| (versions::score(t, &as_yt(&c)), c)).collect();
     ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     ranked.into_iter().find(|(s, c)| *s >= GOOD && versions::artist_hit(t, &as_yt(c)) && versions::same_version(t, &as_yt(c))).map(|(_, c)| c)
@@ -141,27 +144,49 @@ pub async fn find(t: &Track, prefs: &Value, locals: &[Track], elsewhere: bool) -
         decide(&t.key, None);
         return None;
     }
+    let got = look_in(&ids, t, locals).await;
+    decide(&t.key, got.clone());
+    got
+}
+
+/// What one source has for the song (the query: its artist and title, as guessed)
+async fn search(id: &str, t: &Track, q: &str, locals: &[Track]) -> Vec<Track> {
+    match id {
+        "local" => locals.to_vec(),
+        "soundcloud" if omnipulse_core::soundcloud::signed_in() => crate::sources::sc_search(q, 8).await,
+        "soundcloud" => Vec::new(),
+        "youtube" => match versions::find(t).await { Some(v) if v.exact => vec![Track::youtube(&v.yt)], _ => Vec::new() },
+        p => match p.strip_prefix("plug:").and_then(crate::plugrun::get) {
+            Some(plug) => plug.call("search", vec![serde_json::json!(q)]).await.map(|v| v.as_array().cloned().unwrap_or_default().iter().take(30).filter_map(|x| Track::plugin(&plug.id, x)).collect()).unwrap_or_default(),
+            None => Vec::new(),
+        },
+    }
+}
+
+/// The song looked for in these sources, in order: the first with it
+async fn look_in(ids: &[String], t: &Track, locals: &[Track]) -> Option<Track> {
     let (artist, title) = versions::guess_names(t);
     let q = format!("{artist} {title}").trim().to_string();
-    let mut got: Option<Track> = None;
     for id in ids {
-        let found: Vec<Track> = match id.as_str() {
-            "local" => locals.to_vec(),
-            "soundcloud" if omnipulse_core::soundcloud::signed_in() => crate::sources::sc_search(&q, 8).await,
-            "soundcloud" => Vec::new(),
-            "youtube" => match versions::find(t).await { Some(v) if v.exact => vec![Track::youtube(&v.yt)], _ => Vec::new() },
-            p => match p.strip_prefix("plug:").and_then(crate::plugrun::get) {
-                Some(plug) => plug.call("search", vec![serde_json::json!(q)]).await.map(|v| v.as_array().cloned().unwrap_or_default().iter().take(30).filter_map(|x| Track::plugin(&plug.id, x)).collect()).unwrap_or_default(),
-                None => Vec::new(),
-            },
-        };
-        if let Some(c) = best(t, found) {
+        if let Some(c) = best(t, search(id, t, &q, locals).await) {
             omnipulse_core::diag::note(&format!("Play From: {} - {} plays from {} ({})", t.artist, t.title, id, c.key));
-            got = Some(c);
-            break;
+            return Some(c);
         }
     }
-    decide(&t.key, got.clone());
+    None
+}
+
+/// The song's own way failed (a preview, YouTube paused, no version of it): every source that's on asked,
+/// in your order, below its own too, before it's given up on. What's found is kept for the song
+pub async fn find_anywhere(t: &Track, prefs: &Value, locals: &[Track]) -> Option<Track> {
+    if t.is_mix() { return None; }
+    let own = source_of(t);
+    let off = off(prefs);
+    let ids: Vec<String> = sources(prefs).into_iter().map(|(i, _)| i).filter(|i| *i != own && !off.contains(i)).collect();
+    if ids.is_empty() { return None; }
+    omnipulse_core::diag::note(&format!("Play From: {} - {} couldn't play its own way: every source that's on asked", t.artist, t.title));
+    let got = look_in(&ids, t, locals).await;
+    if got.is_some() { decide(&t.key, got.clone()); }
     got
 }
 
@@ -218,6 +243,10 @@ mod tests {
         assert!(best(&starship, vec![remix]).is_none());
         let original = Track::soundcloud(&json!({ "id": 1, "title": "Starship - Nothing's Gonna Stop Us Now", "user": { "username": "Starship" }, "duration": 270_000 })).unwrap();
         assert_eq!(best(&starship, vec![original]).map(|c| c.key), Some("1".to_string()));
+        // (a Go+ track's length is its preview's or an edit's: not judged. 185 s against the song's 241 s)
+        let goplus = Track { key: "9".into(), src: Src::SoundCloud(9), title: "Mountain Song".into(), artist: "Jane's Addiction".into(), ms: 185_129, go_plus: true, ..Default::default() };
+        let full = Track::plugin("p", &json!({ "id": "m", "title": "Mountain Song", "artist": "Jane's Addiction", "album": "Nothing's Shocking", "duration_ms": 241_000 })).unwrap();
+        assert_eq!(best(&goplus, vec![full]).map(|c| c.key), Some("plug:p:m".to_string()));
         assert_eq!(source_of(&want), "youtube");
         assert_eq!(source_of(&strobe), "plug:p");
         // (decided once, and itself till then)

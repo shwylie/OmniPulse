@@ -3171,18 +3171,31 @@ const sessionSubs = { twitch: 0, kick: 0 };
 let kickWasLive = false;
 async function statsRefresh() {
   if (S().userId && apiToken) {
-    const t = { on: true, live: false, started: 0, viewers: null, followers: null, subs: null, note: "" };
+    const t = { on: true, live: false, started: 0, viewers: null, followers: null, subs: null, clips: null, note: "" };
     try {
       const st = ((await helix("GET", "streams?user_id=" + S().userId)).data || [])[0];
       if (st) { t.live = st.type === "live"; t.viewers = num(st.viewer_count); t.started = Date.parse(st.started_at) || 0; }
     } catch (e) { t.note = "Couldn't read the stream."; }
+    // (clips made this stream: Twitch's, from when it started)
+    if (t.live && t.started) {
+      try {
+        let n = 0, cursor = "";
+        for (let p = 0; p < 10; p++) {
+          const j = await helix("GET", "clips?broadcaster_id=" + S().userId + "&first=100&started_at=" + encodeURIComponent(new Date(t.started).toISOString()) + "&ended_at=" + encodeURIComponent(new Date().toISOString()) + (cursor ? "&after=" + encodeURIComponent(cursor) : ""));
+          n += (j.data || []).length;
+          cursor = (j.pagination && j.pagination.cursor) || "";
+          if (!cursor) break;
+        }
+        t.clips = n;
+      } catch (e) {}
+    }
     try { t.followers = num((await helix("GET", "channels/followers?broadcaster_id=" + S().userId + "&first=1")).total); } catch (e) {}
     try { t.subs = num((await helix("GET", "subscriptions?broadcaster_id=" + S().userId + "&first=1")).total); } catch (e) { t.subs = null; if (/40[13]/.test(e.message)) t.note = "Sign in to Twitch again to see subs."; }
     sessionStats.twitch = t;
   } else sessionStats.twitch = null;
   const slug = String(S().kickChannel || "").trim().toLowerCase().replace(/_/g, "-");
   if ((yes(S().kickOn) && slug) || (S().kickToken && S().kickUserId)) {
-    const k = { on: true, live: false, started: 0, viewers: null, followers: null, subs: null, subsLabel: "Subs this stream", note: "Sign in to Kick (Settings > Streaming > Suite) for your sub total; this counts the stream's." };
+    const k = { on: true, live: false, started: 0, viewers: null, followers: null, subs: null, clips: null, subsLabel: "Subs this stream", note: "Sign in to Kick (Settings > Streaming > Suite) for your sub total; this counts the stream's." };
     let got = false, total = null;
     if (S().kickToken && S().kickUserId) {
       try {
@@ -3202,6 +3215,22 @@ async function statsRefresh() {
           k.followers = num(ch.followers_count);
           if (!got) { k.live = !!ch.livestream; k.viewers = ch.livestream ? num(ch.livestream.viewer_count) : null; k.started = ch.livestream ? (Date.parse(ch.livestream.start_time || ch.livestream.created_at) || 0) : 0; }
         }
+      } catch (e) {}
+    }
+    // (clips made this stream: Kick's public list, newest first, counted back to when the stream started)
+    if (k.live && k.started && slug) {
+      try {
+        let n = 0, cursor = "0";
+        for (let p = 0; p < 5 && cursor; p++) {
+          const r = await OmniPulse.fetch("https://kick.com/api/v2/channels/" + encodeURIComponent(slug) + "/clips?cursor=" + encodeURIComponent(cursor) + "&sort=date&time=all", { headers: { Accept: "application/json", "User-Agent": "OmniPulse" } });
+          if (!r.ok) break;
+          const j = await r.json(), list = (j && j.clips) || [];
+          let older = false;
+          for (const c of list) { if ((Date.parse(c.created_at) || 0) >= k.started) n++; else older = true; }
+          if (older || !list.length) break;
+          cursor = j.nextCursor ? String(j.nextCursor) : "";
+        }
+        k.clips = n;
       } catch (e) {}
     }
     // (a new stream on Kick: its count starts again)
