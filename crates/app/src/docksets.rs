@@ -28,7 +28,7 @@ fn defaults(page: &str) -> Map<String, Value> {
             "secs": "600", "hover": true, "follow": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         "info" => json!({ "now": true, "count": true, "art": true, "hint": true, "size": "13", "follow": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         "stats" => json!({ "twitch": true, "kick": true, "live": true, "uptime": true, "viewers": true, "followers": true, "subs": true, "layout": "stack", "size": "13", "follow": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
-        "activity" => json!({ "hidden": ["firstwords"], "newest": true, "compact": false, "platform": true, "msg": true, "cmds": false, "size": "13", "from": "all", "follow": true, "look": "app", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
+        "activity" => json!({ "hidden": ["firstwords"], "newest": true, "compact": false, "platform": true, "msg": true, "cmds": false, "size": "13", "from": "all", "follow": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         _ => json!({ "from": "all", "cmds": false, "bot": true, "badges": true, "marks": true, "style": "plain", "size": 20, "bg": "0", "shadow": true, "dir": "bottom", "align": "left", "flow": "stack", "out": "fade", "speed": "normal", "rcol": "sunset", "ricon": "chat", "rdots": true, "rglow": false, "rshine": false, "fade": 0, "max": 30, "bttv": true, "ffz": true, "stv": true, "name": "beside", "anim": "rise", "events": false, "pronouns": false, "first": true }),
     };
     v.as_object().cloned().unwrap_or_default()
@@ -93,6 +93,11 @@ fn note(t: &str) -> Value { json!({ "key": "", "label": t, "note": "", "type": "
 fn info(label: &str, value: &str, n: &str) -> Value { json!({ "key": "", "label": label, "note": n, "type": "info", "value": value, "copy": value }) }
 fn sel(key: &str, label: &str, n: &str, opts: &[(Value, &str)]) -> Value {
     json!({ "key": key, "label": label, "note": n, "type": "select", "options": opts.iter().map(|o| o.0.clone()).collect::<Vec<_>>(), "labels": opts.iter().map(|o| o.1).collect::<Vec<_>>() })
+}
+
+/// A dock's design, the Chat Dock's five and Cards: how it's drawn, in the colours chosen
+fn design() -> Value {
+    sel("style", "Design", "How the dock is drawn, in the colours above. The same five as the Chat Dock's, so they can match, and Cards.", &[(json!("plain"), "Plain"), (json!("glass"), "Glass"), (json!("bubbles"), "Bubbles"), (json!("neon"), "Neon"), (json!("ribbon"), "Ribbon"), (json!("cards"), "Cards")])
 }
 
 /// A dock's look: the app theme's, or Classic; its accent, font, corners and spacing. A dock other than the
@@ -167,7 +172,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             tog("dot", "Chatting Now Dot", "A green dot beside anyone who chatted in the last ten minutes."),
             sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large"), (json!("17"), "Larger")]),
         ].into_iter().chain(look(true)).chain([
-            sel("style", "Design", "How the dock is drawn, in the colours above.", &[(json!("plain"), "Plain"), (json!("glass"), "Glass"), (json!("cards"), "Cards"), (json!("neon"), "Neon")]),
+            design(),
             note("Moderating"),
             sel("secs", "Time-Out Length", "How long the time-out button times someone out for.", &[(json!("60"), "1 minute"), (json!("300"), "5 minutes"), (json!("600"), "10 minutes"), (json!("3600"), "1 hour"), (json!("86400"), "1 day")]),
             tog("hover", "Buttons Only on Hover", "Time-out and ban show when you point at someone. Off, they're always there."),
@@ -182,7 +187,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             tog("hint", "Help Note", "The short note at the foot of the dock."),
             sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large"), (json!("17"), "Larger")]),
         ].into_iter().chain(look(true)).chain([
-            sel("style", "Design", "How the dock is drawn, in the colours above.", &[(json!("plain"), "Plain"), (json!("glass"), "Glass"), (json!("cards"), "Cards"), (json!("neon"), "Neon")]),
+            design(),
             note("In OBS"),
             info("Address", &format!("{base}/dock/info"), "In OBS, open Docks > Custom Browser Docks, give it a name and paste this address. Changes here show there within a few seconds."),
         ]).collect(),
@@ -194,12 +199,12 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             tog("uptime", "Uptime", "How long you've been live, ticking."),
             tog("viewers", "Viewers", "Who's watching right now."),
             tog("followers", "Followers", "Your follower count on each."),
-            tog("subs", "Subs", "Your subscriber count. Kick doesn't share it."),
+            tog("subs", "Subs", "Your subscriber count on Twitch. Kick shares no total, so its tile counts the subs of this stream."),
             note("How It Looks"),
             sel("layout", "Layout", "Stacked suits a tall, narrow dock. Across puts the platforms side by side, for a wide, short one along the top or bottom of OBS.", &[(json!("stack"), "Stacked"), (json!("row"), "Across")]),
             sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large"), (json!("17"), "Larger")]),
         ].into_iter().chain(look(true)).chain([
-            sel("style", "Design", "How the dock is drawn, in the colours above.", &[(json!("plain"), "Plain"), (json!("glass"), "Glass"), (json!("cards"), "Cards"), (json!("neon"), "Neon")]),
+            design(),
             note("In OBS"),
             info("Address", &format!("{base}/dock/stats"), "In OBS, open Docks > Custom Browser Docks, give it a name and paste this address. Changes here show there within a few seconds. The numbers are read every minute while the Stream Suite is on."),
         ]).collect(),
@@ -216,6 +221,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
                 sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large")]),
             ];
             f.extend(look(false));
+            f.push(design());
             // (the kinds of event: a switch for each, in their groups)
             let all = kinds();
             let mut groups: Vec<String> = Vec::new();

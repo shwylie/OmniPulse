@@ -8,7 +8,7 @@
   /* OmniPulse's activity feed, for OBS (Docks > Custom Browser Docks): what happened on stream, each kind
      shown or hidden, each alert replayed, the chatbot's events' actions run again */
   :root {
-    --bg: #1b1d24; --panel: #23262f; --line: #2e323d; --text: #e6e8ee; --dim: #8b91a1; --accent: #7aa2ff; --danger: #ff5c6c; --fs: 13px;
+    --bg: #1b1d24; --panel: #23262f; --line: #2e323d; --text: #e6e8ee; --dim: #8b91a1; --accent: #7aa2ff; --accent2: #c08bff; --danger: #ff5c6c; --fs: 13px;
   }
   * { box-sizing: border-box; }
   /* the scroll bars in the dock's colours, as the app's: OBS's browser draws its own light grey ones otherwise */
@@ -67,6 +67,63 @@
   #empty { color: var(--dim); text-align: center; padding: 24px 16px; font-size: 12px; }
   #toast { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; font-size: 12px; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
   #toast.on { opacity: 1; }
+  /* ---------- Designs: the Chat Dock's five, on this dock (it follows the Chat Dock's unless told not to) ---------- */
+  :root { --grad: linear-gradient(120deg, var(--accent2), var(--accent)); --band: #ffffff0b; }
+  body.light { --band: #0000000d; }
+  select { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 1px 4px; }
+  select option { background: var(--bg); color: var(--text); }
+  select:focus { outline: none; border-color: var(--accent); }
+  input[type=checkbox] { accent-color: var(--accent); }
+  /* Glass: soft colour behind, its panels see-through, pills and a gradient title */
+  body.st-glass { background: radial-gradient(90% 60% at 0% 0%, color-mix(in srgb, var(--accent2) 22%, transparent), transparent 70%), radial-gradient(90% 60% at 100% 100%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%), var(--bg); }
+  body.st-glass header, body.st-glass #settings { background: color-mix(in srgb, var(--panel) 70%, transparent); border-color: #ffffff1c; }
+  body.st-glass header h1 { font-size: 15px; font-weight: 800; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  body.st-glass input[type=text], body.st-glass input[type=search], body.st-glass select { border-radius: 999px; background: color-mix(in srgb, var(--bg) 70%, transparent); border-color: #ffffff26; padding-left: 12px; }
+  body.st-glass .item { border-radius: 10px; background: color-mix(in srgb, var(--panel) 55%, transparent); margin-bottom: 2px; }
+  body.st-glass .item:nth-child(even) { background: color-mix(in srgb, var(--panel) 88%, transparent); box-shadow: inset 0 0 0 1px #ffffff12; }
+  body.st-glass .item:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent); }
+  /* Bubbles: each band a speech bubble in its platform's colour */
+  body.st-bubbles { background: radial-gradient(120% 70% at 0% 0%, color-mix(in srgb, var(--accent) 16%, var(--bg)), var(--bg) 62%); }
+  body.st-bubbles header { background: none; border: 0; padding: 10px 12px; }
+  body.st-bubbles header h1 { font-size: 15px; font-weight: 700; }
+  body.st-bubbles #settings { background: none; border: 0; }
+  body.st-bubbles input[type=text], body.st-bubbles input[type=search], body.st-bubbles select { border-radius: 999px; background: var(--panel); padding-left: 12px; }
+  body.st-bubbles .item { border: 1px solid var(--line); border-left: 3px solid var(--c, var(--line)); border-radius: 4px 14px 14px 14px; background: var(--panel); margin: 0 10px 6px 8px; max-width: calc(100% - 18px); }
+  body.st-bubbles .item:nth-child(even) { background: color-mix(in srgb, var(--panel) 80%, var(--text) 7%); }
+  /* Neon: a terminal lit in your accent, in a monospace face */
+  body.st-neon { background: #010402; font-family: "Cascadia Code", "Cascadia Mono", Consolas, monospace; box-shadow: inset 0 0 0 1px var(--accent), inset 0 0 30px color-mix(in srgb, var(--accent) 12%, transparent); }
+  body.st-neon.light { background: #f6fff9; }
+  body.st-neon header, body.st-neon #settings { background: none; border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  body.st-neon header h1 { color: var(--accent); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; text-shadow: 0 0 8px var(--accent); }
+  body.st-neon header h1::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: var(--accent2); box-shadow: 0 0 10px var(--accent2); }
+  body.st-neon h2 { color: var(--accent); text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); letter-spacing: 0.12em; }
+  body.st-neon input[type=text], body.st-neon input[type=search], body.st-neon select, body.st-neon button { border-radius: 3px; }
+  body.st-neon input[type=text], body.st-neon input[type=search], body.st-neon select { background: color-mix(in srgb, var(--accent) 6%, #010402); border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--text); }
+  body.st-neon select option { background: #010402; }
+  body.st-neon.light input[type=text], body.st-neon.light input[type=search], body.st-neon.light select { background: color-mix(in srgb, var(--accent) 6%, #f6fff9); } body.st-neon.light select option { background: #f6fff9; }
+  body.st-neon input:focus, body.st-neon select:focus { box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent); }
+  body.st-neon .item { border-left: 2px solid var(--c, var(--line)); border-radius: 0 6px 6px 0; background: #ffffff08; box-shadow: -6px 0 12px -8px var(--c, var(--line)); margin-bottom: 4px; }
+  body.st-neon .item:nth-child(even) { background: #ffffff14; }
+  body.st-neon.light .item { background: #0000000a; } body.st-neon.light .item:nth-child(even) { background: #00000014; }
+  body.st-neon .note, body.st-neon .count, body.st-neon .meta, body.st-neon .ago, body.st-neon .sum { color: color-mix(in srgb, var(--accent) 60%, var(--dim)); }
+  /* Ribbon: each band a ribbon in its platform's colour, under a gradient rule */
+  body.st-ribbon { background: var(--panel); }
+  body.st-ribbon header { background: var(--bg); border-bottom: 2px solid transparent; border-image: var(--grad) 1; }
+  body.st-ribbon header h1 { font-size: 15px; font-weight: 800; }
+  body.st-ribbon #settings { background: var(--bg); }
+  body.st-ribbon input[type=text], body.st-ribbon input[type=search], body.st-ribbon select { background: var(--bg); }
+  body.st-ribbon .item { border-left: 3px solid var(--c, var(--line)); border-radius: 0 10px 10px 0; background: linear-gradient(90deg, color-mix(in srgb, var(--c, var(--line)) 40%, transparent) -60%, var(--bg) 36%); margin-bottom: 3px; }
+  body.st-ribbon .item:nth-child(even) { background: linear-gradient(90deg, color-mix(in srgb, var(--c, var(--line)) 40%, transparent) -60%, color-mix(in srgb, var(--bg) 70%, var(--text) 9%) 36%); }
+  /* Cards: a heading in your accent, each band a card */
+  body.st-cards header { border-bottom: 2px solid var(--accent); }
+  body.st-cards .item { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--c, var(--line)); border-radius: 8px; margin-bottom: 4px; }
+  body.st-glass .glyph, body.st-neon .glyph { background: color-mix(in srgb, var(--c, #888) 30%, transparent); }
+  body.st-neon .glyph { box-shadow: 0 0 8px color-mix(in srgb, var(--c, #888) 50%, transparent); border-radius: 3px; }
+  body.st-neon .what b { text-shadow: 0 0 8px currentColor; }
+  body.st-neon .ib, body.st-neon .chip { border-radius: 3px; background: none; border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); }
+  body.st-glass .ib, body.st-bubbles .ib { border-radius: 999px; }
+  body.st-glass .chip, body.st-bubbles .chip { background: #ffffff0e; color: var(--text); }
+  body.st-ribbon .ib { background: var(--bg); }
   /* the look (Settings > Streaming > Suite, the dock's gear): the app theme's colours, font and corners, or Classic */
   body.sq *, body.sq *::after { border-radius: 0 !important; }
   body.d-compact .item { padding-top: 3px; padding-bottom: 3px; }
@@ -153,17 +210,19 @@
     get(k, d) { try { const v = localStorage.getItem("omnipulse.feed." + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem("omnipulse.feed." + k, JSON.stringify(v)); } catch (e) {} },
   };
-  const opt = { hidden: store.get("hidden", OFF_FIRST), newest: store.get("newest", true), compact: store.get("compact", false), platform: store.get("platform", true), msg: store.get("msg", true), cmds: store.get("cmds", false), size: store.get("size", "13"), from: store.get("from", "all"), look: store.get("look", "app"), accent: store.get("accent", "app"), font: store.get("font", "app"), corners: store.get("corners", "app"), density: store.get("density", "normal") };
+  const opt = { hidden: store.get("hidden", OFF_FIRST), newest: store.get("newest", true), compact: store.get("compact", false), platform: store.get("platform", true), msg: store.get("msg", true), cmds: store.get("cmds", false), size: store.get("size", "13"), from: store.get("from", "all"), look: store.get("look", "app"), style: store.get("style", "plain"), accent: store.get("accent", "app"), font: store.get("font", "app"), corners: store.get("corners", "app"), density: store.get("density", "normal") };
   // (the look: the app theme's colours, its headings' font and its corners (OmniPulse sends them), or Classic, the
   // dock's own dark grey; an accent of its own; how close together)
-  const CLASSIC = { bg: "#1b1d24", panel: "#23262f", line: "#2e323d", text: "#e6e8ee", muted: "#8b91a1", accent: "#7aa2ff", light: false, rounded: true, font: "" };
-  const PALS = { sunset: "#ff8a5c", ocean: "#3ec7ff", candy: "#ff8fd8", mint: "#5ef2b8", fire: "#ffb03a", gold: "#ffd76e", mono: "#f2f2f2" };
+  const CLASSIC = { bg: "#1b1d24", panel: "#23262f", line: "#2e323d", text: "#e6e8ee", muted: "#8b91a1", accent: "#7aa2ff", accent2: "#c08bff", light: false, rounded: true, font: "" };
+  const PALS = { sunset: ["#ff8a5c", "#ff5c8a"], ocean: ["#3ec7ff", "#5c7cff"], candy: ["#ff8fd8", "#a78bff"], mint: ["#5ef2b8", "#3ec7ff"], fire: ["#ffb03a", "#ff5c3a"], gold: ["#ffd76e", "#ffa53a"], mono: ["#f2f2f2", "#a8a8a8"] };
   let appTheme = null, fontOn = "";
   function applyLook() {
     const t = opt.look === "classic" || !appTheme ? CLASSIC : appTheme, r = document.documentElement.style;
     r.setProperty("--bg", t.bg); r.setProperty("--panel", t.panel); r.setProperty("--line", t.line); r.setProperty("--text", t.text); r.setProperty("--dim", t.muted);
-    r.setProperty("--accent", PALS[opt.accent] || t.accent);
+    const pal = PALS[opt.accent];
+    r.setProperty("--accent", pal ? pal[0] : t.accent); r.setProperty("--accent2", pal ? pal[1] : t.accent2 || t.accent);
     document.body.classList.toggle("light", !!t.light);
+    ["glass", "bubbles", "neon", "ribbon", "cards"].forEach((s) => document.body.classList.toggle("st-" + s, opt.style === s));
     document.body.classList.toggle("sq", opt.corners === "square" || (opt.corners !== "rounded" && !t.rounded));
     ["compact", "roomy"].forEach((d) => document.body.classList.toggle("d-" + d, opt.density === d));
     // (the theme's font: from Google Fonts, as OBS won't have it)

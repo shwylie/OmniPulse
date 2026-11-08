@@ -2712,6 +2712,9 @@ function suiteHear(ev, ctx) {
   if (ev === "online" && String(x.goalReset || "stream") === "stream") Object.assign(g, { follow: 0, sub: 0, bits: 0, donation: 0, common: 0, day: today() });
   if (["follow", "sub", "resub", "gift", "bits", "donation", "raid"].includes(ev)) commonAdd(ev, ctx);
   const sub = ev === "sub" || ev === "resub" || ev === "gift";
+  // (the Session Stats dock: subs this stream, by platform)
+  if (ev === "online") sessionSubs.twitch = 0;
+  if (sub) { const pl = ctx.platform === "kick" ? "kick" : "twitch"; sessionSubs[pl] += ev === "gift" ? Math.max(1, num(ctx.amount)) : 1; }
   if (ev === "follow") { g.follow++; st.latest.follow = { user: ctx.user, platform: ctx.platform, at: Date.now() }; if (yes(x.timerSubathon)) timerAdd(num(x.timerFollow) * 1000); }
   if (sub) {
     const n = ev === "gift" ? Math.max(1, num(ctx.amount)) : 1, tier = tierOf(ctx.tier);
@@ -3163,6 +3166,9 @@ function modeBody(mode, on, secs, mins) {
 // platform (Twitch's by its API; Kick's by its API when signed in, else its public channel page; Kick shares
 // no sub count) ----------
 const sessionStats = { twitch: null, kick: null, at: 0 };
+// (subs this stream, counted as they're heard: Kick's API gives no total, so its tile shows these)
+const sessionSubs = { twitch: 0, kick: 0 };
+let kickWasLive = false;
 async function statsRefresh() {
   if (S().userId && apiToken) {
     const t = { on: true, live: false, started: 0, viewers: null, followers: null, subs: null, note: "" };
@@ -3176,7 +3182,7 @@ async function statsRefresh() {
   } else sessionStats.twitch = null;
   const slug = String(S().kickChannel || "").trim().toLowerCase().replace(/_/g, "-");
   if ((yes(S().kickOn) && slug) || (S().kickToken && S().kickUserId)) {
-    const k = { on: true, live: false, started: 0, viewers: null, followers: null, subs: null, note: "Kick doesn't share sub counts." };
+    const k = { on: true, live: false, started: 0, viewers: null, followers: null, subs: null, subsLabel: "Subs this stream", note: "Kick shares no sub total, so this counts the stream's." };
     let got = false;
     if (S().kickToken && S().kickUserId) {
       try {
@@ -3195,6 +3201,10 @@ async function statsRefresh() {
         }
       } catch (e) {}
     }
+    // (a new stream on Kick: its count starts again)
+    if (k.live && !kickWasLive) sessionSubs.kick = 0;
+    kickWasLive = k.live;
+    k.subs = sessionSubs.kick;
     sessionStats.kick = k;
   } else sessionStats.kick = null;
   sessionStats.at = Date.now();

@@ -22,6 +22,11 @@
   body { display: flex; flex-direction: column; overflow: hidden; }
   button, select, input, textarea { font: inherit; color: inherit; }
   button { cursor: pointer; }
+  /* (every dropdown and tick box in the dock's colours, not the browser's white) */
+  select { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 1px 4px; }
+  select option { background: var(--bg); color: var(--text); }
+  select:focus { outline: none; border-color: var(--accent); }
+  input[type=checkbox] { accent-color: var(--accent); }
 
   header { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
   header h1 { margin: 0 auto 0 2px; font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
@@ -147,6 +152,7 @@
   body.st-glass .mod .ib { border: 0; background: none; }
   body.st-glass .notice { margin: 4px 0; padding: 6px 10px; border-radius: 10px; color: var(--text); border: 1px solid transparent; background-image: linear-gradient(var(--panel), var(--panel)), var(--grad); background-origin: border-box; background-clip: padding-box, border-box; }
   body.st-glass form input, body.st-glass form select { border-radius: 999px; background: color-mix(in srgb, var(--bg) 70%, transparent); padding-left: 12px; }
+  body.st-glass select { border-radius: 999px; padding-left: 10px; background: color-mix(in srgb, var(--bg) 70%, transparent); border-color: #ffffff26; }
   body.st-glass form button[type="submit"], body.st-glass #more { background: var(--grad); border-radius: 999px; }
   body.st-glass #mod { background: color-mix(in srgb, var(--panel) 80%, transparent); border-color: #ffffff1c; }
   body.st-glass #mod section { background: color-mix(in srgb, var(--bg) 60%, transparent); border: 1px solid #ffffff14; border-radius: 12px; padding: 8px 10px; }
@@ -166,6 +172,7 @@
   body.st-bubbles .notice { align-self: center; background: var(--panel); border-radius: 999px; padding: 3px 12px; margin: 4px 0 8px; font-style: normal; font-size: 0.9em; }
   body.st-bubbles form { background: none; border: 0; padding: 8px 10px; }
   body.st-bubbles form input, body.st-bubbles form select { border-radius: 999px; background: var(--panel); padding-left: 12px; }
+  body.st-bubbles select { border-radius: 999px; padding-left: 10px; background: var(--panel); }
   body.st-bubbles form button[type="submit"], body.st-bubbles #more { background: var(--grad); border-radius: 999px; }
   body.st-bubbles #mod { background: none; border: 0; }
   body.st-bubbles #mod section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 9px 11px; }
@@ -194,6 +201,10 @@
   body.st-neon .notice { color: var(--accent2); border: 1px dashed color-mix(in srgb, var(--accent2) 60%, transparent); padding: 5px 9px; margin: 6px 0; font-style: normal; }
   body.st-neon .notice::before { content: "> "; }
   body.st-neon form input, body.st-neon form select { background: color-mix(in srgb, var(--accent) 6%, transparent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+  body.st-neon select { border-radius: 3px; background: color-mix(in srgb, var(--accent) 6%, #010402); border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--text); }
+  body.st-neon select option { background: #010402; }
+  body.st-neon #settings label { color: color-mix(in srgb, var(--accent) 55%, var(--dim)); }
+  body.st-neon.light select { background: color-mix(in srgb, var(--accent) 6%, #f6fff9); } body.st-neon.light select option { background: #f6fff9; }
   body.st-neon form button[type="submit"], body.st-neon #more { background: var(--grad); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 70%, transparent); }
   body.st-neon #mod { background: none; border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
   body.st-neon #mod section { border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); padding: 8px 10px; background: #ffffff08; }
@@ -212,6 +223,8 @@
   body.st-ribbon .msg.twitch { --pc: #a970ff66; border-left-color: #a970ff; } body.st-ribbon .msg.kick { --pc: #53fc1855; border-left-color: #53fc18; } body.st-ribbon .msg.youtube { --pc: #ff335566; border-left-color: #ff3355; }
   body.st-ribbon .notice { margin: 5px 0; padding: 6px 11px; border-radius: 0 10px 10px 0; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); color: var(--text); font-style: normal; }
   body.st-ribbon form { background: var(--bg); }
+  body.st-ribbon select { background: var(--bg); border-color: var(--line); }
+  body.st-ribbon #settings { background: var(--bg); }
   body.st-ribbon form button[type="submit"], body.st-ribbon #more { background: var(--grad); }
   body.st-ribbon #mod { background: var(--bg); border-color: var(--line); }
   body.st-ribbon #mod section { border-left: 3px solid var(--accent); border-radius: 0 10px 10px 0; padding: 7px 10px; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 22%, transparent) -40%, var(--panel) 40%); }
