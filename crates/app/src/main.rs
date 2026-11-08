@@ -3551,7 +3551,8 @@ fn start(shared: &Shared) {
                         shared.borrow_mut().cur_loud = what.as_ref().map(|(k, id)| format!("{k}:{id}"));
                         FADE.with(|f| *f.borrow_mut() = (false, String::new()));
                         let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
-                        let db = sound::loud_db(&shared.borrow().web.prefs, &t, known, version.is_some());
+                        // (judged as what plays: a Spotify song from a plugin's copy is that copy, levelled like any other)
+                        let db = sound::loud_db(&shared.borrow().web.prefs, &playfrom::as_played(&t), known, version.is_some());
                         // the track before ending with Fade Between Tracks on: both heard at once, this one coming in
                         let resumed = resume > 0 || trim_of(&shared.borrow().web.prefs, &t.key).0 > 0;
                         match (src, XFADE.with(|x| x.borrow_mut().take())) {
@@ -4295,7 +4296,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                 Ok((src, pitch)) => {
                     let what = sound::loud_source(&playfrom::as_played(&next), version.as_ref().map(|v| v.yt.id.as_str()));
                     let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
-                    let db = sound::loud_db(&prefs, &next, known, version.is_some());
+                    let db = sound::loud_db(&prefs, &playfrom::as_played(&next), known, version.is_some());
                     // (slowed into the next one's tempo: from here, the one playing goes through the stretch, as it was until the mix)
                     // (and a key ride: the one playing's key able to move too)
                     let ride = smart && plan.semitones != 0 && pitch.is_some();
@@ -4762,11 +4763,11 @@ fn preload_next(shared: &Shared) {
     };
     if PRELOADED.with(|p| *p.borrow() == next.key) { return; }
     PRELOADED.with(|p| *p.borrow_mut() = next.key.clone());
-    // (Seamless Mix: its intro and first sound, measured ahead)
-    if smart_on(&shared.borrow().web.prefs) {
-        if smart_same_source(&next) { rhythm_ahead(shared, next.clone()); }
-        loud_ahead(shared, next.clone());
-    }
+    // (Seamless Mix: its intro and first sound, measured ahead; Match Loudness alone: its loudness, so it
+    // starts at the right level instead of a guess corrected a minute in)
+    let (mix, loud) = { let p = &shared.borrow().web.prefs; (smart_on(p), sound::loud_step(p) != "off") };
+    if mix && smart_same_source(&next) { rhythm_ahead(shared, next.clone()); }
+    if mix || loud { loud_ahead(shared, next.clone()); }
     let yt_id = |t: &Track| if let track::Src::YouTube(id) = &t.src { Some(id.clone()) } else { None };
     // (a Spotify song from YouTube Music: with a free account, or Seamless Mix on)
     let mix_on = smart_on(&shared.borrow().web.prefs);
@@ -10937,7 +10938,7 @@ fn loud_measure(shared: &Shared, t: &Track, kind: &'static str, id: String, toke
             shared.borrow_mut().analysis.insert(format!("{kind}:{id}"), a.clone());
             let a = shared.borrow();
             if a.token == token {
-                a.engine.set_match_db(sound::loud_db(&a.web.prefs, &t, Some(lufs), kind == "youtube"), false);
+                a.engine.set_match_db(sound::loud_db(&a.web.prefs, &playfrom::as_played(&t), Some(lufs), kind == "youtube"), false);
             }
         }));
     });
@@ -11065,11 +11066,12 @@ fn loud_pick(shared: &Shared, step: &str) {
         Some(("youtube", id)) => Some(("youtube", id.to_string())),
         Some(("soundcloud", id)) => Some(("soundcloud", id.to_string())),
         Some(("local", id)) => Some(("local", id.to_string())),
-        _ => sound::loud_source(&t, None),
+        Some(("plugin", id)) => Some(("plugin", id.to_string())),
+        _ => sound::loud_source(&playfrom::as_played(&t), None),
     };
     let ver = what.as_ref().is_some_and(|(k, _)| *k == "youtube") && !matches!(t.src, track::Src::YouTube(_));
     let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
-    { let a = shared.borrow(); let db = sound::loud_db(&a.web.prefs, &t, known, ver); if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: loudness {step}: {db:+.1} dB ({:?}, measured {known:?})", what); } a.engine.set_match_db(db, true); }
+    { let a = shared.borrow(); let db = sound::loud_db(&a.web.prefs, &playfrom::as_played(&t), known, ver); if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: loudness {step}: {db:+.1} dB ({:?}, measured {known:?})", what); } a.engine.set_match_db(db, true); }
     // (and Spotify's own levelling, for its songs it plays: from the next one)
     let (on, target) = sound::spotify_norm(&shared.borrow().web.prefs);
     omnipulse_core::spotify_engine::spe_set_normalisation(on, target);
