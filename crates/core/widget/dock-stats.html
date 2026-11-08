@@ -39,6 +39,15 @@
   .n.off b { color: var(--dim); font-weight: 500; }
   .note { color: var(--dim); font-size: 11px; }
   .note:empty { display: none; }
+  /* Co-Stream: whose numbers (All adds every stream's up); hidden when there are no guests */
+  #tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: calc(8px * var(--pad)) calc(10px * var(--pad)) 0; flex: none; }
+  #tabs:empty { display: none; }
+  #tabs button { border: 1px solid var(--line); background: var(--panel); color: var(--dim); border-radius: 999px; padding: 2px 10px; font-size: 11px; font-weight: 600; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #tabs button:hover { color: var(--text); border-color: var(--dim); }
+  #tabs button.on { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  .plat.hide { display: none !important; }
+  .plat h2 .whose { font-weight: 500; color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .plat h2 .whose:empty { display: none; }
   /* Across: the platforms side by side, each one's numbers in a row (a wide, short dock) */
   body.h-row main { flex-direction: row; align-items: stretch; }
   body.h-row .plat { flex: 1 1 0; }
@@ -76,6 +85,10 @@
   body.st-neon header h1::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: var(--accent2); box-shadow: 0 0 10px var(--accent2); }
   body.st-neon h2 { color: var(--accent); text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); letter-spacing: 0.12em; }
   body.st-neon input[type=text], body.st-neon input[type=search], body.st-neon select, body.st-neon button { border-radius: 3px; }
+  body.st-neon #tabs button { background: color-mix(in srgb, var(--accent) 6%, #010402); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  body.st-neon #tabs button.on { color: var(--accent); border-color: var(--accent); text-shadow: 0 0 8px var(--accent); background: color-mix(in srgb, var(--accent) 14%, #010402); }
+  body.st-glass #tabs button { background: color-mix(in srgb, var(--panel) 70%, transparent); border-color: #ffffff26; }
+  body.st-ribbon #tabs { background: var(--bg); padding-bottom: calc(8px * var(--pad)); border-bottom: 1px solid var(--line); }
   body.st-neon input[type=text], body.st-neon input[type=search], body.st-neon select { background: color-mix(in srgb, var(--accent) 6%, #010402); border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--text); }
   body.st-neon select option { background: #010402; }
   body.st-neon.light input[type=text], body.st-neon.light input[type=search], body.st-neon.light select { background: color-mix(in srgb, var(--accent) 6%, #f6fff9); } body.st-neon.light select option { background: #f6fff9; }
@@ -118,9 +131,10 @@
   <h1>Session Stats</h1>
   <button class="icon" id="again" type="button" title="Read them again from Twitch and Kick">&#x21bb;</button>
 </header>
+<nav id="tabs" aria-label="Whose numbers"></nav>
 <main>
   <section class="plat" id="twitch" style="--c: var(--twitch)">
-    <h2><svg viewBox="0 0 24 24"><path d="M4.3 2 3 5.4v13.8h4.7V22h2.7l2.6-2.8h3.8l5.2-5.3V2zm16 11-2.9 3h-4.7l-2.6 2.6V16H6.3V3.7h14zm-2.9-6v5.3h-1.8V7zm-4.8 0v5.3h-1.8V7z"/></svg>Twitch<span class="state">Offline</span></h2>
+    <h2><svg viewBox="0 0 24 24"><path d="M4.3 2 3 5.4v13.8h4.7V22h2.7l2.6-2.8h3.8l5.2-5.3V2zm16 11-2.9 3h-4.7l-2.6 2.6V16H6.3V3.7h14zm-2.9-6v5.3h-1.8V7zm-4.8 0v5.3h-1.8V7z"/></svg>Twitch<span class="whose"></span><span class="state">Offline</span></h2>
     <div class="nums">
       <div class="n k-uptime"><b data-k="uptime">—</b><span>Uptime</span></div>
       <div class="n k-viewers"><b data-k="viewers">—</b><span>Viewers</span></div>
@@ -131,7 +145,7 @@
     <div class="note"></div>
   </section>
   <section class="plat" id="kick" style="--c: var(--kick)">
-    <h2><svg viewBox="0 0 24 24"><path d="M3 2h6v6h2V5h2V2h8v8h-2v2h-2v2h2v2h2v6h-8v-3h-2v-3H9v6H3z"/></svg>Kick<span class="state">Offline</span></h2>
+    <h2><svg viewBox="0 0 24 24"><path d="M3 2h6v6h2V5h2V2h8v8h-2v2h-2v2h2v2h2v6h-8v-3h-2v-3H9v6H3z"/></svg>Kick<span class="whose"></span><span class="state">Offline</span></h2>
     <div class="nums">
       <div class="n k-uptime"><b data-k="uptime">—</b><span>Uptime</span></div>
       <div class="n k-viewers"><b data-k="viewers">—</b><span>Viewers</span></div>
@@ -186,8 +200,45 @@
   const span = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return (h ? h + ":" : "") + String(m).padStart(h ? 2 : 1, "0") + ":" + String(x).padStart(2, "0"); };
   // (what was last read, and when, so the uptime ticks between reads)
   let stats = null, readAt = 0;
-  function drawOne(id, p) {
+  // (Co-Stream: whose numbers show; "all" adds every stream's on a platform together)
+  let tab = "all";
+  function tabsDraw(s) {
+    const gs = s.guests || [], nav = $("tabs");
+    const want = gs.length ? [{ id: "all", label: "All" }, { id: "host", label: (s.host && (s.host.twitch || s.host.kick)) || "You" }].concat(gs.map((g) => ({ id: g.plat + ":" + g.name, label: g.label || g.name }))) : [];
+    if (!want.some((t) => t.id === tab)) tab = "all";
+    const key = JSON.stringify(want) + "|" + tab;
+    if (nav.dataset.key === key) return;
+    nav.dataset.key = key;
+    nav.textContent = "";
+    for (const t of want) {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = t.label; b.title = t.id === "all" ? "Every stream in the Co-Stream, added up" : t.id === "host" ? "Your streams" : "Their stream";
+      b.classList.toggle("on", t.id === tab);
+      b.onclick = () => { tab = t.id; draw(); };
+      nav.append(b);
+    }
+  }
+  // (a platform's streams, added up: live if any is, the uptime of the one live longest, the numbers summed)
+  function combine(list) {
+    list = list.filter(Boolean);
+    if (!list.length) return null;
+    const out = { on: list.some((p) => p.on), live: list.some((p) => p.on && p.live), started: 0, viewers: null, followers: null, subs: null, clips: null, note: "" };
+    const sum = (k, live) => { let n = null; for (const p of list) { if (!p.on || (live && !p.live) || p[k] == null) continue; n = (n || 0) + Number(p[k]); } return n; };
+    for (const p of list) if (p.on && p.live && p.started && (!out.started || p.started < out.started)) out.started = p.started;
+    out.viewers = sum("viewers", true); out.followers = sum("followers"); out.subs = sum("subs"); out.clips = sum("clips", true);
+    if (list.some((p) => p.on && p.subsLabel)) { out.subsLabel = "Subs*"; out.note = "* Kick's count is this stream's where a sign-in is missing."; }
+    return out;
+  }
+  function pick(s, plat) {
+    const gs = (s.guests || []).filter((g) => g.plat === plat);
+    if (tab === "all") return { p: combine([s[plat]].concat(gs)), whose: gs.length ? "" : "", show: !!(s[plat] || gs.length) };
+    if (tab === "host") return { p: s[plat], whose: "", show: true };
+    const g = gs.find((x) => x.plat + ":" + x.name === tab);
+    return { p: g || null, whose: g ? g.label || g.name : "", show: !!g };
+  }
+  function drawOne(id, p, whose, show) {
     const el = $(id);
+    el.classList.toggle("hide", show === false);
+    el.querySelector(".whose").textContent = whose || "";
     const on = p && p.on;
     el.classList.toggle("live", !!(on && p.live));
     el.querySelector(".state").textContent = !on ? "Not signed in" : p.live ? "Live" : "Offline";
@@ -204,8 +255,15 @@
   }
   function draw() {
     const s = stats || {};
-    drawOne("twitch", s.twitch);
-    drawOne("kick", s.kick);
+    tabsDraw(s);
+    if ((s.guests || []).length) {
+      const t = pick(s, "twitch"), k = pick(s, "kick");
+      drawOne("twitch", t.p, t.whose, t.show);
+      drawOne("kick", k.p, k.whose, k.show);
+    } else {
+      drawOne("twitch", s.twitch, "", true);
+      drawOne("kick", s.kick, "", true);
+    }
   }
   const SAMPLE = { twitch: { on: true, live: true, started: Date.now() - 83 * 60000, viewers: 142, followers: 12840, subs: 96, clips: 6 }, kick: { on: true, live: true, started: Date.now() - 83 * 60000, viewers: 37, followers: 2310, subs: 41, clips: 2 } };
   async function poll() {

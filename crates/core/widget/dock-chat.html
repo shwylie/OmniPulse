@@ -86,6 +86,8 @@
   /* the moderation buttons: on every message (not yours), clearer on the one under the mouse */
   .mod { display: inline-flex; gap: 2px; float: right; margin: 0 0 2px 8px; opacity: 0.6; }
   .msg:hover .mod, .mod:focus-within, .mod:has(.sure) { opacity: 1; }
+  /* a narrow dock (or column): the buttons on a line of their own under the message, the words given the width */
+  body.narrow .mod { float: none; display: flex; flex-wrap: wrap; margin: 4px 0 1px; }
   /* (shown only on the message under the mouse: laid over its top right corner, on a backing of their own, so
      the message's words stay where they are instead of moving aside for them) */
   body.modhover .mod { display: none; float: none; position: absolute; right: 4px; top: 1px; margin: 0; z-index: 2; opacity: 1; padding: 2px 3px 2px 14px; border-radius: 8px; background: linear-gradient(90deg, transparent, var(--panel) 12px); }
@@ -678,8 +680,9 @@
     const time = document.createElement("span"); time.className = "time"; time.textContent = stamp(m.ts); r.append(time);
     // (from a Shared Chat partner's channel: whose)
     if (m.shared) { const f = document.createElement("span"); f.className = "from"; f.textContent = m.sharedFrom ? "@" + m.sharedFrom : "Shared chat"; f.title = "From " + (m.sharedFrom || "the channel you're sharing chat with"); r.append(f); }
-    // (its buttons first, so they sit on the right of its first line)
-    if (!m.self && m.platform !== "youtube") r.append(modButtons(m));
+    // (its buttons first, so they sit on the right of its first line; under it when the dock's narrow)
+    const mod = !m.self && m.platform !== "youtube" ? modButtons(m) : null;
+    if (mod && !narrow) r.append(mod);
     const mark = document.createElementNS("http://www.w3.org/2000/svg", "svg"); mark.setAttribute("viewBox", "0 0 24 24"); mark.classList.add("pm", pl);
     const mp = document.createElementNS("http://www.w3.org/2000/svg", "path"); mp.setAttribute("d", MARKS[pl]); mark.append(mp);
     const mt = document.createElementNS("http://www.w3.org/2000/svg", "title"); mt.textContent = pl === "kick" ? "Kick" : pl === "youtube" ? "YouTube" : "Twitch"; mark.append(mt);
@@ -693,6 +696,7 @@
     r.append(name, document.createTextNode(m.me ? " " : ": "));
     const text = document.createElement("span"); text.className = "text"; text.append(...textNodes(m)); r.append(text);
     if (m.first) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = "first message"; r.append(tag); }
+    if (mod && narrow) r.append(mod);
     rows.set(m.n, r);
     show(r);
     place(r, m);
@@ -715,6 +719,18 @@
     return g ? g.plat + ":" + String(g.name).toLowerCase() : "";
   }
   function isGuestMsg(m) { return !!guestKey(m); }
+  // (narrow: the chat's column is under 400px, so each message's buttons move under its words)
+  let narrow = false;
+  function narrowCheck() {
+    const cols = [log].concat([...guestCols.values()].filter((l) => l.offsetParent));
+    const w = Math.min(...cols.map((l) => l.clientWidth || Infinity));
+    const now = w < 400;
+    if (now === narrow) return;
+    narrow = now;
+    document.body.classList.toggle("narrow", narrow);
+    for (const mod of document.querySelectorAll(".msg > .mod")) { const r = mod.parentElement; if (narrow) r.append(mod); else r.insertBefore(mod, r.querySelector(".pm")); }
+  }
+  new ResizeObserver(() => narrowCheck()).observe($("logs"));
   function colOf(m) { const k = guestKey(m); return document.body.classList.contains("split") && k && guestCols.has(k) ? guestCols.get(k) : log; }
   function sharedDraw(sh) {
     const was = JSON.stringify(shared);
@@ -734,6 +750,7 @@
       const glog = document.createElement("div"); glog.className = "glog";
       col.append(head, glog); $("logs").append(col); guestCols.set(k, glog);
     }
+    narrowCheck();
     // (the send-to list: each account, while the event's on; Both, Twitch and Kick otherwise)
     const to = $("to"), keep = to.value;
     const opts = shared.on && shared.accounts.length ? [{ id: "all", label: "Both (yours)" }].concat(shared.accounts) : [{ id: "all", label: "Both" }, { id: "twitch", label: "Twitch" }, { id: "kick", label: "Kick" }];
