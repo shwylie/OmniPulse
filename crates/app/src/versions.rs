@@ -157,12 +157,23 @@ pub fn artist_hit(t: &Track, c: &YtTrack) -> bool {
     let artist: Vec<String> = match_words(if ga.is_empty() { &t.artist } else { &ga }).into_iter().filter(|w| w != "the").collect();
     let place: HashSet<String> = match_words(&format!("{} {}", c.artists, c.title)).into_iter().collect();
     if artist.is_empty() || artist.iter().all(|w| place.contains(w)) { return true; }
-    // (an uploader's name run together, "DJFreshUK" for DJ Fresh: the same once the spaces are gone, one
-    // holding the other, four letters at least)
+    squashed_fit(&artist.join(" "), &c.artists)
+}
+
+/// Two names the same once their spaces are gone, one holding the other ("DJFreshUK" for DJ Fresh), four
+/// letters at least
+fn squashed_fit(a: &str, b: &str) -> bool {
     let squash = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
-    let mine = squash(&artist.join(""));
-    let theirs = squash(&c.artists);
-    mine.len() >= 4 && theirs.len() >= 4 && (mine.contains(&theirs) || theirs.contains(&mine))
+    let (x, y) = (squash(a), squash(b));
+    x.len() >= 4 && y.len() >= 4 && (x.contains(&y) || y.contains(&x))
+}
+
+/// Whether a name (an uploader's) is the artist's: every word of theirs in it, or the same squashed together
+pub fn name_fits(artist: &str, name: &str) -> bool {
+    let words: Vec<String> = match_words(artist).into_iter().filter(|w| w != "the").collect();
+    if words.is_empty() { return true; }
+    let place: HashSet<String> = match_words(name).into_iter().collect();
+    words.iter().all(|w| place.contains(w)) || squashed_fit(artist, name)
 }
 
 /// The same title, word for word (uploads' tags like "(Official Audio)" aside), and one that names a version

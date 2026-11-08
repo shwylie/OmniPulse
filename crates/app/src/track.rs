@@ -46,6 +46,9 @@ pub struct Track {
     pub uploader: String,
     /// who added it, in a collaborative playlist (shown on its row as you hover over it)
     pub added_by: String,
+    /// the artist is the platform's own metadata (SoundCloud's metadata_artist), not an uploader's name or a
+    /// title's guess: a copy credited to them
+    pub credited: bool,
 }
 
 impl Default for Src {
@@ -161,6 +164,7 @@ impl Track {
             date: t["created_at"].as_str().unwrap_or("").chars().take(10).collect::<String>().replace('/', "-"),
             uploader: t["user"]["username"].as_str().unwrap_or("").to_string(),
             added_by: String::new(),
+            credited: meta_artist.is_some(),
         }
         .tidied();
         // (the metadata's artists stay as they are: not an "Artist - Song" title's guess)
@@ -268,7 +272,7 @@ impl Track {
     /// The same saved form, for the session (read back with from_snapshot)
     pub fn to_snapshot(&self) -> Value {
         let mut s = serde_json::json!({
-            "id": self.key, "source": self.plat(), "title": self.title, "displayArtist": self.artist,
+            "id": self.key, "source": self.plat(), "title": self.title, "displayArtist": self.artist, "credited": self.credited,
             "album": self.album, "duration": self.ms, "artwork_url": self.art, "genre": self.genre,
             "permalink_url": self.link,
         });
@@ -328,6 +332,7 @@ impl Track {
             date: String::new(),
             uploader: String::new(),
             added_by: s["addedBy"].as_str().unwrap_or("").to_string(),
+            credited: s["credited"].as_bool().unwrap_or(false),
         })
     }
 }

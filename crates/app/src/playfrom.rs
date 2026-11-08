@@ -180,18 +180,36 @@ pub fn queries(t: &Track) -> Vec<String> {
     out
 }
 
-/// The song looked for in these sources, in order: the first with it (each asked up to three ways)
+/// A stand-in worth taking at once: anything but a SoundCloud upload by someone other than the artist (a fan's
+/// re-upload, "Boston - More Than A Feeling" from a stranger's account: taken only when no source has better)
+pub fn strong(t: &Track, c: &Track) -> bool {
+    if !matches!(c.src, Src::SoundCloud(_)) || c.credited { return true; }
+    let (ga, _) = versions::guess_names(t);
+    let artist = if ga.is_empty() { t.artist.clone() } else { ga };
+    versions::name_fits(&artist, &c.uploader)
+}
+
+/// The song looked for in these sources, in order: the first with it (each asked up to three ways). A
+/// stranger's re-upload on SoundCloud is noted and passed over; it plays only if nothing better turns up
 async fn look_in(ids: &[String], t: &Track, locals: &[Track]) -> Option<Track> {
     let qs = queries(t);
+    let mut weak: Option<(String, Track)> = None;
     for id in ids {
         for q in &qs {
-            if let Some(c) = best(t, search(id, t, q, locals).await) {
+            let found = search(id, t, q, locals).await;
+            let firm: Vec<Track> = found.iter().filter(|c| strong(t, c)).cloned().collect();
+            if let Some(c) = best(t, firm) {
                 omnipulse_core::diag::note(&format!("Play From: {} - {} plays from {} ({}), asked \"{q}\"", t.artist, t.title, id, c.key));
                 return Some(c);
             }
+            if weak.is_none() { if let Some(c) = best(t, found) { weak = Some((id.clone(), c)); } }
             // (your files and YouTube Music: one look is every look)
             if matches!(id.as_str(), "local" | "youtube") { break; }
         }
+    }
+    if let Some((id, c)) = weak {
+        omnipulse_core::diag::note(&format!("Play From: {} - {} plays from {} ({}): a re-upload by {}, as no source had better", t.artist, t.title, id, c.key, c.uploader));
+        return Some(c);
     }
     None
 }
@@ -277,6 +295,16 @@ mod tests {
         // (the same remix title exactly, from someone else entirely: still it; the wrong remix never)
         let other = Track::plugin("p", &json!({ "id": "o", "title": "Gold Dust (Fox Stevenson Remix)", "artist": "Some Uploader", "duration_ms": 234_000 })).unwrap();
         assert_eq!(best(&gold, vec![shy, other]).map(|c| c.key), Some("plug:p:o".to_string()));
+        // (a stranger's re-upload on SoundCloud: a weak stand-in; the artist's own upload, or one SoundCloud's
+        // metadata credits to them, or any other source's copy: a firm one)
+        let boston = Track { key: "sp:b".into(), src: Src::Spotify("b".into()), title: "More Than a Feeling".into(), artist: "Boston".into(), ms: 285_000, ..Default::default() };
+        let reup = Track::soundcloud(&json!({ "id": 210867179, "title": "Boston - More Than A Feeling", "user": { "username": "Gembong Martin" }, "duration": 284_000 })).unwrap();
+        let own = Track::soundcloud(&json!({ "id": 2, "title": "More Than A Feeling", "user": { "username": "BostonBand" }, "duration": 284_000 })).unwrap();
+        let meta = Track::soundcloud(&json!({ "id": 3, "title": "Boston - More Than A Feeling", "user": { "username": "Classic Rock Vault" }, "metadata_artist": "Boston", "duration": 284_000 })).unwrap();
+        assert!(!strong(&boston, &reup) && strong(&boston, &own) && strong(&boston, &meta));
+        assert_eq!((meta.artist.as_str(), meta.credited), ("Boston", true));
+        let dj = Track::soundcloud(&json!({ "id": 4, "title": "Gold Dust (Fox Stevenson Remix)", "user": { "username": "DJFreshUK" }, "duration": 233_000 })).unwrap();
+        assert!(strong(&Track { artist: "DJ Fresh".into(), ..gold.clone() }, &dj));
         assert_eq!(source_of(&want), "youtube");
         assert_eq!(source_of(&strobe), "plug:p");
         // (decided once, and itself till then)
