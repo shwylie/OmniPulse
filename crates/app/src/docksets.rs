@@ -23,7 +23,7 @@ fn defaults(page: &str) -> Map<String, Value> {
     let v = match page {
         "chat" => json!({ "twitch": true, "kick": true, "time": false, "badges": true, "hover": false, "confirm": true, "secs": "600", "size": "13", "to": "all", "bttv": true, "ffz": true, "stv": true,
             "modPile": true, "lkPile": true, "pileMin": "3", "modLock": true, "modModes": true, "modShield": true, "modAb": true, "lkShield": true, "lkFollow": true, "lkSlow": true, "lkEmote": false, "lkSub": false,
-            "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
+            "split": false, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         "viewers" => json!({ "mods": true, "vips": true, "subs": true, "viewers": true, "counts": true, "search": true, "marks": true, "colors": true, "ago": true, "dot": true, "sort": "active", "size": "13",
             "secs": "600", "hover": true, "follow": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         "info" => json!({ "now": true, "count": true, "art": true, "hint": true, "size": "13", "follow": true, "look": "app", "style": "plain", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
@@ -126,6 +126,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             tog("kick", "Kick Chat", ""),
             tog("badges", "Badges", "Subscriber, moderator and VIP badges next to names."),
             tog("time", "Times", "When each message was sent."),
+            tog("split", "Split by Stream", "Shared Stream only: your channels' chat on the left, the guest's on the right. Off, it's one chat, the guest's messages marked with their channel."),
             sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large"), (json!("17"), "Larger")]),
         ].into_iter().chain(look_for(true, false)).chain([
             sel("style", "Design", "How the dock is drawn, in the colours above. Each one keeps every message on a band of its own so chat is easy to read, and dresses the Moderation panel to match. The other docks follow it unless told not to.", &[(json!("plain"), "Plain"), (json!("glass"), "Glass"), (json!("bubbles"), "Bubbles"), (json!("neon"), "Neon"), (json!("ribbon"), "Ribbon")]),

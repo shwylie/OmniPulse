@@ -43,7 +43,15 @@
   #settings.open { display: flex; }
   #settings label { display: flex; align-items: center; gap: 5px; color: var(--dim); }
 
-  #log { flex: 1; overflow-y: auto; padding: 4px 0 8px; overscroll-behavior: contain; }
+  #logs { flex: 1; display: flex; min-height: 0; }
+  #logs .col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+  #log, #log2 { flex: 1; overflow-y: auto; padding: 4px 0 8px; overscroll-behavior: contain; }
+  /* Shared Stream, split by stream: yours left, the guest's right, each column named */
+  .colhead { display: none; }
+  #col2 { display: none; }
+  body.split #col2 { display: flex; border-left: 1px solid var(--line); }
+  body.split .colhead { display: block; padding: 4px 10px 2px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); border-bottom: 1px solid var(--line); }
+  body.split .colhead:empty { display: none; }
   .msg { position: relative; padding: 3px 8px 3px 10px; border-left: 2px solid transparent; word-wrap: break-word; }
   .msg:hover { background: #ffffff08; }
   .msg.twitch { border-left-color: #9146ff55; }
@@ -318,6 +326,7 @@
 </div>
 <div id="settings">
   <label><input type="checkbox" id="oTime"> Times</label>
+  <label><input type="checkbox" id="oSplit"> Split by stream</label>
   <label><input type="checkbox" id="oBadges" checked> Badges</label>
   <label><input type="checkbox" id="oHover"> Buttons only on hover</label>
   <label><input type="checkbox" id="oConfirm" checked> Ask before banning</label>
@@ -340,7 +349,10 @@
   <label><input type="checkbox" id="oLkSub"> Subscribers only</label>
 </div>
 <div id="piles"></div>
-<div id="log"><div id="empty">Chat shows here while OmniPulse's chatbot is on (Settings &gt; Streaming), signed in to Twitch or Kick.</div></div>
+<div id="logs">
+  <div class="col"><div class="colhead" id="head1"></div><div id="log"><div id="empty">Chat shows here while OmniPulse's chatbot is on (Settings &gt; Streaming), signed in to Twitch or Kick.</div></div></div>
+  <div class="col" id="col2"><div class="colhead" id="head2"></div><div id="log2"></div></div>
+</div>
 <button id="more" type="button">New messages &#8595;</button>
 <form id="send" autocomplete="off">
   <select id="to" title="Where it goes"><option value="all">Both</option><option value="twitch">Twitch</option><option value="kick">Kick</option></select>
@@ -365,7 +377,7 @@
     set(k, v) { try { localStorage.setItem("omnipulse.chat." + k, JSON.stringify(v)); } catch (e) {} },
   };
   const opt = {
-    twitch: store.get("twitch", true), kick: store.get("kick", true), time: store.get("time", false), badges: store.get("badges", true),
+    twitch: store.get("twitch", true), kick: store.get("kick", true), time: store.get("time", false), split: store.get("split", false), badges: store.get("badges", true),
     hover: store.get("hover", false), confirm: store.get("confirm", true), secs: store.get("secs", "600"), size: store.get("size", "13"), to: store.get("to", "all"),
     bttv: store.get("bttv", true), ffz: store.get("ffz", true), stv: store.get("stv", true),
     look: store.get("look", "app"), style: store.get("style", "plain"), accent: store.get("accent", "app"), font: store.get("font", "app"), corners: store.get("corners", "app"), density: store.get("density", "normal"),
@@ -403,6 +415,8 @@
     $("fTwitch").setAttribute("aria-pressed", String(opt.twitch));
     $("fKick").setAttribute("aria-pressed", String(opt.kick));
     $("oTime").checked = opt.time; $("oBadges").checked = opt.badges; $("oHover").checked = opt.hover; $("oConfirm").checked = opt.confirm;
+    $("oSplit").checked = !!opt.split;
+    document.body.classList.toggle("split", !!opt.split && shared.on);
     $("oSecs").value = opt.secs; $("oSize").value = opt.size; $("to").value = opt.to; $("oStyle").value = opt.style;
     document.documentElement.style.setProperty("--fs", opt.size + "px");
     document.body.classList.toggle("modhover", opt.hover);
@@ -448,6 +462,7 @@
   $("fKick").onclick = () => setOpt("kick", !opt.kick);
   $("gear").onclick = () => $("settings").classList.toggle("open");
   $("oTime").onchange = (e) => setOpt("time", e.target.checked);
+  $("oSplit").onchange = (e) => setOpt("split", e.target.checked);
   $("oBadges").onchange = (e) => setOpt("badges", e.target.checked);
   $("oHover").onchange = (e) => setOpt("hover", e.target.checked);
   $("oConfirm").onchange = (e) => setOpt("confirm", e.target.checked);
@@ -621,7 +636,7 @@
   function modButtons(m) {
     const box = document.createElement("span");
     box.className = "mod";
-    const base = { platform: m.platform, id: m.id, user: m.user, login: m.login, userId: m.userId };
+    const base = { platform: m.platform, id: m.id, user: m.user, login: m.login, userId: m.userId, channel: m.channel || "" };
     const ask = (what, extra) => {
       // (Mod View: not a moderator on this message's platform, so nothing's asked: said, by platform)
       if (SUITE && document.documentElement.classList.contains("nomod-" + (m.platform === "kick" ? "kick" : "twitch"))) {
@@ -680,7 +695,7 @@
     if (m.first) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = "first message"; r.append(tag); }
     rows.set(m.n, r);
     show(r);
-    place(r);
+    place(r, m);
     if (!m.self) pileUp(m, r);
   }
 
@@ -691,14 +706,39 @@
     place(r);
   }
 
+  // (Shared Stream: whose channels are in, from the Suite; a message from the guest's goes to the right column)
+  let shared = { on: false, host: {}, guest: {}, accounts: [] };
+  const log2 = $("log2");
+  function isGuestMsg(m) {
+    if (!shared.on || !m || !m.channel) return false;
+    const g = m.platform === "kick" ? shared.guest.kick : shared.guest.twitch;
+    return !!g && String(m.channel).toLowerCase() === String(g).toLowerCase();
+  }
+  function colOf(m) { return document.body.classList.contains("split") && isGuestMsg(m) ? log2 : log; }
+  function sharedDraw(sh) {
+    const was = JSON.stringify(shared);
+    shared = Object.assign({ on: false, host: {}, guest: {}, accounts: [] }, sh || {});
+    document.body.classList.toggle("split", !!opt.split && shared.on);
+    if (JSON.stringify(shared) === was) return;
+    const name = (o) => [o.twitch, o.kick].filter((x, i, a) => x && a.findIndex((y) => String(y).toLowerCase() === String(x).toLowerCase()) === i).join(" / ");
+    $("head1").textContent = shared.on ? name(shared.host || {}) || "You" : "";
+    $("head2").textContent = shared.on ? name(shared.guest || {}) || "Guest" : "";
+    // (the send-to list: each account, while the event's on; Both, Twitch and Kick otherwise)
+    const to = $("to"), keep = to.value;
+    const opts = shared.on && shared.accounts.length ? [{ id: "all", label: "Both (yours)" }].concat(shared.accounts) : [{ id: "all", label: "Both" }, { id: "twitch", label: "Twitch" }, { id: "kick", label: "Kick" }];
+    to.textContent = "";
+    for (const o of opts) { const x = document.createElement("option"); x.value = o.id; x.textContent = o.label; to.append(x); }
+    to.value = opts.some((o) => o.id === keep) ? keep : "all";
+  }
   // (kept at the bottom while you're there; scrolled up, it waits, and says new ones came)
-  function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 40; }
-  function place(r) {
-    const stay = atBottom();
+  function atBottom(l) { l = l || log; return l.scrollHeight - l.scrollTop - l.clientHeight < 40; }
+  function place(r, m) {
+    const l = colOf(m);
+    const stay = atBottom(l);
     $("empty").hidden = true;
-    log.append(r);
-    while (log.children.length > 400) { const x = log.children[1]; for (const [n, v] of rows) if (v === x) rows.delete(n); x.remove(); }
-    if (stay) log.scrollTop = log.scrollHeight; else $("more").classList.add("show");
+    l.append(r);
+    while (l.children.length > 400) { const x = l.children[l === log ? 1 : 0]; if (!x) break; for (const [n, v] of rows) if (v === x) rows.delete(n); x.remove(); }
+    if (stay) l.scrollTop = l.scrollHeight; else if (l === log) $("more").classList.add("show");
   }
   log.onscroll = () => { if (atBottom()) $("more").classList.remove("show"); };
   $("more").onclick = () => { log.scrollTop = log.scrollHeight; $("more").classList.remove("show"); };
@@ -994,6 +1034,7 @@
       }
       const m = SUITE ? s.state && s.state.modes : s.suite && s.suite.mod;
       if (m && Date.now() - edited > 5000) { mod = Object.assign({ autoban: { on: false, terms: [] }, chat: {} }, m); modDraw(); }
+      if (!SUITE) sharedDraw(s.suite && s.suite.shared);
     } catch (e) {}
     setTimeout(modPoll, 3000);
   }
