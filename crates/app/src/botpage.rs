@@ -655,20 +655,26 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             if !own { v.drain(1..8); }
             if !KICK_ID.is_empty() { v.push(f("toggle", "kickOwnApp", "Use my own Kick app", "For developers. Most people can leave this off.", if own { "true" } else { "false" }, "")); }
             v }),
-        // (Shared Stream: a guest streamer's accounts beside yours for one event; off, they're signed out and forgotten)
-        "shared" => ("Shared Stream".into(), {
+        // (Co-Stream: a guest streamer's accounts beside yours for one event; off, they're signed out and forgotten)
+        "shared" => ("Co-Stream".into(), {
             let on_now = on(cur, "sharedOn", false);
             let mut v = vec![
-                f("toggle", "sharedOn", "Shared Stream", "Two of you streaming from this PC, one feed, each on your own channel. The guest's chat, follows, subs, gifts, bits and raids come in with yours, marked with their channel. Switching it off signs the guest's accounts out and forgets them.", if on_now { "true" } else { "false" }, ""),
+                f("toggle", "sharedOn", "Co-Stream", "Two of you streaming from this PC, one feed, each on your own channel. The guest's chat, follows, subs, gifts, bits and raids come in with yours, marked with their channel. Switching it off signs the guest's accounts out and forgets them.", if on_now { "true" } else { "false" }, ""),
             ];
             if on_now {
-                v.push(f("head", "", "The guest's sign-ins", "", "", ""));
-                v.push(f("note", "", "The guest signs in with their own accounts, here on this PC. Their sign-ins are kept only while Shared Stream is on.", "", "", ""));
-                v.push(account("twitch:guest", "Guest's Twitch channel", s(cur, "guestLogin"), false, "twitch"));
-                v.push(account("kick:guest", "Guest's Kick channel", s(cur, "guestKickLogin"), false, "kick"));
-                v.push(f("note", "", "To sign in as the guest, copy the link instead and open it in a private window, so your own sign-in stays as it is.", "", "", ""));
+                v.push(f("head", "", "The guests' sign-ins", "", "", ""));
+                v.push(f("note", "", "Each guest signs in with their own accounts, here on this PC, as many as are streaming with you. Their sign-ins are kept only while Co-Stream is on.", "", "", ""));
+                for g in shared_guests(cur) {
+                    let (plat, name) = (g["plat"].as_str().unwrap_or(""), if g["plat"] == "kick" { g["login"].as_str().filter(|x| !x.is_empty()).or(g["slug"].as_str()).unwrap_or("") } else { g["login"].as_str().unwrap_or("") });
+                    if name.is_empty() || !matches!(plat, "twitch" | "kick") { continue; }
+                    let key = format!("{plat}:guest:{}", if plat == "kick" { g["slug"].as_str().unwrap_or(name) } else { name });
+                    v.push(account(&key, &format!("Guest's {} channel", if plat == "kick" { "Kick" } else { "Twitch" }), name, false, plat));
+                }
+                v.push(account("twitch:guest", "Add a guest's Twitch channel", "", false, "twitch"));
+                v.push(account("kick:guest", "Add a guest's Kick channel", "", false, "kick"));
+                v.push(f("note", "", "To sign in as a guest, copy the link instead and open it in a private window, so your own sign-in stays as it is.", "", "", ""));
                 v.push(f("head", "", "While it's on", "", "", ""));
-                v.push(f("note", "", "The Chat Dock can split by stream (its settings, Split by Stream), and its send-to list offers each account. The bot answers commands in the chat they came from. Session Stats shows your numbers; the guest's follow in a later update.", "", "", ""));
+                v.push(f("note", "", "The Chat Dock can split by stream (its settings, Split by Stream), a column for you and one for each guest, and its send-to list offers each account. The bot answers commands in the chat they came from. Session Stats shows your numbers; the guests' follow in a later update.", "", "", ""));
             }
             v }),
         "obs" => ("OBS".into(), vec![
@@ -1384,16 +1390,20 @@ pub fn tiles(cur: &Map<String, Value>, st: &Value, running: bool) -> Vec<(&'stat
     ]
 }
 
-/// Shared Stream, in one tile: off, or the guest's channels, lit while their chats are up
+/// The guests signed in (sharedGuests: a list kept as text by the chatbot)
+pub fn shared_guests(cur: &Map<String, Value>) -> Vec<Value> {
+    cur.get("sharedGuests").and_then(|v| v.as_str()).and_then(|t| serde_json::from_str::<Value>(t).ok()).and_then(|v| v.as_array().cloned()).unwrap_or_default()
+}
+
+/// Co-Stream, in one tile: off, or the guests' channels, lit while their chats are up
 fn shared(cur: &Map<String, Value>, st: &Value) -> (&'static str, String, &'static str, String, String) {
-    if !on(cur, "sharedOn", false) { return ("shared", "Shared Stream".into(), "off", "Off".into(), "A guest streamer's channels beside yours, for one event".into()); }
-    let sh = &st["shared"];
-    let tw = s(cur, "guestLogin");
-    let kk = s(cur, "guestKickLogin");
-    if tw.is_empty() && kk.is_empty() { return ("shared", "Shared Stream".into(), "warn", "On, no guest signed in yet".into(), "Sign the guest in below".into()); }
-    let up = (tw.is_empty() || sh["twitchUp"].as_bool().unwrap_or(false)) && (kk.is_empty() || sh["kickUp"].as_bool().unwrap_or(false));
-    let who = [if tw.is_empty() { String::new() } else { format!("Twitch: {tw}") }, if kk.is_empty() { String::new() } else { format!("Kick: {kk}") }].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(", ");
-    ("shared", "Shared Stream".into(), if up { "ok" } else { "warn" }, who, "Their chat and alerts come in with yours".into())
+    if !on(cur, "sharedOn", false) { return ("shared", "Co-Stream".into(), "off", "Off".into(), "Guest streamers' channels beside yours, for one event".into()); }
+    let list = shared_guests(cur);
+    if list.is_empty() { return ("shared", "Co-Stream".into(), "warn", "On, no guest signed in yet".into(), "Sign the guests in below".into()); }
+    let ups: Vec<&Value> = st["shared"]["guests"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
+    let up = !ups.is_empty() && ups.iter().all(|g| g["up"].as_bool().unwrap_or(false));
+    let names: Vec<String> = list.iter().map(|g| format!("{}: {}", if g["plat"] == "kick" { "Kick" } else { "Twitch" }, g["login"].as_str().filter(|x| !x.is_empty()).or(g["slug"].as_str()).unwrap_or("?"))).collect();
+    ("shared", "Co-Stream".into(), if up { "ok" } else { "warn" }, names.join(", "), format!("{} guest{}: their chat and alerts come in with yours", list.len(), if list.len() == 1 { "" } else { "s" }))
 }
 
 /// Your streaming software, in one tile: OBS, Meld Studio or Streamlabs Desktop, whichever are on
@@ -1487,14 +1497,19 @@ pub fn value_of(manifest: &Value, key: &str, v: &str) -> Value {
 
 /// An account's icons: the plugin's method for each (in: sign in here; link: its link copied; out: signed out)
 pub fn method(act: &str) -> Option<&'static str> {
+    // (Co-Stream's guests: any number, each row's key ending in their name; a sign-out names them (guestOut))
+    if act.starts_with("out:twitch:guest:") { return Some("signOutGuest"); }
+    if act.starts_with("out:kick:guest:") { return Some("signOutKickGuest"); }
+    if act.starts_with("in:twitch:guest") { return Some("signInGuest"); }
+    if act.starts_with("link:twitch:guest") { return Some("signInGuestCopy"); }
+    if act.starts_with("in:kick:guest") { return Some("signInKickGuest"); }
+    if act.starts_with("link:kick:guest") { return Some("signInKickGuestCopy"); }
     Some(match act {
         "in:twitch:channel" => "signInChannel", "link:twitch:channel" => "signInChannelCopy", "out:twitch:channel" => "signOutChannel",
         "in:twitch:bot" => "signInBot", "link:twitch:bot" => "signInBotCopy", "out:twitch:bot" => "signOutBot",
         "in:kick:channel" => "signInKick", "link:kick:channel" => "signInKickCopy", "out:kick:channel" => "signOutKickChannel",
         "in:kick:bot" => "signInKickBot", "link:kick:bot" => "signInKickBotCopy", "out:kick:bot" => "signOutKickBot",
-        // (Shared Stream's guest)
-        "in:twitch:guest" => "signInGuest", "link:twitch:guest" => "signInGuestCopy", "out:twitch:guest" => "signOutGuest",
-        "in:kick:guest" => "signInKickGuest", "link:kick:guest" => "signInKickGuestCopy", "out:kick:guest" => "signOutKickGuest",
+
         // (channel points as the currency: its rewards made on Twitch and Kick)
         "pts:rewards" => "makePointRewards",
         _ => return None,

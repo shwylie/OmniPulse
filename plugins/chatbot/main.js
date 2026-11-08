@@ -5,20 +5,32 @@
 
 const S = () => OmniPulse.settings;
 
-// ---------- Shared Stream: a guest streamer's accounts beside yours for one event (two channels, one feed, one
+// ---------- Co-Stream: guest streamers' accounts beside yours for one event (several channels, one feed, one
 // PC): their chat and their follows, subs, gifts, bits and raids come in with yours, each marked with whose
 // channel it is. Their sign-ins live only while the event's on: switching it off signs them out and forgets them.
-// (keys: sharedOn; guestToken/guestRefresh/guestLogin/guestUserId; guestKickToken/guestKickRefreshToken/
-// guestKickLogin/guestKickUserId/guestKickChannel) ----------
+// (keys: sharedOn; sharedGuests: a list, each { plat: "twitch" | "kick", login, userId, token, refresh, slug }) ----------
 const sharedOn = () => yes(S().sharedOn);
-const guestTwitch = () => sharedOn() && !!(S().guestToken && S().guestLogin);
-const guestKick = () => sharedOn() && !!String(S().guestKickChannel || "").trim();
-const isGuestChannel = (ch) => !!ch && !!S().guestLogin && String(ch).toLowerCase() === String(S().guestLogin).toLowerCase();
-const guestKickSlug = () => String(S().guestKickChannel || "").trim().toLowerCase().replace(/_/g, "-");
-let guestChat = null, guestEvents = null, kickGuest = null, kickGuestRefresh = null;
+function guests() { try { const l = JSON.parse(S().sharedGuests || "[]"); return Array.isArray(l) ? l.filter((g) => g && typeof g === "object") : []; } catch (e) { return []; } }
+async function saveGuests(list) { const keep = { sharedGuests: JSON.stringify(list) }; await OmniPulse.app.saveSettings(keep); Object.assign(OmniPulse.settings, keep); }
+const twitchGuests = () => (sharedOn() ? guests().filter((g) => g.plat === "twitch" && g.token && g.login) : []);
+const kickGuests = () => (sharedOn() ? guests().filter((g) => g.plat === "kick" && g.slug) : []);
+const guestByChannel = (ch) => twitchGuests().find((g) => String(g.login).toLowerCase() === String(ch || "").replace(/^#/, "").toLowerCase()) || null;
+const kickGuestBySlug = (slug) => kickGuests().find((g) => g.slug === String(slug || "").toLowerCase()) || null;
+const isGuestChannel = (ch) => !!guestByChannel(ch);
+// (a guest's name in a "who": "guest:<login>" for Twitch, "kickguest:<slug>" for Kick)
+const guestOfWho = (who) => (String(who || "").startsWith("guest:") ? twitchGuests().find((g) => String(g.login).toLowerCase() === who.slice(6).toLowerCase()) || guests().find((g) => g.plat === "twitch" && String(g.login).toLowerCase() === who.slice(6).toLowerCase()) : null);
+const kickGuestOfWho = (who) => (String(who || "").startsWith("kickguest:") ? guests().find((g) => g.plat === "kick" && g.slug === who.slice(10).toLowerCase()) || null : null);
+// (each guest's connections: Twitch by login { chat, events }; Kick by slug { s, refresh })
+const guestConns = new Map(), kickGuestConns = new Map();
 // (whose chat the message being answered came from, so the reply goes back there)
-let replyChannel = "", replyKickGuest = false;
+let replyChannel = "", replyKickGuest = "";
 function asWho(who) { return who === "bot" ? "as the bot account" : who === "guest" ? "as the guest streamer, with their own account" : "as your channel"; }
+// (a guest signed in: added to the list, or their entry made new; never your own channel)
+async function guestKeep(entry) {
+  const list = guests().filter((g) => !(g.plat === entry.plat && (entry.plat === "twitch" ? String(g.login).toLowerCase() === String(entry.login).toLowerCase() : g.slug === entry.slug)));
+  list.push(entry);
+  await saveGuests(list);
+}
 const TWITCH_SCOPES_CHANNEL = [
   "chat:read", "chat:edit", "user:read:chat", "moderator:read:followers", "channel:read:subscriptions", "bits:read",
   "channel:read:hype_train", "channel:read:polls", "moderator:read:shoutouts", "channel:read:redemptions",
@@ -121,15 +133,21 @@ async function twitchSignedIn(who, clientId, relay, j) {
   if (!me) return "Signed in, but Twitch didn't say who as: try again.";
   if (who === "bot" && S().login && me.login === String(S().login).toLowerCase()) return "That's your channel's own account: sign in the bot with its own Twitch account (a private window keeps you signed in as you).";
   if (who === "guest" && S().login && me.login === String(S().login).toLowerCase()) return "That's your own channel: the guest signs in with their own Twitch account (a private window keeps you signed in as you).";
+  if (who === "guest") {
+    await guestKeep({ plat: "twitch", login: me.login, userId: String(me.user_id || ""), token: j.access_token, refresh: j.refresh_token || "" });
+    const app = { twitchClientId: clientId, twitchRelay: relay };
+    await OmniPulse.app.saveSettings(app);
+    Object.assign(OmniPulse.settings, app);
+    restart();
+    return "Signed in to Twitch as " + me.login + " (a guest).";
+  }
   const keep = who === "bot"
     ? { twitchClientId: clientId, twitchRelay: relay, botToken: j.access_token, botRefresh: j.refresh_token, botLogin: me.login }
-    : who === "guest"
-    ? { twitchClientId: clientId, twitchRelay: relay, guestToken: j.access_token, guestRefresh: j.refresh_token, guestLogin: me.login, guestUserId: me.user_id }
     : { twitchClientId: clientId, twitchRelay: relay, token: j.access_token, refresh: j.refresh_token, login: me.login, userId: me.user_id };
   await OmniPulse.app.saveSettings(keep);
   Object.assign(OmniPulse.settings, keep);
   restart();
-  return "Signed in to Twitch as " + me.login + (who === "bot" ? " (the bot)." : who === "guest" ? " (the guest)." : ".");
+  return "Signed in to Twitch as " + me.login + (who === "bot" ? " (the bot)." : ".");
 }
 
 async function validate(token) {
@@ -140,23 +158,26 @@ async function validate(token) {
 // A token that's run out, renewed (a public client's refresh needs no secret)
 async function renew(who) {
   const s = S();
-  const refresh = who === "bot" ? s.botRefresh : who === "guest" ? s.guestRefresh : s.refresh;
+  const g = guestOfWho(who);
+  const refresh = who === "bot" ? s.botRefresh : g ? g.refresh : s.refresh;
   if (!refresh || !s.twitchClientId) return false;
   const t = s.twitchRelay
     ? await viaRelay(s.twitchRelay, "twitch", "refresh", { refresh_token: refresh })
     : await form("https://id.twitch.tv/oauth2/token", { client_id: s.twitchClientId, grant_type: "refresh_token", refresh_token: refresh });
   if (!t.ok || !t.j.access_token) return false;
-  const keep = who === "bot" ? { botToken: t.j.access_token, botRefresh: t.j.refresh_token || refresh } : who === "guest" ? { guestToken: t.j.access_token, guestRefresh: t.j.refresh_token || refresh } : { token: t.j.access_token, refresh: t.j.refresh_token || refresh };
+  if (g) { g.token = t.j.access_token; g.refresh = t.j.refresh_token || refresh; await guestKeep(g); return true; }
+  const keep = who === "bot" ? { botToken: t.j.access_token, botRefresh: t.j.refresh_token || refresh } : { token: t.j.access_token, refresh: t.j.refresh_token || refresh };
   await OmniPulse.app.saveSettings(keep);
   Object.assign(OmniPulse.settings, keep);
   return true;
 }
 
 async function fresh(who) {
-  const token = who === "bot" ? S().botToken : who === "guest" ? S().guestToken : S().token;
+  const g = guestOfWho(who);
+  const token = who === "bot" ? S().botToken : g ? g.token : S().token;
   if (!token) return null;
   if (await validate(token)) return token;
-  return (await renew(who)) ? (who === "bot" ? S().botToken : who === "guest" ? S().guestToken : S().token) : null;
+  return (await renew(who)) ? (who === "bot" ? S().botToken : g ? (guestOfWho(who) || {}).token || null : S().token) : null;
 }
 
 // ---------- chat: Twitch's IRC over WebSocket ----------
@@ -186,8 +207,8 @@ function connectChat(token, login, onLine, channel) {
     s.send("PASS oauth:" + token);
     s.send("NICK " + login);
     s.send("JOIN #" + (channel || S().login));
-    // (the bot account: in the guest's chat too, to answer there)
-    if (!channel && guestTwitch() && S().botLogin && String(login).toLowerCase() === String(S().botLogin).toLowerCase()) s.send("JOIN #" + S().guestLogin);
+    // (the bot account: in every guest's chat too, to answer there)
+    if (!channel && S().botLogin && String(login).toLowerCase() === String(S().botLogin).toLowerCase()) twitchGuests().forEach((g) => s.send("JOIN #" + g.login));
   };
   s.onmessage = (data) => data.split("\r\n").filter(Boolean).forEach((line) => {
     if (line.startsWith("PING")) { s.send("PONG" + line.slice(4)); return; }
@@ -217,14 +238,14 @@ function reply(to, text, platform) {
   if (p === "youtube") { OmniPulse.log("youtube (not sent: read only): " + String(text).slice(0, 120)); return; }
   if (p === "kick" || p === "all") kickSay(p === "kick" ? to : null, text, replyKickGuest);
   if (p === "kick") return;
-  // (a command heard in the guest's chat: answered there, by the bot account, else as the guest)
-  const toGuest = isGuestChannel(replyChannel) && guestTwitch();
-  const chan = toGuest ? S().guestLogin : S().login;
-  const s = botChat || (toGuest ? guestChat : chat);
+  // (a command heard in a guest's chat: answered there, by the bot account, else as that guest)
+  const g = guestByChannel(replyChannel);
+  const chan = g ? g.login : S().login;
+  const s = botChat || (g ? (guestConns.get(String(g.login).toLowerCase()) || {}).chat : chat);
   if (!s) return;
   const lines = String(text).split("\n").filter(Boolean);
-  const asLogin = toGuest && !botChat ? S().guestLogin : S().login;
-  if (!botChat) lines.forEach((line) => OmniPulse.app.dockChat({ platform: "twitch", id: "", user: asLogin, login: String(asLogin || "").toLowerCase(), text: line.slice(0, 480), self: true, badges: ["broadcaster"], channel: String(chan || "").toLowerCase(), shared: toGuest, sharedFrom: toGuest ? String(S().guestLogin) : "" }).catch(() => {}));
+  const asLogin = g && !botChat ? g.login : S().login;
+  if (!botChat) lines.forEach((line) => OmniPulse.app.dockChat({ platform: "twitch", id: "", user: asLogin, login: String(asLogin || "").toLowerCase(), text: line.slice(0, 480), self: true, badges: ["broadcaster"], channel: String(chan || "").toLowerCase(), shared: !!g, sharedFrom: g ? String(g.login) : "" }).catch(() => {}));
   lines.forEach((line) => s.send((to && p !== "all" ? "@reply-parent-msg-id=" + to + " " : "") + "PRIVMSG #" + chan + " :" + line.slice(0, 480)));
 }
 
@@ -232,20 +253,22 @@ function reply(to, text, platform) {
 // yours, so your commands run as if you'd typed them in chat
 function sayAsMe(text, platform) {
   const lines = String(text).split("\n").map((l) => l.trim()).filter(Boolean);
-  // (Shared Stream: from the guest's own account, in the guest's own chat)
-  if (platform === "twitch:guest") {
-    if (!guestChat || !guestTwitch()) return;
-    const glogin = String(S().guestLogin || "").toLowerCase();
+  // (Co-Stream: from a guest's own account, in that guest's own chat)
+  if (String(platform).startsWith("twitch:")) {
+    const g = guestByChannel(platform.slice(7)), c = g && guestConns.get(String(g.login).toLowerCase());
+    if (!g || !c || !c.chat) return;
+    const glogin = String(g.login).toLowerCase();
     lines.forEach((line) => {
       line = line.slice(0, 480);
-      guestChat.send("PRIVMSG #" + S().guestLogin + " :" + line);
-      onChat({ command: "PRIVMSG", platform: "twitch", channel: glogin, nick: glogin, text: line, tags: { "display-name": S().guestLogin, badges: "broadcaster/1", mod: "0", "user-id": String(S().guestUserId || ""), id: "" } });
+      c.chat.send("PRIVMSG #" + g.login + " :" + line);
+      onChat({ command: "PRIVMSG", platform: "twitch", channel: glogin, nick: glogin, text: line, tags: { "display-name": g.login, badges: "broadcaster/1", mod: "0", "user-id": String(g.userId || ""), id: "" } });
     });
     return;
   }
-  if (platform === "kick:guest") {
-    if (!S().guestKickToken || !S().guestKickUserId) return;
-    lines.forEach((line) => kickApi("POST", "chat", { content: kickEmotesIn(line).slice(0, 500), type: "user", broadcaster_user_id: Number(S().guestKickUserId) }, false, "guest").catch((e) => OmniPulse.log("kick chat (guest): " + e.message)));
+  if (String(platform).startsWith("kick:")) {
+    const g = kickGuestBySlug(platform.slice(5));
+    if (!g || !g.token || !g.userId) return;
+    lines.forEach((line) => kickApi("POST", "chat", { content: kickEmotesIn(line).slice(0, 500), type: "user", broadcaster_user_id: Number(g.userId) }, false, "kickguest:" + g.slug).catch((e) => OmniPulse.log("kick chat (guest): " + e.message)));
     return;
   }
   // (Kick sends it back, and as it's not one of the bot's own, it's taken as yours then)
@@ -288,7 +311,7 @@ async function onChat(m) {
   const platform = m.platform || "twitch";
   // (which chat it came from: the reply goes back there)
   replyChannel = platform === "twitch" ? String(m.channel || "").replace(/^#/, "").toLowerCase() : "";
-  replyKickGuest = platform === "kick" && !!m.kickGuest;
+  replyKickGuest = platform === "kick" ? String(m.kickGuest || "") : "";
   if (platform === "twitch") dockTwitch(m);
   // (the bot's own messages never start anything)
   if (S().botLogin && m.nick === S().botLogin.toLowerCase()) return;
@@ -631,7 +654,7 @@ function onEvent(type, e) {
   const said = (e.message && e.message.text) || e.title || "";
   const ctx = { user: a.user || e.user_name || e.from_broadcaster_user_name || "", userId: e.user_id || e.from_broadcaster_user_id || "", amount: ev === "adbreak" ? String(e.duration_seconds || 0) : amount, message: a.message || said || e.user_input || "", reward, rewardId, redemptionId: ev === "reward" ? String(e.id || "") : "", rawInput: e.user_input || said || "", msgId: e.msg_id || "", platform: "twitch", winner: won, tier: String(e.tier || "") };
   Object.assign(ctx, words(ctx.rawInput));
-  // (Shared Stream: whose channel it happened on; yours when it isn't said)
+  // (Co-Stream: whose channel it happened on; yours when it isn't said)
   ctx.channel = String(e.__channel || "");
   if (ev === "reward") {
     const cost = num(e.reward && e.reward.cost);
@@ -2045,20 +2068,28 @@ async function kickSignInFlow(values, said, copy, who) {
     ? await viaRelay(relay, "kick", "token", { code: got.code, code_verifier: verifier, redirect_uri: KICK_REDIRECT })
     : await form("https://id.kick.com/oauth/token", { grant_type: "authorization_code", client_id: id, client_secret: secret, redirect_uri: KICK_REDIRECT, code: got.code, code_verifier: verifier });
   if (!t.ok || !t.j.access_token) return "Kick didn't take the sign-in: " + (t.j.error_description || t.j.message || t.j.error || t.status) + (relay ? ". Try again in a moment." : ". Check your app's Client Secret, and that its Redirect URL is " + KICK_REDIRECT + ".");
-  const p = bot ? "kickBot" : guest ? "guestKick" : "kick";
-  const keep = { kickClientId: id, kickClientSecret: secret, kickRelay: relay, [p + "Token"]: t.j.access_token, [p + "RefreshToken"]: t.j.refresh_token || "" };
+  const p = bot ? "kickBot" : "kick";
+  // (a guest: kept in the guests' list once Kick says who they are, not in your channel's keys)
+  const keep = guest ? { kickClientId: id, kickClientSecret: secret, kickRelay: relay } : { kickClientId: id, kickClientSecret: secret, kickRelay: relay, [p + "Token"]: t.j.access_token, [p + "RefreshToken"]: t.j.refresh_token || "" };
   Object.assign(OmniPulse.settings, keep);
+  if (guest) {
+    const pending = { plat: "kick", slug: "", login: "", userId: "", token: t.j.access_token, refresh: t.j.refresh_token || "" };
+    const r2 = await OmniPulse.fetch("https://api.kick.com/public/v1/users", { headers: { Authorization: "Bearer " + pending.token, Accept: "application/json" } });
+    const u2 = r2.ok ? ((await r2.json()).data || [])[0] : null;
+    if (!u2) return "Signed in, but Kick didn't say who as: try again.";
+    pending.userId = String(u2.user_id); pending.login = String(u2.name || ""); pending.slug = String(u2.name || "").toLowerCase().replace(/_/g, "-");
+    if (pending.login && pending.login.toLowerCase() === String(S().kickLogin || "").toLowerCase()) return "That's your own Kick channel: the guest signs in with their own Kick account (a private window keeps you signed in as you).";
+    await guestKeep(pending);
+    await OmniPulse.app.saveSettings(keep);
+    restart();
+    return "Signed in to Kick as " + (u2.name || "the guest") + " (a guest).";
+  }
   const me = await kickApi("GET", "users", null, false, who);
   const u = me.data && me.data[0];
   if (!u) return "Signed in, but Kick didn't say who as: try again.";
   if (bot) {
     keep.kickBotLogin = String(u.name || "");
     if (keep.kickBotLogin && keep.kickBotLogin.toLowerCase() === String(S().kickLogin || "").toLowerCase()) return "That's your channel's own account: sign in the bot with its own Kick account (a private window keeps you signed in as you).";
-  } else if (guest) {
-    keep.guestKickUserId = String(u.user_id);
-    keep.guestKickLogin = String(u.name || "");
-    keep.guestKickChannel = String(u.name || "").toLowerCase();
-    if (keep.guestKickLogin && keep.guestKickLogin.toLowerCase() === String(S().kickLogin || "").toLowerCase()) return "That's your own Kick channel: the guest signs in with their own Kick account (a private window keeps you signed in as you).";
   } else {
     keep.kickUserId = String(u.user_id);
     keep.kickLogin = String(u.name || "");
@@ -2067,12 +2098,13 @@ async function kickSignInFlow(values, said, copy, who) {
   await OmniPulse.app.saveSettings(keep);
   Object.assign(OmniPulse.settings, keep);
   restart();
-  return "Signed in to Kick as " + (u.name || "you") + (bot ? " (the bot)." : guest ? " (the guest)." : ".");
+  return "Signed in to Kick as " + (u.name || "you") + (bot ? " (the bot)." : ".");
 }
 
 // Kick's API, as your channel (or who: "bot", the bot account); a token that's run out, renewed once
 async function kickApi(method, path, body, again, who) {
-  const token = who === "bot" ? S().kickBotToken : who === "guest" ? S().guestKickToken : S().kickToken;
+  const kg = kickGuestOfWho(who);
+  const token = who === "bot" ? S().kickBotToken : kg ? kg.token : S().kickToken;
   if (!token) throw new Error("sign in to Kick first (in the chatbot's settings)");
   const r = await OmniPulse.fetch("https://api.kick.com/public/v1/" + path, {
     method,
@@ -2099,13 +2131,16 @@ async function viaRelay(relay, platform, what, body) {
 
 async function kickRenew(who) {
   const s = S();
-  const p = who === "bot" ? "kickBot" : who === "guest" ? "guestKick" : "kick";
-  if (!s[p + "RefreshToken"] || !s.kickClientId || (!s.kickClientSecret && !s.kickRelay)) return false;
+  const kg = kickGuestOfWho(who);
+  const p = who === "bot" ? "kickBot" : "kick";
+  const had = kg ? kg.refresh : s[p + "RefreshToken"];
+  if (!had || !s.kickClientId || (!s.kickClientSecret && !s.kickRelay)) return false;
   const t = s.kickClientSecret
-    ? await form("https://id.kick.com/oauth/token", { grant_type: "refresh_token", client_id: s.kickClientId, client_secret: s.kickClientSecret, refresh_token: s[p + "RefreshToken"] })
-    : await viaRelay(s.kickRelay, "kick", "refresh", { refresh_token: s[p + "RefreshToken"] });
+    ? await form("https://id.kick.com/oauth/token", { grant_type: "refresh_token", client_id: s.kickClientId, client_secret: s.kickClientSecret, refresh_token: had })
+    : await viaRelay(s.kickRelay, "kick", "refresh", { refresh_token: had });
   if (!t.ok || !t.j.access_token) return false;
-  const keep = { [p + "Token"]: t.j.access_token, [p + "RefreshToken"]: t.j.refresh_token || s[p + "RefreshToken"] };
+  if (kg) { kg.token = t.j.access_token; kg.refresh = t.j.refresh_token || had; await guestKeep(kg); return true; }
+  const keep = { [p + "Token"]: t.j.access_token, [p + "RefreshToken"]: t.j.refresh_token || had };
   await OmniPulse.app.saveSettings(keep);
   Object.assign(OmniPulse.settings, keep);
   return true;
@@ -2157,13 +2192,14 @@ function kickEmotesIn(text) {
 
 // A message in your Kick chat (to the one it answers): from the bot account if there is one, else you; kept
 // a moment, so its echo isn't taken as chat
-function kickSay(to, text, guest) {
-  // (a command heard in the guest's Kick chat: answered there, by the bot account, else as the guest)
-  if (guest) {
-    const who = S().kickBotToken ? "bot" : "guest";
-    if (!S().guestKickUserId || !(who === "bot" ? S().kickBotToken : S().guestKickToken)) return;
+function kickSay(to, text, guestSlug) {
+  // (a command heard in a guest's Kick chat: answered there, by the bot account, else as that guest)
+  const g = guestSlug ? kickGuestBySlug(guestSlug) : null;
+  if (g) {
+    const who = S().kickBotToken ? "bot" : "kickguest:" + g.slug;
+    if (!g.userId || !(who === "bot" ? S().kickBotToken : g.token)) return;
     String(text).split("\n").filter(Boolean).forEach((line) => {
-      const body = { content: kickEmotesIn(line).slice(0, 500), type: "user", broadcaster_user_id: Number(S().guestKickUserId) };
+      const body = { content: kickEmotesIn(line).slice(0, 500), type: "user", broadcaster_user_id: Number(g.userId) };
       if (to) body.reply_to_message_id = to;
       kickApi("POST", "chat", body, false, who).catch((e) => OmniPulse.log("kick chat (guest): " + e.message));
     });
@@ -2188,23 +2224,25 @@ async function kickPost(path, body) {
   return (await r.json()).data || {};
 }
 
-// (Shared Stream: the guest's Kick chat and events, read from their public channel the same way)
-async function kickGuestConnect() {
-  const slug = guestKickSlug();
+// (Co-Stream: a guest's Kick chat and events, read from their public channel the same way)
+async function kickGuestConnect(slug) {
+  slug = String(slug || "").toLowerCase();
   if (!slug) return;
+  const g = kickGuestBySlug(slug);
   const r = await OmniPulse.fetch("https://kick.com/api/v2/channels/" + encodeURIComponent(slug), { headers: { Accept: "application/json", "User-Agent": "OmniPulse" } });
   if (!r.ok) throw new Error("Kick didn't answer for " + slug + " (" + r.status + ")");
   const ch = await r.json();
   const room = ch.chatroom && ch.chatroom.id, channelId = ch.id;
   if (!room) throw new Error("Kick has no channel called " + slug);
-  if (!S().guestKickUserId && ch.user_id) OmniPulse.settings.guestKickUserId = String(ch.user_id);
+  if (g && !g.userId && ch.user_id) { g.userId = String(ch.user_id); await guestKeep(g); }
   const client = randomText(8) + "-" + randomText(4) + "-4" + randomText(3) + "-a" + randomText(3) + "-" + randomText(12);
   const conn = await kickPost("connection", { client: { id: client, type: "web" }, capabilities: { accepted_providers: [{ provider: "centrifugo" }] } });
   const url = conn.connections && conn.connections[0] && conn.connections[0].credentials && conn.connections[0].credentials.url;
   if (!url) throw new Error("Kick's chat didn't say where to connect");
   const token = (await kickPost("auth/connection", { client_id: client })).token;
   const s = OmniPulse.socket(url);
-  kickGuest = s;
+  const me = { s, refresh: null };
+  kickGuestConns.set(slug, me);
   s.onopen = () => {
     s.send(JSON.stringify({ connect: { token, name: "js" }, id: 1 }));
     s.send(JSON.stringify({ subscribe: { channel: "chatrooms." + room + ".v2" }, id: 2 }));
@@ -2216,22 +2254,22 @@ async function kickGuestConnect() {
     try { m = JSON.parse(line); } catch (e) { return; }
     if (m.id === 1 && m.connect) s.up = true;
     if (m.id === 1 && m.connect && m.connect.ttl) {
-      if (kickGuestRefresh) clearInterval(kickGuestRefresh);
-      kickGuestRefresh = setInterval(() => {
-        kickPost("auth/connection", { client_id: client }).then((t) => { if (kickGuest === s) s.send(JSON.stringify({ refresh: { token: t.token }, id: ++kickN })); }).catch((e) => OmniPulse.log("kick token (guest): " + e.message));
+      if (me.refresh) clearInterval(me.refresh);
+      me.refresh = setInterval(() => {
+        kickPost("auth/connection", { client_id: client }).then((t) => { if (kickGuestConns.get(slug) === me) s.send(JSON.stringify({ refresh: { token: t.token }, id: ++kickN })); }).catch((e) => OmniPulse.log("kick token (guest): " + e.message));
       }, Math.max(60, m.connect.ttl * 0.75) * 1000);
     }
     const pub = m.push && m.push.pub && m.push.pub.data;
     if (!pub) return;
     let d = pub.data;
     if (typeof d === "string") { try { d = JSON.parse(d); } catch (e) { d = {}; } }
-    onKick(String(pub.event || ""), d || {}, true);
+    onKick(String(pub.event || ""), d || {}, slug);
   });
   s.onclose = (why) => {
-    if (kickGuest !== s) return;
-    kickGuest = null;
-    if (kickGuestRefresh) { clearInterval(kickGuestRefresh); kickGuestRefresh = null; }
-    if (!stopped && guestKick()) { OmniPulse.log("kick (guest) closed: " + why); setTimeout(() => { if (!kickGuest && !stopped) kickGuestConnect().catch((e) => OmniPulse.log("kick (guest): " + e.message)); }, kickRetry); }
+    if (kickGuestConns.get(slug) !== me) return;
+    kickGuestConns.delete(slug);
+    if (me.refresh) { clearInterval(me.refresh); me.refresh = null; }
+    if (!stopped && kickGuestBySlug(slug)) { OmniPulse.log("kick (guest " + slug + ") closed: " + why); setTimeout(() => { if (!kickGuestConns.has(slug) && !stopped) kickGuestConnect(slug).catch((e) => OmniPulse.log("kick (guest): " + e.message)); }, kickRetry); }
   };
 }
 
@@ -2355,8 +2393,8 @@ const spoken = new Set();
 // What Kick sends: its chat as ours (a Twitch line's shape, its platform Kick), its events as ours
 function onKick(event, d, guest) {
   const ev = event.replace(/^App\\Events\\/, "");
-  // (Shared Stream: the guest's channel's, marked with its name)
-  const gch = guest ? guestKickSlug() : "";
+  // (Co-Stream: a guest's channel's (guest: its slug), marked with its name)
+  const gch = guest ? String(guest).toLowerCase() : "";
   if (ev === "MessageDeletedEvent") { dockGone("kick", String((d.message && d.message.id) || d.id || ""), ""); return; }
   if (ev === "UserBannedEvent") { const u = d.user || {}; dockGone("kick", "", String(u.slug || u.username || "")); return; }
   if (ev === "ChatroomClearEvent") { dockGone("kick", "", ""); return; }
@@ -2385,7 +2423,7 @@ function onKick(event, d, guest) {
     const badges = types.map((t) => (t === "moderator" ? "moderator" : t === "founder" || t === "og" ? "founder" : t) + "/1").join(",");
     const emotes = (content.match(/\[emote:\d+:[^\]]*\]/g) || []).length;
     onChat({
-      command: "PRIVMSG", platform: "kick", kickGuest: !!guest, nick: String(sender.slug || sender.username || "").toLowerCase(), text: content.replace(/\[emote:\d+:([^\]]*)\]/g, "$1"),
+      command: "PRIVMSG", platform: "kick", kickGuest: gch, nick: String(sender.slug || sender.username || "").toLowerCase(), text: content.replace(/\[emote:\d+:([^\]]*)\]/g, "$1"),
       tags: { "display-name": sender.username || "", badges, mod: types.includes("moderator") ? "1" : "0", subscriber: types.includes("subscriber") ? "1" : "0", id: String(d.id || ""), "user-id": String(sender.id || ""), emotes: emotes ? "kick:" + new Array(emotes).fill("0-0").join(",") : "" },
     });
     return;
@@ -2449,11 +2487,11 @@ async function twitchUserId(name) {
 }
 
 // Twitch's API, as your channel (its moderation, its shoutouts)
-async function helix(method, path, body, again, token) {
+async function helix(method, path, body, again, token, who) {
   if (token) {
     const r = await OmniPulse.fetch("https://api.twitch.tv/helix/" + path, { method, headers: { "Client-Id": S().twitchClientId, Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
-    if (r.status === 401 && !again && (await renew("guest"))) return helix(method, path, body, true, S().guestToken);
-    if (!r.ok) throw new Error("Twitch said " + r.status + (r.status === 401 || r.status === 403 ? ": the guest needs to sign in again (in Shared Stream), for the permission" : ""));
+    if (r.status === 401 && !again && who && (await renew(who))) return helix(method, path, body, true, (guestOfWho(who) || {}).token || token, who);
+    if (!r.ok) throw new Error("Twitch said " + r.status + (r.status === 401 || r.status === 403 ? ": the guest needs to sign in again (in Co-Stream), for the permission" : ""));
     if (r.status === 204) return {};
     try { return await r.json(); } catch (e) { return {}; }
   }
@@ -2533,17 +2571,18 @@ async function staleSubsGone(token) {
 
 function connectEvents(token, url, who) {
   const s = OmniPulse.socket(url || "wss://eventsub.wss.twitch.tv/ws");
-  // (whose: yours, or the guest's (Shared Stream), each feed its own connection)
-  const guest = who === "guest";
-  const mine = () => (guest ? guestEvents : events);
-  const setMine = (x) => { if (guest) guestEvents = x; else events = x; };
+  // (whose: yours, or a guest's (Co-Stream, who: "guest:<login>"), each feed its own connection)
+  const guest = String(who || "").startsWith("guest:");
+  const glogin = guest ? who.slice(6).toLowerCase() : "";
+  const mine = () => (guest ? (guestConns.get(glogin) || {}).events : events);
+  const setMine = (x) => { if (guest) { const c = guestConns.get(glogin) || {}; c.events = x; guestConns.set(glogin, c); } else events = x; };
   s.onmessage = async (data) => {
     let m;
     try { m = JSON.parse(data); } catch (e) { return; }
     const kind = m.metadata && m.metadata.message_type;
     if (kind === "session_welcome" && !url) {
       // (the sign-in as it is now: renewed if it's run out since the chatbot started, as on a long stream)
-      token = (await fresh(guest ? "guest" : "channel")) || token;
+      token = (await fresh(guest ? who : "channel")) || token;
       if (!guest) apiToken = token;
       // (subscribed to at once, all together: Twitch closes a connection with none within 10 seconds, so the
       // old ones are cleared after, not before, and any refused for being too many (429) tried again then)
@@ -2559,7 +2598,7 @@ function connectEvents(token, url, who) {
         try { why = ((await r.json()) || {}).message || ""; } catch (e) {}
         return { sub: [type, version, condition], status: r.status, why };
       };
-      const failed = (await Promise.all(SUBS(guest ? S().guestUserId : S().userId).map((x) => follow(x).catch((e) => ({ sub: x, status: 0, why: e.message }))))).filter(Boolean);
+      const failed = (await Promise.all(SUBS(guest ? String((guestOfWho(who) || {}).userId || "") : S().userId).map((x) => follow(x).catch((e) => ({ sub: x, status: 0, why: e.message }))))).filter(Boolean);
       await staleSubsGone(token);
       const again = failed.filter((f) => f.status === 429).map((f) => f.sub);
       const still = failed.filter((f) => f.status !== 429).concat((await Promise.all(again.map((x) => follow(x).catch((e) => ({ sub: x, status: 0, why: e.message }))))).filter(Boolean));
@@ -2573,7 +2612,7 @@ function connectEvents(token, url, who) {
     } else if (kind === "notification") {
       const type = m.payload.subscription.type, e = m.payload.event || {};
       // (the guest's: marked with their channel; their going live or offline is theirs, not yours)
-      if (guest) { e.__channel = String(S().guestLogin || "").toLowerCase(); if (type === "stream.online" || type === "stream.offline") return; }
+      if (guest) { e.__channel = glogin; if (type === "stream.online" || type === "stream.offline") return; }
       if (S().alerts !== false) {
         const a = asAlert(type, e);
         if (a) { if (guest) a.channel = e.__channel; sendAlert(a); }
@@ -2612,7 +2651,7 @@ async function start() {
   ytLook();
   tipConnect();
   kickConnect().catch((e) => { OmniPulse.log("kick: " + e.message); OmniPulse.app.say("Kick's chat didn't connect: " + e.message).catch(() => {}); });
-  if (guestKick()) kickGuestConnect().catch((e) => OmniPulse.log("kick (guest): " + e.message));
+  for (const g of kickGuests()) kickGuestConnect(g.slug).catch((e) => OmniPulse.log("kick (guest " + g.slug + "): " + e.message));
   // (Kick's emotes now; Twitch's join them once it's signed in, below)
   emotesRead();
   if (!S().token || !S().login) return;
@@ -2629,14 +2668,14 @@ async function start() {
     if (bot) botChat = connectChat(bot, S().botLogin, () => {});
   }
   events = connectEvents(token);
-  // (Shared Stream: the guest's chat read as their account, and their channel's events)
-  if (guestTwitch()) {
-    const g = await fresh("guest");
-    if (g) {
-      const glogin = String(S().guestLogin || "").toLowerCase();
-      guestChat = connectChat(g, S().guestLogin, (m) => onChat(Object.assign(m, { channel: glogin })), S().guestLogin);
-      guestEvents = connectEvents(g, undefined, "guest");
-    } else OmniPulse.app.say("The guest's Twitch sign-in has run out: sign them in again in Shared Stream.").catch(() => {});
+  // (Co-Stream: each guest's chat read as their account, and their channel's events)
+  for (const g of twitchGuests()) {
+    const tok = await fresh("guest:" + g.login);
+    const glogin = String(g.login).toLowerCase();
+    if (!tok) { OmniPulse.app.say(g.login + "'s Twitch sign-in has run out: sign them in again in Co-Stream.").catch(() => {}); continue; }
+    const c = { chat: connectChat(tok, g.login, (m) => onChat(Object.assign(m, { channel: glogin })), g.login), events: null };
+    guestConns.set(glogin, c);
+    c.events = connectEvents(tok, undefined, "guest:" + g.login);
   }
   retry = 1000;
 }
@@ -2742,10 +2781,13 @@ function suitePush() {
       sponsors: sponsorPlug(),
       // (moderation, for the Chat Dock's panel: Auto-Ban's terms, Twitch's chat modes and Shield Mode, a lockdown)
       stats: sessionStats,
-      // (Shared Stream, for the Chat Dock: whose channels are in, and the accounts a typed message can go from)
-      shared: sharedOn() ? { on: true, host: { twitch: String(S().login || "").toLowerCase(), kick: String(S().kickChannel || "").toLowerCase() }, guest: { twitch: String(S().guestLogin || "").toLowerCase(), kick: guestKickSlug() },
-        accounts: [S().login ? { id: "twitch", label: "Twitch: " + S().login } : null, guestTwitch() ? { id: "twitch:guest", label: "Twitch: " + S().guestLogin + " (guest)" } : null, S().kickLogin ? { id: "kick", label: "Kick: " + S().kickLogin } : null, S().guestKickToken ? { id: "kick:guest", label: "Kick: " + (S().guestKickLogin || S().guestKickChannel) + " (guest)" } : null].filter(Boolean) } : { on: false },
-      info: { twitch: streamInfo.twitch, kick: streamInfo.kick, found: streamInfo.found, said: streamInfo.said, at: streamInfo.at, canTwitch: !!(S().userId && apiToken), canKick: !!(S().kickToken && S().kickUserId) },
+      // (Co-Stream, for the Chat Dock: whose channels are in, and the accounts a typed message can go from)
+      shared: sharedOn() ? { on: true, host: { twitch: String(S().login || "").toLowerCase(), kick: String(S().kickChannel || "").toLowerCase() },
+        guests: guests().map((g) => ({ plat: g.plat, name: g.plat === "kick" ? g.slug : String(g.login).toLowerCase(), label: g.plat === "kick" ? (g.login || g.slug) : g.login })),
+        accounts: [S().login ? { id: "twitch", label: "Twitch: " + S().login } : null, S().kickLogin ? { id: "kick", label: "Kick: " + S().kickLogin } : null]
+          .concat(twitchGuests().map((g) => ({ id: "twitch:" + String(g.login).toLowerCase(), label: "Twitch: " + g.login + " (guest)" })))
+          .concat(kickGuests().filter((g) => g.token).map((g) => ({ id: "kick:" + g.slug, label: "Kick: " + (g.login || g.slug) + " (guest)" }))).filter(Boolean) } : { on: false },
+      info: { twitch: streamInfo.twitch, kick: streamInfo.kick, guests: sharedOn() ? streamInfo.guests || [] : [], found: streamInfo.found, said: streamInfo.said, at: streamInfo.at, canTwitch: !!(S().userId && apiToken), canKick: !!(S().kickToken && S().kickUserId) },
       mod: { autoban: { on: yes(x.abOn), terms: String(x.abTerms || "").split(/\r?\n|\|/).map((t) => t.trim()).filter(Boolean) }, chat: modState.chat, shield: modState.shield, lock: !!modState.lock, twitch: !!(S().userId && apiToken) },
       gifs: { goals: x.gifGoals || "", timer: x.gifTimer || "", latest: x.gifLatest || "", raid: x.gifRaid || "", hype: x.gifHype || "", voteskip: x.gifVoteskip || "", wheel: x.gifWheel || "", leaderboard: x.gifLeaderboard || "", tune: x.gifTune || "" },
       gifPlace: String(x.gifPlace || "top"),
@@ -3269,10 +3311,10 @@ function dockTwitch(m) {
     // draws it, where it's known)
     badges: String((sharedFrom(m) && m.tags["source-badges"]) || m.tags.badges || "").split(",").map((b) => b.split("/")[0]).filter(Boolean),
     badgeImgs: String((sharedFrom(m) && m.tags["source-badges"]) || m.tags.badges || "").split(",").filter(Boolean).map((b) => twitchBadges[b]).filter((b) => b && b.url), text, emotes: m.tags.emotes || "", first: m.tags["first-msg"] === "1", me: !!me,
-    // (Shared Stream: from the guest's chat, marked with their channel, for the dock's split and its tag)
-    shared: isGuestChannel(m.channel) || !!sharedFrom(m), sharedFrom: isGuestChannel(m.channel) ? String(S().guestLogin) : (sharedFrom(m) || {}).name || "",
+    // (Co-Stream: from a guest's chat, marked with their channel, for the dock's split and its tag)
+    shared: isGuestChannel(m.channel) || !!sharedFrom(m), sharedFrom: isGuestChannel(m.channel) ? String(guestByChannel(m.channel).login) : (sharedFrom(m) || {}).name || "",
     channel: String(m.channel || S().login || "").replace(/^#/, "").toLowerCase(),
-    self: [S().login, S().botLogin, isGuestChannel(m.channel) ? S().guestLogin : ""].some((x) => x && String(x).toLowerCase() === login),
+    self: [S().login, S().botLogin, isGuestChannel(m.channel) ? guestByChannel(m.channel).login : ""].some((x) => x && String(x).toLowerCase() === login),
   }).catch(() => {});
 }
 
@@ -3382,7 +3424,25 @@ async function statsRefresh() {
 }
 
 // ---------- the Stream Info dock: your title and category on Twitch and Kick, read and changed ----------
-const streamInfo = { twitch: null, kick: null, found: { q: "", list: [] }, said: "", at: 0 };
+const streamInfo = { twitch: null, kick: null, guests: [], found: { q: "", list: [] }, said: "", at: 0 };
+// (Co-Stream: each guest's title and category, read with their own sign-in)
+async function infoReadGuests() {
+  const out = [];
+  for (const g of twitchGuests()) {
+    try {
+      const c = ((await helix("GET", "channels?broadcaster_id=" + encodeURIComponent(g.userId), null, false, g.token, "guest:" + g.login)).data || [])[0] || {};
+      out.push({ plat: "twitch", name: String(g.login).toLowerCase(), label: g.login, title: c.title || "", category: c.game_name || "" });
+    } catch (e) { out.push({ plat: "twitch", name: String(g.login).toLowerCase(), label: g.login, title: "", category: "", error: e.message }); }
+  }
+  for (const g of kickGuests()) {
+    if (!g.token || !g.userId) { out.push({ plat: "kick", name: g.slug, label: g.login || g.slug, title: "", category: "", error: "not signed in" }); continue; }
+    try {
+      const c = ((await kickApi("GET", "channels?broadcaster_user_id=" + encodeURIComponent(g.userId), null, false, "kickguest:" + g.slug)).data || [])[0] || {};
+      out.push({ plat: "kick", name: g.slug, label: g.login || g.slug, title: c.stream_title || "", category: (c.category && c.category.name) || "" });
+    } catch (e) { out.push({ plat: "kick", name: g.slug, label: g.login || g.slug, title: "", category: "", error: e.message }); }
+  }
+  return out;
+}
 async function infoRead() {
   if (S().userId && apiToken) {
     try { const c = ((await helix("GET", "channels?broadcaster_id=" + S().userId)).data || [])[0] || {}; streamInfo.twitch = { title: c.title || "", category: c.game_name || "" }; } catch (e) { streamInfo.twitch = null; }
@@ -3390,6 +3450,7 @@ async function infoRead() {
   if (S().kickToken && S().kickUserId) {
     try { const c = ((await kickApi("GET", "channels?broadcaster_user_id=" + encodeURIComponent(S().kickUserId))).data || [])[0] || {}; streamInfo.kick = { title: c.stream_title || "", category: (c.category && c.category.name) || "" }; } catch (e) { streamInfo.kick = null; }
   } else streamInfo.kick = null;
+  streamInfo.guests = sharedOn() ? await infoReadGuests() : [];
   streamInfo.at = Date.now();
   suitePush();
 }
@@ -3398,13 +3459,13 @@ async function dockDo(cmd) {
   // (the message acted on is Kick's: not `kick`, which is the Kick connection itself)
   const fromKick = cmd.platform === "kick";
   const who = cmd.user || cmd.login || "them";
-  // (Shared Stream: a message from the guest's chat is dealt with there, with the guest's own sign-in)
-  const onGuest = isGuestChannel(cmd.channel) && guestTwitch();
-  const twitchMod = onGuest ? "broadcaster_id=" + S().guestUserId + "&moderator_id=" + S().guestUserId : "broadcaster_id=" + S().userId + "&moderator_id=" + S().userId;
-  const hx = (method, path, body) => helix(method, path, body, false, onGuest ? S().guestToken : undefined);
-  const kickGuestMsg = fromKick && !!cmd.channel && !!guestKickSlug() && String(cmd.channel).toLowerCase() === guestKickSlug();
-  const kx = (method, path, body) => kickApi(method, path, body, false, kickGuestMsg ? "guest" : undefined);
-  const kickBroadcaster = Number(kickGuestMsg ? S().guestKickUserId : S().kickUserId);
+  // (Co-Stream: a message from a guest's chat is dealt with there, with that guest's own sign-in)
+  const tg = !fromKick ? guestByChannel(cmd.channel) : null;
+  const twitchMod = tg ? "broadcaster_id=" + tg.userId + "&moderator_id=" + tg.userId : "broadcaster_id=" + S().userId + "&moderator_id=" + S().userId;
+  const hx = (method, path, body) => helix(method, path, body, false, tg ? tg.token : undefined, tg ? "guest:" + tg.login : undefined);
+  const kg = fromKick ? kickGuestBySlug(cmd.channel) : null;
+  const kx = (method, path, body) => kickApi(method, path, body, false, kg ? "kickguest:" + kg.slug : undefined);
+  const kickBroadcaster = Number(kg ? kg.userId : S().kickUserId);
   switch (cmd.do) {
     // (a Twitch reward's points given back: its redemption cancelled. Twitch allows it only for rewards this
     // app made (in OmniPulse), not ones made on its dashboard)
@@ -3458,6 +3519,32 @@ async function dockDo(cmd) {
           if (Object.keys(body).length) await kickApi("PATCH", "channels", body);
           done.push("Kick");
         } catch (e) { failed.push("Kick (" + e.message + ")"); }
+      }
+      // (Co-Stream: each guest's own title (cmd.titles, by "plat:name"), the one category for all of them)
+      const titles = cmd.titles && typeof cmd.titles === "object" ? cmd.titles : {};
+      for (const g of sharedOn() ? twitchGuests() : []) {
+        const key = "twitch:" + String(g.login).toLowerCase();
+        if (!(key in titles) && !cat) continue;
+        const gt = String(titles[key] || "").trim().slice(0, 140);
+        try {
+          const body = {};
+          if (gt) body.title = gt;
+          if (cat) { const gm = await helix("GET", "games?name=" + encodeURIComponent(cat)); const gid = gm.data && gm.data[0] && gm.data[0].id; if (!gid) throw new Error("no category called " + cat); body.game_id = gid; }
+          if (Object.keys(body).length) await helix("PATCH", "channels?broadcaster_id=" + encodeURIComponent(g.userId), body, false, g.token, "guest:" + g.login);
+          done.push(g.login + " (Twitch)");
+        } catch (e) { failed.push(g.login + " (" + e.message + ")"); }
+      }
+      for (const g of sharedOn() ? kickGuests().filter((x) => x.token && x.userId) : []) {
+        const key = "kick:" + g.slug;
+        if (!(key in titles) && !cat) continue;
+        const gt = String(titles[key] || "").trim().slice(0, 140);
+        try {
+          const body = {};
+          if (gt) body.stream_title = gt;
+          if (cat) { const c = await kickApi("GET", "categories?q=" + encodeURIComponent(cat), null, false, "kickguest:" + g.slug); const hit = ((c.data || []).find((x) => String(x.name || "").toLowerCase() === cat.toLowerCase())) || (c.data || [])[0]; if (!hit) throw new Error("no category called " + cat); body.category_id = hit.id; }
+          if (Object.keys(body).length) await kickApi("PATCH", "channels", body, false, "kickguest:" + g.slug);
+          done.push((g.login || g.slug) + " (Kick)");
+        } catch (e) { failed.push((g.login || g.slug) + " (" + e.message + ")"); }
       }
       streamInfo.said = (done.length ? "Updated on " + done.join(" and ") + "." : "") + (failed.length ? " Couldn't on " + failed.join(", ") + "." : "") || "Nothing to update: pick Twitch or Kick.";
       await infoRead();
@@ -3514,7 +3601,7 @@ async function dockDo(cmd) {
     }
     case "say": {
       const text = String(cmd.text || "").trim().slice(0, 500);
-      if (text) sayAsMe(text, ["kick", "twitch", "twitch:guest", "kick:guest"].includes(cmd.platform) ? cmd.platform : "all");
+      if (text) sayAsMe(text, cmd.platform === "kick" || cmd.platform === "twitch" || /^(twitch|kick):./.test(String(cmd.platform || "")) ? cmd.platform : "all");
       return "";
     }
     case "delete":
@@ -3689,9 +3776,12 @@ function stopAll() {
   if (pointsTimer) { clearInterval(pointsTimer); pointsTimer = null; }
   if (kickRefresh) { clearInterval(kickRefresh); kickRefresh = null; }
   if (viewersTimer) { clearInterval(viewersTimer); viewersTimer = null; }
-  if (kickGuestRefresh) { clearInterval(kickGuestRefresh); kickGuestRefresh = null; }
-  for (const s of [chat, botChat, events, obs, kick, meld, slobs, guestChat, guestEvents, kickGuest]) { if (s) { s.onclose = null; s.close(); } }
-  chat = botChat = events = obs = kick = meld = slobs = guestChat = guestEvents = kickGuest = null;
+  for (const c of guestConns.values()) for (const s of [c.chat, c.events]) { if (s) { s.onclose = null; s.close(); } }
+  guestConns.clear();
+  for (const c of kickGuestConns.values()) { if (c.refresh) clearInterval(c.refresh); if (c.s) { c.s.onclose = null; c.s.close(); } }
+  kickGuestConns.clear();
+  for (const s of [chat, botChat, events, obs, kick, meld, slobs]) { if (s) { s.onclose = null; s.close(); } }
+  chat = botChat = events = obs = kick = meld = slobs = null;
   meldReady = slobsReady = false;
   ytStop();
   for (const s of tipSockets) { s.onclose = null; s.close(); }
@@ -3787,15 +3877,26 @@ OmniPulse.register({
   async signOutBot() { return signOutOf({ botToken: "", botRefresh: "", botLogin: "" }, "Signed the bot out of Twitch."); },
   async signOutKickChannel() { return signOutOf({ kickToken: "", kickRefreshToken: "", kickUserId: "", kickLogin: "", kickHookUrl: "", kickHookFor: "", kickLast: "" }, "Signed your channel out of Kick."); },
   async signOutKickBot() { return signOutOf({ kickBotToken: "", kickBotRefreshToken: "", kickBotLogin: "" }, "Signed the bot out of Kick."); },
-  // (Shared Stream: the guest's accounts; and the event over: every one of them signed out and forgotten)
+  // (Co-Stream: the guest's accounts; and the event over: every one of them signed out and forgotten)
   signInGuest(values) { return signIn("guest", TWITCH_SCOPES_CHANNEL, values); },
   signInGuestCopy(values) { return signIn("guest", TWITCH_SCOPES_CHANNEL, values, true); },
-  async signOutGuest() { return signOutOf({ guestToken: "", guestRefresh: "", guestLogin: "", guestUserId: "" }, "Signed the guest out of Twitch."); },
+  // (one guest signed out: by the login (Twitch) or slug (Kick) the page names in guestOut)
+  async signOutGuest(values) {
+    const who = String((values && values.guestOut) || "").toLowerCase();
+    await saveGuests(guests().filter((g) => !(g.plat === "twitch" && String(g.login).toLowerCase() === who)));
+    restart();
+    return "Signed " + (who || "the guest") + " out of Twitch.";
+  },
   signInKickGuest(values) { return signInKick(values, false, "guest"); },
   signInKickGuestCopy(values) { return signInKick(values, true, "guest"); },
-  async signOutKickGuest() { return signOutOf({ guestKickToken: "", guestKickRefreshToken: "", guestKickLogin: "", guestKickUserId: "", guestKickChannel: "" }, "Signed the guest out of Kick."); },
+  async signOutKickGuest(values) {
+    const who = String((values && values.guestOut) || "").toLowerCase();
+    await saveGuests(guests().filter((g) => !(g.plat === "kick" && g.slug === who)));
+    restart();
+    return "Signed " + (who || "the guest") + " out of Kick.";
+  },
   async sharedOff() {
-    return signOutOf({ sharedOn: false, guestToken: "", guestRefresh: "", guestLogin: "", guestUserId: "", guestKickToken: "", guestKickRefreshToken: "", guestKickLogin: "", guestKickUserId: "", guestKickChannel: "" }, "Shared Stream is off. The guest's accounts are signed out and forgotten.");
+    return signOutOf({ sharedOn: false, sharedGuests: "[]" }, "Co-Stream is off. The guests' accounts are signed out and forgotten.");
   },
   tryChat(text, platform, asMod, real) { return tryChat(text, platform, asMod, real); },
   // (settings that change only how things look or behave, saved: taken as they are, nothing restarted, the
@@ -3810,7 +3911,7 @@ OmniPulse.register({
     return {
       running: !stopped,
       twitch: { clientId: !!String(S().twitchClientId || "").trim(), login: S().login || "", name: myName, bot: S().botLogin || "", up: !!(chat && chat.up) },
-      shared: { on: sharedOn(), twitch: guestTwitch() ? String(S().guestLogin || "") : "", kick: guestKick() ? guestKickSlug() : "", twitchUp: !!(guestChat && guestChat.up), kickUp: !!(kickGuest && kickGuest.up) },
+      shared: { on: sharedOn(), guests: guests().map((g) => ({ plat: g.plat, name: g.plat === "kick" ? g.slug : g.login, up: g.plat === "kick" ? !!((kickGuestConns.get(g.slug) || {}).s || {}).up : !!((guestConns.get(String(g.login).toLowerCase()) || {}).chat || {}).up })) },
       kick: { on: yes(S().kickOn), app: !!String(S().kickClientId || "").trim() && (!!String(S().kickClientSecret || "").trim() || !!String(S().kickRelay || "").trim()), login: S().kickLogin || "", bot: S().kickBotLogin || "", channel: S().kickChannel || "", up: !!(kick && kick.up) },
       obs: { on: yes(S().obsOn), up: !!obsReady },
       meld: { on: yes(S().meldOn), up: !!meldReady },

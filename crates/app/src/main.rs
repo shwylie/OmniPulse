@@ -7937,13 +7937,13 @@ const PANEL_TPL_KEYS: [&str; 15] = ["panelTheme", "panelShape", "panelHeight", "
 
 fn bot_set(shared: &Shared, key: &str, v: &str) {
     let key = botpage::key_of(key).to_string();
-    // (Shared Stream switched off with a guest signed in: asked first, as their accounts are signed out and forgotten)
+    // (Co-Stream switched off with a guest signed in: asked first, as their accounts are signed out and forgotten)
     if key == "sharedOn" && v == "false" {
         let cur = bot_current(shared);
-        let guests = ["guestLogin", "guestKickLogin", "guestToken", "guestKickToken"].iter().any(|k| !cur.get(*k).and_then(|x| x.as_str()).unwrap_or("").is_empty());
+        let guests = !botpage::shared_guests(&cur).is_empty();
         if guests {
             if let Some(ui) = shared.borrow().ui.upgrade() {
-                say_with(&ui, "Switch Shared Stream off? The guest's accounts are signed out and forgotten.", vec![("Switch Off", StatusAct::SharedOff), ("Keep On", StatusAct::Dismiss)]);
+                say_with(&ui, "Switch Co-Stream off? The guests' accounts are signed out and forgotten.", vec![("Switch Off", StatusAct::SharedOff), ("Keep On", StatusAct::Dismiss)]);
             }
             bot_paint(shared);
             return;
@@ -8394,6 +8394,8 @@ fn bot_act(shared: &Shared, act: &str) {
     };
     let mut vals = bot_current(shared);
     botpage::sign_in_extras(&mut vals, share::RELAY_URL);
+    // (Co-Stream: which guest a sign-out is for, from the row's key)
+    if let Some(who) = act.strip_prefix("out:").and_then(|r| r.split_once(":guest:")).map(|x| x.1) { vals.insert("guestOut".into(), serde_json::json!(who)); }
     let vals = serde_json::Value::Object(vals);
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
     let method = method.to_string();
@@ -13708,20 +13710,20 @@ fn status_act(shared: &Shared, i: usize) {
         StatusAct::Dismiss => {}
         StatusAct::Prefs(t) => tp_open(shared, &t),
         StatusAct::Skip => step(shared, 1),
-        // (Shared Stream over: the chatbot signs the guest's accounts out and forgets them, then its page is drawn again)
+        // (Co-Stream over: the chatbot signs the guest's accounts out and forgets them, then its page is drawn again)
         StatusAct::SharedOff => {
             bot_keep(shared, "sharedOn", serde_json::json!(false));
             if let Some(p) = plugrun::get(botpage::BOT) {
                 let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
                 rt.spawn(async move {
-                    let said = p.call("sharedOff", vec![]).await.ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_else(|| "Shared Stream is off.".into());
+                    let said = p.call("sharedOff", vec![]).await.ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_else(|| "Co-Stream is off.".into());
                     let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
                         let Some(shared) = s.borrow().clone() else { return };
                         ui.set_status(said.into());
                         bot_paint(&shared);
                     }));
                 });
-            } else { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Shared Stream is off.".into()); } bot_paint(shared); }
+            } else { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Co-Stream is off.".into()); } bot_paint(shared); }
         }
         StatusAct::Leave => listen_leave(shared, false),
         StatusAct::Restart => {

@@ -126,7 +126,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             tog("kick", "Kick Chat", ""),
             tog("badges", "Badges", "Subscriber, moderator and VIP badges next to names."),
             tog("time", "Times", "When each message was sent."),
-            tog("split", "Split by Stream", "Shared Stream only: your channels' chat on the left, the guest's on the right. Off, it's one chat, the guest's messages marked with their channel."),
+            tog("split", "Split by Stream", "Co-Stream only: your channels' chat on the left, the guest's on the right. Off, it's one chat, the guest's messages marked with their channel."),
             sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large"), (json!("17"), "Larger")]),
         ].into_iter().chain(look_for(true, false)).chain([
             sel("style", "Design", "How the dock is drawn, in the colours above. Each one keeps every message on a band of its own so chat is easy to read, and dresses the Moderation panel to match. The other docks follow it unless told not to.", &[(json!("plain"), "Plain"), (json!("glass"), "Glass"), (json!("bubbles"), "Bubbles"), (json!("neon"), "Neon"), (json!("ribbon"), "Ribbon")]),

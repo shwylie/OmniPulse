@@ -46,10 +46,11 @@
   #logs { flex: 1; display: flex; min-height: 0; }
   #logs .col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
   #log, #log2 { flex: 1; overflow-y: auto; padding: 4px 0 8px; overscroll-behavior: contain; }
-  /* Shared Stream, split by stream: yours left, the guest's right, each column named */
+  /* Co-Stream, split by stream: yours left, the guest's right, each column named */
   .colhead { display: none; }
-  #col2 { display: none; }
-  body.split #col2 { display: flex; border-left: 1px solid var(--line); }
+  .col.guest { display: none; }
+  body.split .col.guest { display: flex; border-left: 1px solid var(--line); }
+  .col.guest .glog { flex: 1; overflow-y: auto; padding: 4px 0 8px; overscroll-behavior: contain; }
   body.split .colhead { display: block; padding: 4px 10px 2px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); border-bottom: 1px solid var(--line); }
   body.split .colhead:empty { display: none; }
   .msg { position: relative; padding: 3px 8px 3px 10px; border-left: 2px solid transparent; word-wrap: break-word; }
@@ -351,7 +352,6 @@
 <div id="piles"></div>
 <div id="logs">
   <div class="col"><div class="colhead" id="head1"></div><div id="log"><div id="empty">Chat shows here while OmniPulse's chatbot is on (Settings &gt; Streaming), signed in to Twitch or Kick.</div></div></div>
-  <div class="col" id="col2"><div class="colhead" id="head2"></div><div id="log2"></div></div>
 </div>
 <button id="more" type="button">New messages &#8595;</button>
 <form id="send" autocomplete="off">
@@ -706,23 +706,34 @@
     place(r);
   }
 
-  // (Shared Stream: whose channels are in, from the Suite; a message from the guest's goes to the right column)
-  let shared = { on: false, host: {}, guest: {}, accounts: [] };
-  const log2 = $("log2");
-  function isGuestMsg(m) {
-    if (!shared.on || !m || !m.channel) return false;
-    const g = m.platform === "kick" ? shared.guest.kick : shared.guest.twitch;
-    return !!g && String(m.channel).toLowerCase() === String(g).toLowerCase();
+  // (Co-Stream: whose channels are in, from the Suite; a message from a guest's goes to that guest's column)
+  let shared = { on: false, host: {}, guests: [], accounts: [] };
+  const guestCols = new Map();
+  function guestKey(m) {
+    if (!shared.on || !m || !m.channel) return "";
+    const g = (shared.guests || []).find((x) => x.plat === (m.platform === "kick" ? "kick" : "twitch") && String(x.name).toLowerCase() === String(m.channel).toLowerCase());
+    return g ? g.plat + ":" + String(g.name).toLowerCase() : "";
   }
-  function colOf(m) { return document.body.classList.contains("split") && isGuestMsg(m) ? log2 : log; }
+  function isGuestMsg(m) { return !!guestKey(m); }
+  function colOf(m) { const k = guestKey(m); return document.body.classList.contains("split") && k && guestCols.has(k) ? guestCols.get(k) : log; }
   function sharedDraw(sh) {
     const was = JSON.stringify(shared);
-    shared = Object.assign({ on: false, host: {}, guest: {}, accounts: [] }, sh || {});
+    shared = Object.assign({ on: false, host: {}, guests: [], accounts: [] }, sh || {});
     document.body.classList.toggle("split", !!opt.split && shared.on);
     if (JSON.stringify(shared) === was) return;
     const name = (o) => [o.twitch, o.kick].filter((x, i, a) => x && a.findIndex((y) => String(y).toLowerCase() === String(x).toLowerCase()) === i).join(" / ");
     $("head1").textContent = shared.on ? name(shared.host || {}) || "You" : "";
-    $("head2").textContent = shared.on ? name(shared.guest || {}) || "Guest" : "";
+    // (a column for each guest: made as they come, kept while they stay)
+    const want = new Set((shared.on ? shared.guests || [] : []).map((g) => g.plat + ":" + String(g.name).toLowerCase()));
+    for (const [k, el] of guestCols) { if (!want.has(k)) { el.parentElement.remove(); guestCols.delete(k); } }
+    for (const g of shared.on ? shared.guests || [] : []) {
+      const k = g.plat + ":" + String(g.name).toLowerCase();
+      if (guestCols.has(k)) continue;
+      const col = document.createElement("div"); col.className = "col guest";
+      const head = document.createElement("div"); head.className = "colhead"; head.textContent = (g.label || g.name) + (g.plat === "kick" ? " (Kick)" : "");
+      const glog = document.createElement("div"); glog.className = "glog";
+      col.append(head, glog); $("logs").append(col); guestCols.set(k, glog);
+    }
     // (the send-to list: each account, while the event's on; Both, Twitch and Kick otherwise)
     const to = $("to"), keep = to.value;
     const opts = shared.on && shared.accounts.length ? [{ id: "all", label: "Both (yours)" }].concat(shared.accounts) : [{ id: "all", label: "Both" }, { id: "twitch", label: "Twitch" }, { id: "kick", label: "Kick" }];
