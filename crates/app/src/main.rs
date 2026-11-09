@@ -10123,13 +10123,15 @@ fn pf_open(shared: &Shared, id: &str) {
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_bot_page(bot); ui.set_leave_ask(false); }
     pf_paint(shared);
     pf_mark(shared);
-    if bot { bot_poll(shared); }
     if let Some(ui) = shared.borrow().ui.upgrade() {
         let cat = if p.manifest.section.is_empty() { "Plugins".to_string() } else { p.manifest.section.clone() };
         crumbs_set(&ui, vec![("Settings".into(), "root".into()), (cat.clone(), format!("cat:{cat}"))]);
         ui.set_pf_head(place_label(&p.manifest).into());
         ui.set_pf_open(true);
     }
+    // (the Stream Suite's page asks the chatbot how it's doing while it's open: started once the page counts as
+    // open, above, or it stops at once and every tile says "connecting")
+    if bot { bot_poll(shared); }
 }
 
 fn pf_fields(id: &str) -> Vec<serde_json::Value> {
@@ -13523,7 +13525,7 @@ fn web_preview(key: &str, title: &str, url: &str, w: u32, h: u32) -> Result<(), 
     win.set_name(title.into());
     win.window().set_size(slint::LogicalSize::new(w as f32, h as f32));
     // (a self-test's: off the screen, as its main window is)
-    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { win.window().set_position(slint::PhysicalPosition::new(-4000, 0)); }
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() || std::env::var_os("OMNIPULSE_OFFSCREEN").is_some() { win.window().set_position(slint::PhysicalPosition::new(-4000, 0)); }
     win.show().map_err(|e| e.to_string())?;
     // (every quarter second: the page put in once the window's there, and kept the window's size)
     let timer = slint::Timer::default();
@@ -15063,7 +15065,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // one OmniPulse at a time: a second one hands its link (or "show") to the first, and closes
     let link_arg = std::env::args().find(|x| x.starts_with("omnipulse://"));
     if std::env::var_os("OMNIPULSE_RESTARTING").is_some() { instance::wait_for_the_last(); }
-    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() {
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() && std::env::var_os("OMNIPULSE_OFFSCREEN").is_none() {
         let claimed = instance::claim(link_arg.clone(), |msg| {
             let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| {
                 if let Some(sh) = s.borrow().clone() {

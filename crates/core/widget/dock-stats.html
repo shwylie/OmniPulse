@@ -30,13 +30,19 @@
   .plat h2 svg { width: 14px; height: 14px; fill: currentColor; flex: none; }
   .plat h2 .state { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--dim); display: inline-flex; align-items: center; gap: 5px; text-transform: uppercase; letter-spacing: 0.06em; }
   .plat h2 .state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+  .plat h2 .state .up { font-variant-numeric: tabular-nums; text-transform: none; letter-spacing: 0; font-weight: 700; color: var(--text); }
+  .plat h2 .state .up:empty { display: none; }
+  .plat h2 .state .up::before { content: "·"; margin-right: 5px; color: var(--dim); }
   .plat.live h2 .state { color: var(--live); }
   .plat.live h2 .state::before { background: var(--live); box-shadow: 0 0 6px var(--live); }
-  .nums { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: calc(6px * var(--pad)); }
-  .n { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; }
-  .n b { display: block; font-size: calc(var(--fs) * 1.45); font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .n span { display: block; font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+  /* each number a chip: its icon, then the number; what it is on hover */
+  .nums { display: flex; flex-wrap: wrap; gap: calc(6px * var(--pad)); }
+  .n { display: inline-flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px 3px 8px; min-width: 0; }
+  .n svg { width: 14px; height: 14px; fill: currentColor; color: var(--dim); flex: none; }
+  .n b { font-size: calc(var(--fs) * 1.1); font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .n span { display: none; }
   .n.off b { color: var(--dim); font-weight: 500; }
+  .n.off svg { opacity: 0.6; }
   .note { color: var(--dim); font-size: 11px; }
   .note:empty { display: none; }
   /* Co-Stream: whose numbers (All adds every stream's up); hidden when there are no guests */
@@ -51,7 +57,7 @@
   /* Across: the platforms side by side, each one's numbers in a row (a wide, short dock) */
   body.h-row main { flex-direction: row; align-items: stretch; }
   body.h-row .plat { flex: 1 1 0; }
-  body.h-row .nums { grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); }
+
   /* spacing */
   body.d-compact { --pad: 0.6; } body.d-roomy { --pad: 1.6; }
   /* ---------- Designs: the Chat Dock's five, on this dock (it follows the Chat Dock's unless told not to) ---------- */
@@ -109,13 +115,13 @@
   body.st-cards header { border-bottom: 2px solid var(--accent); }
   body.st-cards .plat { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--c, var(--line)); border-radius: 8px; margin-bottom: 4px; }
   body.st-glass .plat { margin-bottom: 0; }
-  body.st-glass .n { background: color-mix(in srgb, var(--bg) 55%, transparent); border-color: #ffffff14; border-radius: 12px; }
+  body.st-glass .n { background: color-mix(in srgb, var(--bg) 55%, transparent); border-color: #ffffff14; }
   body.st-bubbles .plat { margin: 0; max-width: none; }
   body.st-bubbles .n { border-radius: 4px 12px 12px 12px; }
   body.st-neon .plat { margin-bottom: 0; }
   body.st-neon .n { background: transparent; border-color: color-mix(in srgb, var(--c) 45%, var(--line)); border-radius: 3px; }
   body.st-neon .n b { color: var(--c); text-shadow: 0 0 8px color-mix(in srgb, var(--c) 60%, transparent); }
-  body.st-neon .n span { color: color-mix(in srgb, var(--accent) 60%, var(--dim)); }
+  body.st-neon .n svg { color: color-mix(in srgb, var(--accent) 60%, var(--dim)); }
   body.st-ribbon .plat { margin-bottom: 0; }
   body.st-ribbon .n { background: var(--panel); }
   body.st-cards .plat { border-left-width: 1px; border-top: 3px solid var(--c); margin-bottom: 0; }
@@ -136,22 +142,20 @@
   <section class="plat" id="twitch" style="--c: var(--twitch)">
     <h2><svg viewBox="0 0 24 24"><path d="M4.3 2 3 5.4v13.8h4.7V22h2.7l2.6-2.8h3.8l5.2-5.3V2zm16 11-2.9 3h-4.7l-2.6 2.6V16H6.3V3.7h14zm-2.9-6v5.3h-1.8V7zm-4.8 0v5.3h-1.8V7z"/></svg>Twitch<span class="whose"></span><span class="state">Offline</span></h2>
     <div class="nums">
-      <div class="n k-uptime"><b data-k="uptime">—</b><span>Uptime</span></div>
-      <div class="n k-viewers"><b data-k="viewers">—</b><span>Viewers</span></div>
-      <div class="n k-followers"><b data-k="followers">—</b><span>Followers</span></div>
-      <div class="n k-subs"><b data-k="subs">—</b><span>Subs</span></div>
-      <div class="n k-clips"><b data-k="clips">—</b><span>Clips</span></div>
+      <div class="n k-viewers" title="Viewers"><svg viewBox="0 0 24 24"><path d="M12 5c-5 0-9 4.5-10 7 1 2.5 5 7 10 7s9-4.5 10-7c-1-2.5-5-7-10-7zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9zM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg><b data-k="viewers">—</b><span>Viewers</span></div>
+      <div class="n k-followers" title="Followers"><svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.8 4.5c2 0 3.6 1 5.2 2.8 1.6-1.8 3.2-2.8 5.2-2.8 3.8 0 5.9 3.9 4.4 7.3C19.5 16.4 12 21 12 21z"/></svg><b data-k="followers">—</b><span>Followers</span></div>
+      <div class="n k-subs" title="Subs"><svg viewBox="0 0 24 24"><path d="M12 2.5 14.9 8.6l6.6.9-4.8 4.6 1.2 6.6L12 17.6l-5.9 3.1 1.2-6.6L2.5 9.5l6.6-.9z"/></svg><b data-k="subs">—</b><span>Subs</span></div>
+      <div class="n k-clips" title="Clips"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 18.5zM6.5 5a.5.5 0 0 0-.5.5v13c0 .3.2.5.5.5h11c.3 0 .5-.2.5-.5v-13a.5.5 0 0 0-.5-.5zM10 8.5l6 3.5-6 3.5z"/></svg><b data-k="clips">—</b><span>Clips</span></div>
     </div>
     <div class="note"></div>
   </section>
   <section class="plat" id="kick" style="--c: var(--kick)">
     <h2><svg viewBox="0 0 24 24"><path d="M3 2h6v6h2V5h2V2h8v8h-2v2h-2v2h2v2h2v6h-8v-3h-2v-3H9v6H3z"/></svg>Kick<span class="whose"></span><span class="state">Offline</span></h2>
     <div class="nums">
-      <div class="n k-uptime"><b data-k="uptime">—</b><span>Uptime</span></div>
-      <div class="n k-viewers"><b data-k="viewers">—</b><span>Viewers</span></div>
-      <div class="n k-followers"><b data-k="followers">—</b><span>Followers</span></div>
-      <div class="n k-subs"><b data-k="subs">—</b><span>Subs</span></div>
-      <div class="n k-clips"><b data-k="clips">—</b><span>Clips</span></div>
+      <div class="n k-viewers" title="Viewers"><svg viewBox="0 0 24 24"><path d="M12 5c-5 0-9 4.5-10 7 1 2.5 5 7 10 7s9-4.5 10-7c-1-2.5-5-7-10-7zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9zM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg><b data-k="viewers">—</b><span>Viewers</span></div>
+      <div class="n k-followers" title="Followers"><svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.8 4.5c2 0 3.6 1 5.2 2.8 1.6-1.8 3.2-2.8 5.2-2.8 3.8 0 5.9 3.9 4.4 7.3C19.5 16.4 12 21 12 21z"/></svg><b data-k="followers">—</b><span>Followers</span></div>
+      <div class="n k-subs" title="Subs"><svg viewBox="0 0 24 24"><path d="M12 2.5 14.9 8.6l6.6.9-4.8 4.6 1.2 6.6L12 17.6l-5.9 3.1 1.2-6.6L2.5 9.5l6.6-.9z"/></svg><b data-k="subs">—</b><span>Subs</span></div>
+      <div class="n k-clips" title="Clips"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 18.5zM6.5 5a.5.5 0 0 0-.5.5v13c0 .3.2.5.5.5h11c.3 0 .5-.2.5-.5v-13a.5.5 0 0 0-.5-.5zM10 8.5l6 3.5-6 3.5z"/></svg><b data-k="clips">—</b><span>Clips</span></div>
     </div>
     <div class="note"></div>
   </section>
@@ -225,7 +229,7 @@
     const sum = (k, live) => { let n = null; for (const p of list) { if (!p.on || (live && !p.live) || p[k] == null) continue; n = (n || 0) + Number(p[k]); } return n; };
     for (const p of list) if (p.on && p.live && p.started && (!out.started || p.started < out.started)) out.started = p.started;
     out.viewers = sum("viewers", true); out.followers = sum("followers"); out.subs = sum("subs"); out.clips = sum("clips", true);
-    if (list.some((p) => p.on && p.subsLabel)) { out.subsLabel = "Subs*"; out.note = "* Kick's count is this stream's where a sign-in is missing."; }
+    if (list.some((p) => p.on && p.subsLabel)) out.subsLabel = "Subs (Kick's counted this stream only where a sign-in is missing)";
     return out;
   }
   function pick(s, plat) {
@@ -241,15 +245,18 @@
     el.querySelector(".whose").textContent = whose || "";
     const on = p && p.on;
     el.classList.toggle("live", !!(on && p.live));
-    el.querySelector(".state").textContent = !on ? "Not signed in" : p.live ? "Live" : "Offline";
+    const state = el.querySelector(".state");
+    state.textContent = !on ? "Not signed in" : p.live ? "Live" : "Offline";
+    // (how long it's been live, beside the dot)
+    const live0 = !!(on && p.live);
+    if (live0 && p.started && opt.uptime) { const u = document.createElement("span"); u.className = "up"; u.textContent = span(Date.now() - p.started); state.append(u); }
     const v = (k) => el.querySelector('[data-k="' + k + '"]');
     const set = (k, text, off) => { const b = v(k); b.textContent = text; b.parentElement.classList.toggle("off", !!off); };
     const live = !!(on && p.live);
-    set("uptime", live && p.started ? span(Date.now() - p.started) : "—", !live);
     set("viewers", live ? fmt(p.viewers) : "—", !live);
     set("followers", on ? fmt(p.followers) : "—", !on);
     set("subs", on && p.subs != null ? fmt(p.subs) : "—", !(on && p.subs != null));
-    el.querySelector(".k-subs span").textContent = on && p.subsLabel ? p.subsLabel : "Subs";
+    el.querySelector(".k-subs").title = on && p.subsLabel ? p.subsLabel : "Subs";
     set("clips", live && p.clips != null ? fmt(p.clips) : "—", !(live && p.clips != null));
     el.querySelector(".note").textContent = on && p.note ? p.note : "";
   }

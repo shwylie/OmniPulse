@@ -165,7 +165,7 @@ var __run_timers = () => {
 };
 // a socket's events, from the app
 var __sock_event = (id, kind, data) => {
-  const s = __socks[id]; if (!s) return;
+  const s = __socks[id]; if (!s) { __host_log("socket " + id + " " + kind + ": nothing listening for it"); return; }
   if (kind === "close") delete __socks[id];
   const f = kind === "open" ? s.onopen : kind === "message" ? s.onmessage : s.onclose;
   if (typeof f === "function") { try { f(data); } catch (e) { __host_log("socket: " + ((e && e.message) || e)); } }
@@ -356,6 +356,7 @@ fn run(id: String, code: String, settings: String, caps: Caps, rt: tokio::runtim
     }
     // its calls waiting for their answers: (their reply, when they give up)
     let mut calls: HashMap<u32, (tokio::sync::oneshot::Sender<Result<Value, String>>, Instant)> = HashMap::new();
+    let mut heard: std::collections::HashSet<u32> = std::collections::HashSet::new();
     loop {
         // asleep till something comes, its next timer's due, or a call gives up
         let timer: Option<u64> = ctx.with(|ctx| ctx.eval::<f64, _>("__next_timer()").ok()).filter(|ms| *ms >= 0.0).map(|ms| ms as u64);
@@ -382,10 +383,14 @@ fn run(id: String, code: String, settings: String, caps: Caps, rt: tokio::runtim
                         g.get::<_, Function>("__call").and_then(|f| f.call::<_, ()>((n, job.method, job.args)))
                     }
                     Msg::Fetched(n, r) | Msg::App(n, r) => g.get::<_, Function>("__host_done").and_then(|f| f.call::<_, ()>((n, r))),
-                    Msg::Socket(n, kind, data) => g.get::<_, Function>("__sock_event").and_then(|f| f.call::<_, ()>((n, kind, data))),
+                    Msg::Socket(n, kind, data) => {
+                        // (each socket's open and close, and its first message, in the log: to see them reach the script)
+                        if kind != "message" || heard.insert(n) { core::diag::note(&format!("[plugin {id}] socket {n} {kind}{} -> script", if kind == "message" { format!(" ({} chars)", data.len()) } else { String::new() })); }
+                        g.get::<_, Function>("__sock_event").and_then(|f| f.call::<_, ()>((n, kind, data)))
+                    }
                     Msg::Stop => Ok(()),
                 };
-                if let Err(e) = r { eprintln!("[plugin {id}] {}", caught(&ctx, e)); }
+                if let Err(e) = r { core::diag::note(&format!("[plugin {id}] {}", caught(&ctx, e))); }
             }
             let _ = ctx.eval::<(), _>("__run_timers()");
         });
@@ -398,7 +403,7 @@ fn run(id: String, code: String, settings: String, caps: Caps, rt: tokio::runtim
             }
         };
         *deadline.lock().unwrap() = None;
-        if broke { eprintln!("[plugin {id}] a turn of it stopped with an error, or ran out of time"); }
+        if broke { core::diag::note(&format!("[plugin {id}] a turn of it stopped with an error, or ran out of time")); }
         // its answers to their calls; those it hasn't answered in time, given up
         for (n, out) in std::mem::take(&mut *replies.lock().unwrap()) {
             if let Some((reply, _)) = calls.remove(&n) {
@@ -489,6 +494,59 @@ mod tests {
         let p = start(&pkg(r#"let n = 0; const t = setInterval(() => { n++; if (n >= 3) clearInterval(t); }, 20);
             OmniPulse.register({ search() { return new Promise((done) => setTimeout(() => done([n]), 150)); }, resolve() { return null; } });"#), &json!({}), rt.handle().clone()).unwrap();
         assert_eq!(rt.block_on(p.call("search", vec![])).unwrap(), json!([3]));
+        stop(&p.id);
+    }
+
+    // (live: Twitch's chat joined anonymously through the runtime, to see its welcome reach the script;
+    // run by name: cargo test -p omnipulse twitch_chat_welcome_reaches_the_script -- --ignored --nocapture)
+    // (live: the real chatbot on Kick's chat without a sign-in, its status asked as the Suite page asks it;
+    // run by name: cargo test -p omnipulse chatbot_status_live -- --ignored --nocapture)
+    #[test]
+    #[ignore]
+    fn chatbot_status_live() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot");
+        let m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        let pk = core::plugins::Package { manifest: m, code: std::fs::read_to_string(root.join("main.js")).unwrap(), digest: String::new(), bundled: true };
+        let p = start(&pk, &json!({ "kickOn": true, "kickChannel": "xqc" }), rt.handle().clone()).unwrap();
+        let until = Instant::now() + Duration::from_secs(20);
+        let mut last = Err("not asked".to_string());
+        while Instant::now() < until {
+            last = rt.block_on(p.call("status", vec![]));
+            if let Ok(st) = &last { if st["kick"]["up"] == json!(true) { break; } }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        println!("status: {last:#?}");
+        assert!(matches!(&last, Ok(st) if st["kick"]["up"] == json!(true)), "{last:?}");
+        stop(&p.id);
+    }
+
+    #[test]
+    #[ignore]
+    fn twitch_chat_welcome_reaches_the_script() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let code = r#"let got = []; let up = false;
+            OmniPulse.register({ start() {
+                const s = OmniPulse.socket("wss://irc-ws.chat.twitch.tv:443");
+                s.onopen = () => { got.push("open"); s.send("NICK justinfan12345"); };
+                s.onmessage = (d) => { got.push(d.slice(0, 60)); if (/^:\S+ 001 /.test(d)) up = true; };
+                s.onclose = (why) => got.push("close: " + why);
+                return true;
+            }, status() { return { up, got }; }, search() { return []; }, resolve() { return null; } });"#;
+        let mut pk = pkg(code);
+        pk.manifest.capabilities = vec!["sockets".into()];
+        pk.manifest.hosts = vec!["irc-ws.chat.twitch.tv".into()];
+        let p = start(&pk, &json!({}), rt.handle().clone()).unwrap();
+        rt.block_on(p.call("start", vec![])).unwrap();
+        let until = Instant::now() + Duration::from_secs(15);
+        let mut st = Value::Null;
+        while Instant::now() < until {
+            st = rt.block_on(p.call("status", vec![])).unwrap();
+            if st["up"] == json!(true) { break; }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        println!("{st:#?}");
+        assert_eq!(st["up"], json!(true), "{st:#?}");
         stop(&p.id);
     }
 

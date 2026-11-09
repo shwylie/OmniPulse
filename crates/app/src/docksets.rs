@@ -197,7 +197,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             tog("twitch", "Twitch", ""),
             tog("kick", "Kick", ""),
             tog("live", "Live or Not", "Each platform's state, with a red light while you're live."),
-            tog("uptime", "Uptime", "How long you've been live, ticking."),
+            tog("uptime", "Uptime", "How long you've been live, beside the live light."),
             tog("viewers", "Viewers", "Who's watching right now."),
             tog("followers", "Followers", "Your follower count on each."),
             tog("subs", "Subs", "Your subscriber count on each. Kick's needs your Kick sign-in in the Suite; without it, its tile counts the subs of this stream."),
