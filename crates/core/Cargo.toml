@@ -12,7 +12,7 @@ description = "OmniPulse's backend: accounts, streaming services, local music an
 default = ["desktop"]
 desktop = ["reqwest/default-tls", "dep:tiny_http", "dep:opener", "spotify", "librespot-core/native-tls", "dep:librespot-playback", "librespot-playback/native-tls", "dep:librespot-oauth", "librespot-oauth/native-tls",
   "dep:symphonia", "dep:ebur128", "dep:zip", "dep:mdns-sd", "dep:native-tls", "dep:omnipulse-pcmout", "dep:lofty", "model"]
-mobile = ["reqwest/rustls-tls", "dep:ebur128", "model", "spotify", "librespot-core/rustls-tls-webpki-roots"]
+mobile = ["reqwest/rustls-tls", "dep:ebur128", "model", "spotify", "librespot-core/rustls-tls-webpki-roots", "dep:zip"]
 # Spotify's library through librespot's session (likes, playlists, songs): the desktop's and the phone's
 spotify = ["dep:librespot-core", "dep:librespot-metadata", "dep:librespot-protocol", "dep:protobuf"]
 # Beat This! (the beat and downbeat model, pure Rust through rten): on the desktop and the phone alike

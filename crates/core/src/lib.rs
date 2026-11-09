@@ -32,8 +32,9 @@ pub mod songbpm;
 pub mod sponsorblock;
 pub mod musicbrainz;
 pub mod playlistfile;
-#[cfg(feature = "desktop")]
 pub mod plugins;
+// (an addon answered directly, for builds without the plugin runtime)
+pub mod addons;
 #[cfg(feature = "desktop")]
 pub mod cast;
 #[cfg(feature = "desktop")]
