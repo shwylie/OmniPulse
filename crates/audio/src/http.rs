@@ -26,6 +26,9 @@ struct Pieces {
     /// the piece being read (the fetcher keeps AHEAD pieces past it)
     want: u64,
     url: String,
+    /// the address as it was given, when `url` is where that one redirected to (a download link made for
+    /// the asking): gone back to for a new one if `url` stops being accepted
+    origin: Option<String>,
     refreshed: u32,
     /// the fetcher gave up (reading fetches what it needs itself, as it did before)
     failed: bool,
@@ -51,6 +54,18 @@ fn fetch_piece(client: &reqwest::blocking::Client, ahead: &Ahead, refresh: &std:
     let end = (at + PIECE - 1).min(len.unwrap_or(u64::MAX).saturating_sub(1));
     let url = ahead.0.lock().unwrap().url.clone();
     let mut res = client.get(&url).header("Range", format!("bytes={at}-{end}")).send().map_err(std::io::Error::other)?;
+    // (the address it redirected to has run out: the one it was given asked again, for a new one)
+    if !res.status().is_success() {
+        let origin = ahead.0.lock().unwrap().origin.clone();
+        if let Some(o) = origin {
+            let again = client.get(&o).header("Range", format!("bytes={at}-{end}")).send().map_err(std::io::Error::other)?;
+            if again.status().is_success() {
+                let to = again.url().to_string();
+                if to != o { ahead.0.lock().unwrap().url = to; }
+                res = again;
+            }
+        }
+    }
     // turned down partway: a fresh address for the same sound, and on from where it was
     if matches!(res.status().as_u16(), 403 | 410) {
         let can = ahead.0.lock().unwrap().refreshed < 3;
@@ -99,7 +114,12 @@ impl HttpStream {
             return Err(format!("The stream answered {status}."));
         }
         let ranges = status.as_u16() == 206;
-        let len = if ranges {
+        // (an address that redirects to the sound itself, a download link made each time it's asked: the pieces
+        // after this come from where it led, not by asking for a new link for every one, which such a service
+        // soon refuses; the address as given kept, for when that link runs out)
+        let landed = res.url().to_string();
+        let origin = (landed != url).then(|| std::mem::replace(&mut url, landed));
+        let mut len: Option<u64> = if ranges {
             res.headers()
                 .get("content-range")
                 .and_then(|v| v.to_str().ok())
@@ -108,7 +128,12 @@ impl HttpStream {
         } else {
             res.content_length()
         };
-        let ahead: Ahead = std::sync::Arc::new((std::sync::Mutex::new(Pieces { have: Default::default(), busy: None, want: 0, url, refreshed, failed: false, stop: false }), std::sync::Condvar::new()));
+        // (a server that takes ranges but doesn't say the whole length with them: asked for everything from
+        // the start, its length read from that answer, and the answer dropped unread)
+        if ranges && len.is_none() {
+            len = client.get(&url).header("Range", "bytes=0-").send().ok().filter(|r| r.status().as_u16() == 206).and_then(|r| r.content_length()).filter(|l| *l > 0);
+        }
+        let ahead: Ahead = std::sync::Arc::new((std::sync::Mutex::new(Pieces { have: Default::default(), busy: None, want: 0, url, origin, refreshed, failed: false, stop: false }), std::sync::Condvar::new()));
         let refresh = std::sync::Arc::new(std::sync::Mutex::new(refresh));
         let mut s = Self { client, len, ranges, pos: 0, whole: None, ahead, refresh };
         if ranges {
@@ -238,4 +263,71 @@ pub fn open_url(url: &str, ext: &str) -> Result<crate::Decoded, String> {
 /// The same, with a way to a fresh address if this one's turned down partway
 pub fn open_url_refreshing(url: &str, ext: &str, refresh: Refresh) -> Result<crate::Decoded, String> {
     crate::Decoded::open(Box::new(HttpStream::open_with(url, Some(refresh))?), ext)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// A download link made for the asking (it redirects to the file each time), whose file takes ranges
+    /// but doesn't say its whole length with them: asked for a link once, not for every piece; its length
+    /// known all the same, so it can be seeked and its end is its end
+    #[test]
+    fn a_redirecting_link_is_followed_once_and_its_length_found() {
+        let data: Arc<Vec<u8>> = Arc::new((0..700_000u32).map(|i| (i % 251) as u8).collect());
+        let links = Arc::new(AtomicUsize::new(0));
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (d, l) = (data.clone(), links.clone());
+        std::thread::spawn(move || {
+            for s in listener.incoming().flatten() {
+                let (d, l) = (d.clone(), l.clone());
+                std::thread::spawn(move || {
+                    let mut r = BufReader::new(s.try_clone().unwrap());
+                    let mut s = s;
+                    loop {
+                        let mut first = String::new();
+                        if r.read_line(&mut first).unwrap_or(0) == 0 { return; }
+                        let (mut from, mut to) = (None, None);
+                        loop {
+                            let mut h = String::new();
+                            if r.read_line(&mut h).unwrap_or(0) == 0 || h.trim().is_empty() { break; }
+                            if let Some(v) = h.to_lowercase().strip_prefix("range: bytes=") {
+                                let mut p = v.trim().split('-');
+                                from = p.next().and_then(|x| x.parse::<usize>().ok());
+                                to = p.next().and_then(|x| x.parse::<usize>().ok());
+                            }
+                        }
+                        let path = first.split_whitespace().nth(1).unwrap_or("").to_string();
+                        if path.starts_with("/link") {
+                            // (more than a few asks for a link: refused, as the service does)
+                            if l.fetch_add(1, Ordering::SeqCst) >= 3 { let _ = s.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"); continue; }
+                            let _ = s.write_all(format!("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{port}/file\r\nContent-Length: 0\r\n\r\n").as_bytes());
+                            continue;
+                        }
+                        let a = from.unwrap_or(0);
+                        if a >= d.len() { let _ = s.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"); continue; }
+                        let b = to.map(|t| t + 1).unwrap_or(d.len()).min(d.len());
+                        // (206, and no Content-Range)
+                        let _ = s.write_all(format!("HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\n\r\n", b - a).as_bytes());
+                        let _ = s.write_all(&d[a..b]);
+                    }
+                });
+            }
+        });
+        let mut st = HttpStream::open(&format!("http://127.0.0.1:{port}/link")).unwrap();
+        assert_eq!(st.byte_len(), Some(700_000));
+        assert!(st.is_seekable());
+        let mut all = Vec::new();
+        st.read_to_end(&mut all).unwrap();
+        assert!(all == *data, "read {} bytes", all.len());
+        st.seek(SeekFrom::Start(600_000)).unwrap();
+        let mut tail = Vec::new();
+        st.read_to_end(&mut tail).unwrap();
+        assert!(tail == data[600_000..]);
+        assert!(links.load(Ordering::SeqCst) <= 2, "asked for a link {} times", links.load(Ordering::SeqCst));
+    }
 }
