@@ -183,9 +183,17 @@ pub fn queries(t: &Track) -> Vec<String> {
 /// A stand-in worth taking at once: anything but a SoundCloud upload by someone other than the artist (a fan's
 /// re-upload, "Boston - More Than A Feeling" from a stranger's account: taken only when no source has better)
 pub fn strong(t: &Track, c: &Track) -> bool {
-    if !matches!(c.src, Src::SoundCloud(_)) || c.credited { return true; }
     let (ga, _) = versions::guess_names(t);
     let artist = if ga.is_empty() { t.artist.clone() } else { ga };
+    // (a plugin's songs carry their artist: one credited to somebody else, with the real names only in its
+    // title ("Flo Rida feat. Sia - Wild Ones" by a workout act), is a stand-in too. A remix titled exactly as
+    // the song is stays firm, whoever's credited: the title is its identification)
+    if matches!(c.src, Src::Plugin(..)) {
+        let first = artist.split(',').next().unwrap_or("").trim().to_string();
+        let y = as_yt(c);
+        return versions::name_fits(&first, &c.artist) || (versions::same_titled_version(t, &y) && versions::same_version(t, &y));
+    }
+    if !matches!(c.src, Src::SoundCloud(_)) || c.credited { return true; }
     versions::name_fits(&artist, &c.uploader)
 }
 
@@ -294,7 +302,7 @@ mod tests {
         assert_eq!(best(&gold, vec![shy.clone(), fox]).map(|c| c.key), Some("plug:p:g".to_string()));
         // (the same remix title exactly, from someone else entirely: still it; the wrong remix never)
         let other = Track::plugin("p", &json!({ "id": "o", "title": "Gold Dust (Fox Stevenson Remix)", "artist": "Some Uploader", "duration_ms": 234_000 })).unwrap();
-        assert_eq!(best(&gold, vec![shy, other]).map(|c| c.key), Some("plug:p:o".to_string()));
+        assert_eq!(best(&gold, vec![shy, other.clone()]).map(|c| c.key), Some("plug:p:o".to_string()));
         // (a stranger's re-upload on SoundCloud: a weak stand-in; the artist's own upload, or one SoundCloud's
         // metadata credits to them, or any other source's copy: a firm one)
         let boston = Track { key: "sp:b".into(), src: Src::Spotify("b".into()), title: "More Than a Feeling".into(), artist: "Boston".into(), ms: 285_000, ..Default::default() };
@@ -303,6 +311,18 @@ mod tests {
         let meta = Track::soundcloud(&json!({ "id": 3, "title": "Boston - More Than A Feeling", "user": { "username": "Classic Rock Vault" }, "metadata_artist": "Boston", "duration": 284_000 })).unwrap();
         assert!(!strong(&boston, &reup) && strong(&boston, &own) && strong(&boston, &meta));
         assert_eq!((meta.artist.as_str(), meta.credited), ("Boston", true));
+        // (a sound-alike "remake" is never the song; a workout act's take, the real names only in its title, is a
+        // stand-in; the artist's own is firm, credited to the first of them alone or not)
+        let wild = Track { key: "sp:w".into(), src: Src::Spotify("w".into()), title: "Wild Ones".into(), artist: "Flo Rida, Sia".into(), ms: 232_946, ..Default::default() };
+        let remake = Track::plugin("p", &json!({ "id": "r", "title": "Wild Ones (Flo Rida feat. Sia Remake)", "artist": "Wild Flo", "duration_ms": 233_000 })).unwrap();
+        let gym = Track::plugin("p", &json!({ "id": "g", "title": "Flo Rida feat. Sia - Wild Ones", "artist": "DJ Top Gun", "duration_ms": 233_000 })).unwrap();
+        let real = Track::plugin("p", &json!({ "id": "f", "title": "Wild Ones (feat. Sia)", "artist": "Flo Rida", "duration_ms": 233_000 })).unwrap();
+        let kids = Track::plugin("p", &json!({ "id": "k", "title": "Wild Ones (Original By: Flo Rida Ft. Sia)", "artist": "Pop Kidz", "duration_ms": 232_000 })).unwrap();
+        assert_eq!(best(&wild, vec![remake.clone()]).map(|c| c.key), None);
+        assert_eq!(best(&wild, vec![kids]).map(|c| c.key), None);
+        assert_eq!(best(&wild, vec![remake, gym.clone(), real.clone()]).map(|c| c.key), Some("plug:p:f".to_string()));
+        assert!(strong(&wild, &real) && !strong(&wild, &gym));
+        assert!(strong(&gold, &other));
         let dj = Track::soundcloud(&json!({ "id": 4, "title": "Gold Dust (Fox Stevenson Remix)", "user": { "username": "DJFreshUK" }, "duration": 233_000 })).unwrap();
         assert!(strong(&Track { artist: "DJ Fresh".into(), ..gold.clone() }, &dj));
         assert_eq!(source_of(&want), "youtube");

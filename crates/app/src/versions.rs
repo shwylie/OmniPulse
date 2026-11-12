@@ -79,9 +79,9 @@ fn rx(cell: &'static OnceLock<Regex>, src: &str) -> &'static Regex {
 const VERSION_WORDS: [&str; 15] = ["remix", "edit", "mix", "vip", "flip", "bootleg", "live", "acoustic", "instrumental", "remaster", "cover", "sped", "slowed", "nightcore", "karaoke"];
 /// Versions that are never the song asked for, however close the rest: not a match at all (in its title,
 /// or its album's: "The Atlas Underground (Instrumentals)")
-const NEVER_WORDS: [&str; 11] = ["instrumental", "instrumentals", "karaoke", "cover", "live", "acoustic", "sped", "slowed", "nightcore", "reverb", "tribute"];
+const NEVER_WORDS: [&str; 12] = ["instrumental", "instrumentals", "karaoke", "cover", "live", "acoustic", "sped", "slowed", "nightcore", "reverb", "tribute", "remake"];
 /// The same as phrases: someone else's take on the song, however its title reads
-const NEVER_PHRASES: [&str; 6] = ["originally performed", "made famous", "in the style of", "as made famous", "cover version", "tribute to"];
+const NEVER_PHRASES: [&str; 9] = ["originally performed", "made famous", "in the style of", "as made famous", "cover version", "tribute to", "originally by", "original by", "melody version"];
 /// What a version is credited to someone for ("Illenium Remix", "KSHMR Edit"): that one, not another's
 const BY_WORDS: [&str; 6] = ["remix", "edit", "bootleg", "flip", "rework", "vip"];
 
@@ -223,7 +223,9 @@ pub fn score(t: &Track, c: &YtTrack) -> f32 {
         return 0.0;
     }
     let album: HashSet<String> = match_words(&c.album).into_iter().collect();
-    if NEVER_WORDS.iter().any(|v| !want.contains(*v) && (got.contains(*v) || album.contains(*v))) {
+    // (the whole title looked at for these, a featuring bracket and all: "Wild Ones (Flo Rida feat. Sia Remake)")
+    let whole: HashSet<String> = match_words(&c.title).into_iter().collect();
+    if NEVER_WORDS.iter().any(|v| !want.contains(*v) && (got.contains(*v) || whole.contains(*v) || album.contains(*v))) {
         return 0.0;
     }
     let (c_low, w_low) = (format!("{} {}", c.title, c.album).to_lowercase(), match_title(t).to_lowercase());
