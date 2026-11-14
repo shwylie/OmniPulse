@@ -223,6 +223,12 @@ pub mod taskbar {
         if msg == 0x0231 || msg == 0x0232 {
             ON_SIZING.with(|f| if let Some(f) = f.borrow().as_ref() { f(msg == 0x0231) });
         }
+        // (Windows is shutting down, restarting or signing you out (WM_ENDSESSION, really ending): the app is
+        // ended without closing, so its running marker is taken away here, or the next start would take a
+        // shutdown for a crash and ask to send a crash log, every sign-in)
+        if msg == 0x0016 && wparam.0 != 0 {
+            if let Ok(d) = omnipulse_core::data_dir() { let _ = std::fs::remove_file(d.join("state").join("running.flag")); }
+        }
         let created = CREATED_MSG.load(Ordering::Relaxed);
         // the taskbar button exists (or Explorer restarted): add ours
         if created != 0 && msg == created {
