@@ -653,6 +653,8 @@ fn paint_sides(a: &mut App) {
     let pins: std::collections::HashSet<String> = pinned.into_iter().collect();
     a.side_map = map;
     let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: if xpl::is_own(&a.playlists[i].id) { "xpl".into() } else { a.playlists[i].plat.into() }, own: xpl::is_own(&a.playlists[i].id), share: a.playlists[i].plat != "local" || xpl::is_own(&a.playlists[i].id), sc: share::platform_id(&a.playlists[i], &a.xpl, "soundcloud").is_some(), sp: share::platform_id(&a.playlists[i], &a.xpl, "spotify").is_some(), collab: collab_of(&a.xpl, &a.playlists[i].id).is_some(), collab_owner: collab_of(&a.xpl, &a.playlists[i].id).is_some_and(|c| c["owner"].as_bool() == Some(true)), merged: a.xpl.as_array().is_some_and(|l| l.iter().any(|x| x["id"].as_str() == Some(a.playlists[i].id.as_str()) && x["merged"].as_array().is_some_and(|m| !m.is_empty()))), pinned: pins.contains(&mirror::side_id(a.playlists[i].plat, &a.playlists[i].id)) }).collect();
+    // (OMNIPULSE_SELFTEST_NOLISTS: a recording with no playlists in the sidebar: their names can be other people's)
+    let sides = if std::env::var_os("OMNIPULSE_SELFTEST_NOLISTS").is_some() { Vec::new() } else { sides };
     ui.set_sides(ModelRc::from(Rc::new(VecModel::from(sides))));
     // Add to Playlist: yours here first, then the platforms' (one of those becomes a playlist here)
     let mut order: Vec<usize> = a.side_map.iter().copied().filter(|&i| xpl::is_own(&a.playlists[i].id)).collect();
@@ -9530,6 +9532,85 @@ fn widget_preview(shared: &Shared) {
     omnipulse_core::widget::preview_set(Some(state));
 }
 
+// ---------- the web views laid over the window: when they may show ----------
+// A web view (a widget's preview, Mod View, a creator's preview) is a window of its own on top of the app's,
+// put on its spot by the 40 ms timer. Left to follow the page as it changes, it trails behind it: over the
+// next page for a moment, in the wrong place while the window's resized, a step late as a layout settles. So
+// they all keep to one rule: aside the moment the page, the window's size or their own spot changes, and
+// back once it's all been still for a moment.
+thread_local! {
+    /// the window's being dragged by an edge or its title bar (the timer hardly runs meanwhile)
+    static WEB_SIZING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// where you are (the page, the settings screen, what's open) and the window's size, and when either last changed
+    static WEB_PLACE: RefCell<(String, (u32, u32), Option<std::time::Instant>)> = const { RefCell::new((String::new(), (0, 0), None)) };
+    /// when the page itself last changed (not the window's size: a view's spot is still its spot then)
+    static WEB_PAGED: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+    /// each view's spot as last seen, and since when it's been there
+    static WEB_SPOTS: RefCell<HashMap<&'static str, ((f32, f32, f32, f32), std::time::Instant)>> = RefCell::new(HashMap::new());
+}
+
+/// How long the page and the window must have been as they are, and a view's spot where it is
+const WEB_SETTLE: std::time::Duration = std::time::Duration::from_millis(200);
+const WEB_STILL: std::time::Duration = std::time::Duration::from_millis(120);
+
+/// Once a tick, before the views: where you are and the window's size noted, and when they last changed
+fn web_tick(ui: &AppWindow) {
+    let place = format!("{}|{}|{}|{}|{}|{}|{}|{}", ui.get_page(), ui.get_page_kind(), ui.get_set_cat(), ui.get_pf_open(), ui.get_flow_open(), ui.get_page_title(), ui.get_pf_preview(), BOT_SHEET.with(|s| s.borrow().clone()));
+    let size = ui.window().size();
+    let size = (size.width, size.height);
+    let moved = WEB_PLACE.with(|w| {
+        let mut w = w.borrow_mut();
+        let (paged, moved) = (w.0 != place, w.0 != place || w.1 != size);
+        if paged { if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: web views: the page changed: {} -> {place}", w.0); } WEB_PAGED.with(|p| p.set(Some(std::time::Instant::now()))); }
+        if moved { *w = (place, size, Some(std::time::Instant::now())); }
+        moved
+    });
+    // (changed this tick: every view aside now, not a tick or two later as each notices)
+    if moved { web_aside(ui); }
+}
+
+/// When the page or the window's size last changed
+fn web_changed() -> Option<std::time::Instant> {
+    WEB_PLACE.with(|w| w.borrow().2)
+}
+
+/// When the page itself last changed: a view whose spot hasn't beaten since went with the page it was on
+fn web_paged() -> Option<std::time::Instant> {
+    WEB_PAGED.with(|p| p.get())
+}
+
+/// The page and the window have been as they are for a moment, and the window isn't being dragged about
+fn web_ok(ui: &AppWindow) -> bool {
+    !WEB_SIZING.with(|s| s.get()) && !ui.window().is_minimized() && web_changed().is_none_or(|t| t.elapsed() >= WEB_SETTLE)
+}
+
+/// A view's spot hasn't moved for a moment (a page scrolling, a panel sliding in: aside till it stops)
+fn web_still(name: &'static str, spot: (f32, f32, f32, f32)) -> bool {
+    WEB_SPOTS.with(|s| {
+        let mut s = s.borrow_mut();
+        match s.get(name) {
+            Some((was, since)) if *was == spot => since.elapsed() >= WEB_STILL,
+            _ => { s.insert(name, (spot, std::time::Instant::now())); false }
+        }
+    })
+}
+
+/// Every view aside, now (the window's being resized, or the page has just changed): hidden, and marked so,
+/// for the timer to bring back when it may
+fn web_aside(ui: &AppWindow) {
+    let mut any = false;
+    LIVE.with(|l| if let Some(x) = l.borrow_mut().as_mut() { if x.2.4 { let _ = x.0.set_visible(false); x.2.4 = false; any = true; } });
+    MODV.with(|m| if let Some(x) = m.borrow_mut().as_mut() { if x.1.4 { let _ = x.0.set_visible(false); x.1.4 = false; any = true; } });
+    BLIVE.with(|v| if let Some(x) = v.borrow_mut().as_mut() { if x.2.4 { let _ = x.1.set_visible(false); x.2.4 = false; any = true; } });
+    if any { ui.global::<WLive>().set_live(false); repaint_all(ui); }
+}
+
+/// The window's being dragged by an edge or its title bar, or has been let go
+fn web_sizing(ui: &AppWindow, on: bool) {
+    WEB_SIZING.with(|s| s.set(on));
+    if on { web_aside(ui); } else { WEB_PLACE.with(|w| w.borrow_mut().2 = Some(std::time::Instant::now())); }
+}
+
 thread_local! {
     /// a widget page's real page: its web view, whether it's loaded, where it was last put, and its address
     static LIVE: RefCell<Option<(wry::WebView, Arc<std::sync::atomic::AtomicBool>, (f32, f32, f32, f32, bool), String)>> = const { RefCell::new(None) };
@@ -9588,11 +9669,14 @@ fn live_widget(shared: &Shared) {
     // goes, however it was left)
     thread_local! { static PULSE: std::cell::Cell<(i32, Option<std::time::Instant>)> = const { std::cell::Cell::new((0, None)) }; static TICK: std::cell::Cell<u32> = const { std::cell::Cell::new(0) }; }
     let now = g.get_pulse();
-    let alive = PULSE.with(|p| { let (last, at) = p.get(); if now != last { p.set((now, Some(std::time::Instant::now()))); true } else { at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(900)) } });
+    // (its spot's own beat, every 200 ms: one since the page last changed, and not long ago. The page changed and
+    // no beat since: its spot went with the page it was on. The page the same and the beat late: the app held up
+    // for a moment (a big resize), not the spot gone, so it's given a while)
+    let alive = PULSE.with(|p| { let (last, at) = p.get(); if now != last { p.set((now, Some(std::time::Instant::now()))); true } else { at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(2500) && web_paged().is_none_or(|c| t >= c)) } });
     let tick = TICK.with(|t| { t.set(t.get().wrapping_add(1)); t.get() });
     let path = if ui.get_pf_open() && alive { live_path(&ui) } else { None };
     let Some(path) = path else {
-        if LIVE.with(|l| l.borrow_mut().take().is_some()) { g.set_live(false); repaint_all(&ui); }
+        if LIVE.with(|l| l.borrow_mut().take().is_some()) { if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: live gone (settings open {}, its spot beating {alive}, preview {:?})", ui.get_pf_open(), ui.get_pf_preview()); } g.set_live(false); repaint_all(&ui); }
         return;
     };
     // (a menu open: its count moving, or it moved a moment ago)
@@ -9603,6 +9687,7 @@ fn live_widget(shared: &Shared) {
         at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(400))
     });
     let show = g.get_seen() && !menu && !live_covered(&ui, g.get_x(), g.get_w()) && g.get_w() > 1.0 && !ui.window().is_minimized();
+    let show = web_still("live", (g.get_x(), g.get_y(), g.get_w(), g.get_h())) && web_ok(&ui) && show;
     let at = (g.get_x(), g.get_y(), g.get_w(), g.get_h(), show);
     let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(at.0 as f64, at.1 as f64).into(), size: wry::dpi::LogicalSize::new(at.2 as f64, at.3 as f64).into() };
     let made = LIVE.with(|l| l.borrow().is_some());
@@ -9624,6 +9709,7 @@ fn live_widget(shared: &Shared) {
             .with_on_page_load_handler(move |e, _| if matches!(e, wry::PageLoadEvent::Finished) { l2.store(true, std::sync::atomic::Ordering::Relaxed); })
             .build_as_child(w).ok()).flatten();
         let Some(view) = view else { return };
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: live made {path} at {at:?}"); }
         LIVE.with(|l| *l.borrow_mut() = Some((view, loaded, at, path)));
         return;
     }
@@ -9724,6 +9810,7 @@ fn mod_view(shared: &Shared) {
     // (the queue open beside the page: never past its left edge, whatever the page's spot says)
     let win_w = ui.window().size().width as f32 / ui.window().scale_factor();
     let w = if ui.get_queue_open() { g.get_w().min(win_w - 300.0 - 28.0 - g.get_x()).max(2.0) } else { g.get_w() };
+    let show = web_still("mod", (g.get_x(), g.get_y(), w, g.get_h())) && web_ok(&ui) && show;
     let at = (g.get_x(), g.get_y(), w, g.get_h(), show);
     let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(at.0 as f64, at.1 as f64).into(), size: wry::dpi::LogicalSize::new(at.2 as f64, at.3 as f64).into() };
     if MODV.with(|m| m.borrow().is_none()) {
@@ -9769,7 +9856,7 @@ fn bot_live(shared: &Shared) {
     let g = ui.global::<BLive>();
     thread_local! { static BPULSE: std::cell::Cell<(i32, Option<std::time::Instant>)> = const { std::cell::Cell::new((0, None)) }; }
     let pulse = g.get_pulse();
-    let alive = BPULSE.with(|p| { let (last, at) = p.get(); if pulse != last { p.set((pulse, Some(std::time::Instant::now()))); true } else { at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(900)) } });
+    let alive = BPULSE.with(|p| { let (last, at) = p.get(); if pulse != last { p.set((pulse, Some(std::time::Instant::now()))); true } else { at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(2500) && web_paged().is_none_or(|c| t >= c)) } });
     let want = if alive && ui.get_pf_open() && matches!(sheet.as_str(), "cam" | "hud" | "vis") && g.get_which() == sheet.as_str() { Some(sheet) } else { None };
     let Some(which) = want else {
         if BLIVE.with(|b| b.borrow_mut().take().is_some()) { omnipulse_core::widget::creators_preview_set(None); repaint_all(&ui); }
@@ -9789,6 +9876,7 @@ fn bot_live(shared: &Shared) {
     // (all of it within the page's room: under the page's title, above the player)
     let seen = y >= 150.0 && y + h <= win_h - 96.0;
     let show = seen && !menu && !live_covered(&ui, x, w) && w > 8.0 && h > 8.0 && !ui.window().is_minimized();
+    let show = web_still("creator", (x, y, w, h)) && web_ok(&ui) && show;
     let at = (x, y, w, h, show);
     let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(x as f64, y as f64).into(), size: wry::dpi::LogicalSize::new(w as f64, h as f64).into() };
     // (the page's settings as they are, given to the Suite for what the overlay would be: when they change)
@@ -16474,6 +16562,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let t = ui.global::<Theme>();
             if on { motion.set(t.get_motion()); t.set_motion(false); } else { t.set_motion(motion.get()); }
             t.set_resizing(on);
+            // (the web views laid over the window: aside while it's dragged, back once it's let go and settled)
+            web_sizing(&ui, on);
             if !on { aurora_bake(&ui); }
         })));
     }
@@ -16555,13 +16645,37 @@ fn main() -> Result<(), slint::PlatformError> {
     // (the songs' measurements: the one big file of before moved into a small file each, once, in the background)
     rt.spawn_blocking(omnipulse_core::rhythm::migrate);
     // (the Stream Widget's page: the real widget over its preview, kept in place as the page scrolls)
-    let _live = { let t = slint::Timer::default(); let s = shared.clone(); t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(40), move || { live_widget(&s); words_view(&s); mod_view(&s); bot_live(&s); page_repaint(&s); }); t };
+    let _live = { let t = slint::Timer::default(); let s = shared.clone(); t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(40), move || { if let Some(ui) = s.borrow().ui.upgrade() { web_tick(&ui); } live_widget(&s); words_view(&s); mod_view(&s); bot_live(&s); page_repaint(&s); }); t };
 
     // OMNIPULSE_SELFTEST=<folder>: visits each page, plays the first track silently, saves a picture of
     // each page and quits (for checking the app without anyone at the screen)
     let _selftest = std::env::var("OMNIPULSE_SELFTEST").ok().map(|dir| {
         engine.set_volume(0.0);
         ui.set_volume(0.0);
+        // (OMNIPULSE_SELFTEST_FRAMES=<a second>: the window's picture kept that many times a second too, in
+        // frames/t<milliseconds>.png, for a recording of the run; written on threads of their own)
+        if let Some(fps) = std::env::var("OMNIPULSE_SELFTEST_FRAMES").ok().and_then(|f| f.parse::<u64>().ok()).filter(|f| *f > 0) {
+            let fdir = std::path::PathBuf::from(&dir).join("frames");
+            let _ = std::fs::create_dir_all(&fdir);
+            let (tx, rx) = std::sync::mpsc::channel::<(u128, u32, u32, Vec<u8>)>();
+            let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
+            for _ in 0..8 {
+                let (rx, fdir) = (rx.clone(), fdir.clone());
+                std::thread::spawn(move || loop {
+                    let got = rx.lock().unwrap().recv();
+                    let Ok((ms, w, h, px)) = got else { break };
+                    if let Ok(f) = std::fs::File::create(fdir.join(format!("t{ms:08}.png"))) {
+                        use image::ImageEncoder;
+                        let _ = image::codecs::png::PngEncoder::new_with_quality(std::io::BufWriter::new(f), image::codecs::png::CompressionType::Fast, image::codecs::png::FilterType::NoFilter).write_image(&px, w, h, image::ExtendedColorType::Rgba8);
+                    }
+                });
+            }
+            let (weak, t0) = (ui.as_weak(), std::time::Instant::now());
+            let ft: &'static slint::Timer = Box::leak(Box::new(slint::Timer::default()));
+            ft.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(1000 / fps), move || {
+                if let Some(ui) = weak.upgrade() { if let Ok(shot) = ui.window().take_snapshot() { let _ = tx.send((t0.elapsed().as_millis(), shot.width(), shot.height(), shot.as_bytes().to_vec())); } }
+            });
+        }
         let t = slint::Timer::default();
         let s = shared.clone();
         let started = std::time::Instant::now();
@@ -16828,6 +16942,36 @@ fn main() -> Result<(), slint::PlatformError> {
                 w if w.starts_with("sd_") => { ui.invoke_stats_open(w[3..].into()); println!("selftest: stats detail \"{}\": \"{}\", {} blocks", &w[3..], ui.get_st_detail_head(), ui.get_st_blocks().row_count()); }
                 "queue" => { ui.set_queue_open(true); }
                 w if w.starts_with("nav:") => { ui.invoke_nav(w[4..].into()); }
+                // (glide:<pixels>:<milliseconds>: the page scrolled that far, smoothly, over that long: for a recording)
+                w if w.starts_with("glide:") => {
+                    let v: Vec<f32> = w[6..].split(':').filter_map(|x| x.parse().ok()).collect();
+                    if v.len() == 2 {
+                        let (px, ms, weak, t0) = (v[0], v[1].max(16.0), ui.as_weak(), std::time::Instant::now());
+                        let gt: &'static slint::Timer = Box::leak(Box::new(slint::Timer::default()));
+                        let mut done = 0.0f32;
+                        gt.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(16), move || {
+                            let x = (t0.elapsed().as_millis() as f32 / ms).min(1.0);
+                            // (eased at both ends)
+                            let at = px * (x * x * (3.0 - 2.0 * x));
+                            if let Some(ui) = weak.upgrade() { ui.window().dispatch_event(slint::platform::WindowEvent::PointerScrolled { position: slint::LogicalPosition::new(700.0, 450.0), delta_x: 0.0, delta_y: -(at - done) }); }
+                            done = at;
+                            if x >= 1.0 { gt.stop(); }
+                        });
+                    }
+                }
+                // (type:<words>: typed into the search bar a letter at a time, then searched)
+                w if w.starts_with("type:") => {
+                    let (text, weak) = (w[5..].to_string(), ui.as_weak());
+                    let tt: &'static slint::Timer = Box::leak(Box::new(slint::Timer::default()));
+                    let mut n = 0usize;
+                    tt.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(110), move || {
+                        let Some(ui) = weak.upgrade() else { return };
+                        n += 1;
+                        let part: String = text.chars().take(n).collect();
+                        ui.set_search_text(part.clone().into());
+                        if n >= text.chars().count() { ui.invoke_search(part.into()); tt.stop(); } else { ui.invoke_search_edited(part.into()); }
+                    });
+                }
                 // ("setupat:3": the first-run setup opened at that step, to picture it)
                 w if w.starts_with("setupat:") => { setup_show(&s, w[8..].parse().unwrap_or(0)); }
                 // (Game HUD Frames with a made-up game's screenshot (a minimap, a health bar, ammo), drawn here: never
