@@ -5714,6 +5714,7 @@ dependencies = [
  "tokio-tungstenite",
  "tray-icon",
  "unicode-normalization",
+ "webview2-com",
  "windows 0.62.2",
  "wry",
  "zip 2.4.2",

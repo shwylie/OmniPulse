@@ -573,6 +573,17 @@ fn open_page_now(shared: &Shared, page: &str) {
             pf_open(shared, botpage::BOT);
         }
         // (Mod View: its page, a web view the 40 ms timer puts on its spot: see mod_view)
+        // (Mod View in Its Own Window, switched on: a window of its own, to keep on another screen; the page you're
+        // on stays as it is)
+        "mod" if shared.borrow().web.prefs["modWindow"].as_bool() == Some(true) => {
+            let prefs = shared.borrow().web.prefs.clone();
+            let port = prefs["widgetPort"].as_u64().unwrap_or(7878);
+            // (the widgets' server, if it isn't on yet: its page is served there)
+            let mut on = prefs.clone();
+            if let Some(o) = on.as_object_mut() { o.insert("widget".into(), serde_json::json!(true)); }
+            if integrations::widget_start(&prefs).is_none() { let _ = integrations::widget_start(&on); }
+            if let Err(e) = web_preview("modview", "Mod View", &format!("http://localhost:{port}/mod"), 1320, 860) { ui.set_status(format!("Couldn't open Mod View's window: {e}").into()); }
+        }
         "mod" => {
             let mut a = shared.borrow_mut();
             a.page = "mod".into();
@@ -7312,7 +7323,7 @@ fn song_request(shared: &Shared, reply: ReqReply, q: String, user: String, from_
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 29] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 30] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. When this is off, they only play when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist from being recommended. When this is off, nothing is left out, but your lists are kept.", "hideOn", true),
@@ -7337,6 +7348,7 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 29] = [
     ("Integrations", "Discord Status", "Shows what you're playing on your Discord profile.", "presence", false),
     ("Streaming", "Stream Widget", "A now-playing card for OBS, with alerts.", "widget", false),
     ("Streaming", "Lyrics Widget", "Shows the playing song's lyrics in OBS, karaoke style. The line being sung lights up, with the next lines below it.", "lyricsWidget", false),
+    ("Streaming", "Mod View in Its Own Window", "Click the sword in the title bar and Mod View opens as a window of its own, to keep on another screen. Off: it opens as a page in OmniPulse.", "modWindow", false),
     ("Streaming", "Social Plug", "Your handles on other platforms, in turn, for OBS.", "socials", false),
     ("Streaming", "Alerts", "Shows follows, subs, bits, raids and more from your bot, on the widget.", "alertsOn", false),
     ("Streaming", "Song Requests", "Chat asks for songs through your bot.", "req", false),
@@ -9599,10 +9611,9 @@ fn web_still(name: &'static str, spot: (f32, f32, f32, f32)) -> bool {
 /// for the timer to bring back when it may
 fn web_aside(ui: &AppWindow) {
     let mut any = false;
-    LIVE.with(|l| if let Some(x) = l.borrow_mut().as_mut() { if x.2.4 { let _ = x.0.set_visible(false); x.2.4 = false; any = true; } });
     MODV.with(|m| if let Some(x) = m.borrow_mut().as_mut() { if x.1.4 { let _ = x.0.set_visible(false); x.1.4 = false; any = true; } });
     BLIVE.with(|v| if let Some(x) = v.borrow_mut().as_mut() { if x.2.4 { let _ = x.1.set_visible(false); x.2.4 = false; any = true; } });
-    if any { ui.global::<WLive>().set_live(false); repaint_all(ui); }
+    if any { repaint_all(ui); }
 }
 
 /// The window's being dragged by an edge or its title bar, or has been let go
@@ -9676,23 +9687,20 @@ fn live_widget(shared: &Shared) {
     let tick = TICK.with(|t| { t.set(t.get().wrapping_add(1)); t.get() });
     let path = if ui.get_pf_open() && alive { live_path(&ui) } else { None };
     let Some(path) = path else {
+        LIVE_SHOT.with(|s| s.set((None, None)));
         if LIVE.with(|l| l.borrow_mut().take().is_some()) { if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: live gone (settings open {}, its spot beating {alive}, preview {:?})", ui.get_pf_open(), ui.get_pf_preview()); } g.set_live(false); repaint_all(&ui); }
         return;
     };
-    // (a menu open: its count moving, or it moved a moment ago)
-    let beat = g.get_beat();
-    let menu = LIVE_BEAT.with(|b| {
-        let (last, at) = b.get();
-        if beat != last { b.set((beat, Some(std::time::Instant::now()))); return true; }
-        at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(400))
-    });
-    let show = g.get_seen() && !menu && !live_covered(&ui, g.get_x(), g.get_w()) && g.get_w() > 1.0 && !ui.window().is_minimized();
-    let show = web_still("live", (g.get_x(), g.get_y(), g.get_w(), g.get_h())) && web_ok(&ui) && show;
-    let at = (g.get_x(), g.get_y(), g.get_w(), g.get_h(), show);
-    let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(at.0 as f64, at.1 as f64).into(), size: wry::dpi::LogicalSize::new(at.2 as f64, at.3 as f64).into() };
+    // (the real page, out of sight to the window's left, the size of its spot: never over the window. Its
+    // picture is asked for a few times a second and drawn on the spot by the page itself, so it scrolls, clips
+    // and resizes with the page, under menus and dialogs like anything else)
+    let (w, h) = (g.get_w(), g.get_h());
+    if w < 2.0 || h < 2.0 { return; }
+    let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(-(w as f64) - 400.0, 0.0).into(), size: wry::dpi::LogicalSize::new(w as f64, h as f64).into() };
+    let at = (0.0, 0.0, w, h, true);
     let made = LIVE.with(|l| l.borrow().is_some());
     if !made {
-        if !show { return; }
+        if !g.get_seen() { return; }
         let prefs = shared.borrow().web.prefs.clone();
         let port = prefs["widgetPort"].as_u64().unwrap_or(7878);
         // (its server, if neither widget's on yet)
@@ -9709,6 +9717,8 @@ fn live_widget(shared: &Shared) {
             .with_on_page_load_handler(move |e, _| if matches!(e, wry::PageLoadEvent::Finished) { l2.store(true, std::sync::atomic::Ordering::Relaxed); })
             .build_as_child(w).ok()).flatten();
         let Some(view) = view else { return };
+        // (its picture see-through where the page is: over the preview's backdrop, as OBS shows it over the stream)
+        live_ask(&view, "Emulation.setDefaultBackgroundColorOverride", r#"{"color":{"r":0,"g":0,"b":0,"a":0}}"#, |_| {});
         if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: live made {path} at {at:?}"); }
         LIVE.with(|l| *l.borrow_mut() = Some((view, loaded, at, path)));
         return;
@@ -9720,21 +9730,60 @@ fn live_widget(shared: &Shared) {
         if *was != path {
             let port = shared.borrow().web.prefs["widgetPort"].as_u64().unwrap_or(7878);
             loaded.store(false, std::sync::atomic::Ordering::Relaxed);
+            g.set_live(false);
             let _ = view.load_url(&format!("http://127.0.0.1:{port}{path}"));
             *was = path;
         }
-        // (and put where it should be again now and then: a place set while the page was still settling (the queue
-        // opened and closed quickly) is put right)
-        if show && tick % 12 == 0 { let _ = view.set_bounds(rect); }
-        if *last != at {
-            if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: live {was} at {at:?}"); }
-            if show { let _ = view.set_bounds(rect); }
-            if show != last.4 { let _ = view.set_visible(show); if !show { repaint_all(&ui); } }
-            *last = at;
-        }
-        // (the drawing under it hidden once the real one has had a moment to come in)
-        g.set_live(show && loaded.load(std::sync::atomic::Ordering::Relaxed));
+        // (its spot a new size: the page the same size, for its picture to fit)
+        if *last != at || tick % 50 == 0 { let _ = view.set_bounds(rect); *last = at; }
+        // (its picture: while the spot's in sight, the page has loaded, and the last one asked for has come)
+        let due = LIVE_SHOT.with(|s| { let (busy, at) = s.get(); !busy.is_some_and(|b| b.elapsed() < std::time::Duration::from_secs(3)) && at.is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(100)) });
+        if !g.get_seen() || !loaded.load(std::sync::atomic::Ordering::Relaxed) || !due { return; }
+        LIVE_SHOT.with(|s| s.set((Some(std::time::Instant::now()), s.get().1)));
+        let weak = ui.as_weak();
+        let for_page = was.clone();
+        live_ask(view, "Page.captureScreenshot", r#"{"format":"png"}"#, move |json| {
+            LIVE_SHOT.with(|s| s.set((None, Some(std::time::Instant::now()))));
+            let Some(img) = json.and_then(|j| live_picture(&j)) else { return };
+            // (still that page's: one that came after its page was left isn't shown on the next)
+            if !LIVE.with(|l| l.borrow().as_ref().is_some_and(|x| x.3 == for_page)) { return; }
+            if let Some(ui) = weak.upgrade() {
+                let g = ui.global::<WLive>();
+                g.set_shot(img);
+                g.set_live(true);
+            }
+        });
     });
+}
+
+thread_local! {
+    /// a preview's picture: when one was asked for and hasn't come yet, and when the last one came
+    static LIVE_SHOT: std::cell::Cell<(Option<std::time::Instant>, Option<std::time::Instant>)> = const { std::cell::Cell::new((None, None)) };
+}
+
+/// Something asked of a web view's page through its developer tools (its own picture, its backdrop): the answer
+/// (JSON) given to `then` when it comes, None if it couldn't
+fn live_ask(view: &wry::WebView, method: &str, params: &str, then: impl FnOnce(Option<String>) + 'static) {
+    use wry::WebViewExtWindows;
+    let (m, p) = (windows::core::HSTRING::from(method), windows::core::HSTRING::from(params));
+    let handler = webview2_com::CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |res, json: String| { then(res.ok().map(|_| json)); Ok(()) }));
+    let asked = unsafe { view.webview().CallDevToolsProtocolMethod(windows::core::PCWSTR(m.as_ptr()), windows::core::PCWSTR(p.as_ptr()), &handler) };
+    if asked.is_err() { LIVE_SHOT.with(|s| s.set((None, s.get().1))); }
+}
+
+/// A page's picture as its developer tools give it ({"data": "<a PNG, base64>"}), for the interface to draw
+fn live_picture(json: &str) -> Option<slint::Image> {
+    use base64::Engine;
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let png = base64::engine::general_purpose::STANDARD.decode(v["data"].as_str()?).ok()?;
+    if let Some(dir) = std::env::var_os("OMNIPULSE_SELFTEST") {
+        thread_local! { static N: std::cell::Cell<u32> = const { std::cell::Cell::new(0) }; }
+        let n = N.with(|n| { n.set(n.get() + 1); n.get() });
+        if n == 12 || n == 40 { let _ = std::fs::write(std::path::Path::new(&dir).join(format!("live-shot-{n}.png")), &png); println!("selftest: live picture {n}: {} bytes", png.len()); }
+    }
+    let img = image::load_from_memory_with_format(&png, image::ImageFormat::Png).ok()?.to_rgba8();
+    let buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(img.as_raw(), img.width(), img.height());
+    Some(slint::Image::from_rgba8(buf))
 }
 
 // ---------- Mod View (plugins/modsuite, its page /mod) ----------

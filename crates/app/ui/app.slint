@@ -135,6 +135,14 @@ export global WLive {
     in-out property <bool> live;
     /// (counted up a few times a second by the spot while it's there: stopped, there's no spot any more)
     in-out property <int> pulse;
+    /// the real page's picture, taken a few times a second: drawn on the spot by the page itself (so it scrolls,
+    /// clips and resizes with the page, and nothing's laid over the window)
+    in-out property <image> shot;
+}
+
+/// The real page's picture, on its spot (wherever this is put, as long as it's over the spot's place)
+component LiveShot inherits Rectangle {
+    Image { x: WLive.x - root.absolute-position.x; y: WLive.y - root.absolute-position.y; width: WLive.w; height: WLive.h; source: WLive.shot; visible: WLive.live; image-fit: fill; }
 }
 
 /// A channel panel's words being written (Panels): the dialog open, whose words, and where its editor goes (a web
@@ -3102,6 +3110,7 @@ component LiveCover inherits Rectangle {
     Checker { x: 0; y: 0; width: parent.width; height: parent.height; }
     Caps { r: 14px; outside: Theme.bg; tl: #2a2d36; tr: #2a2d36; bl: #2a2d36; br: #2a2d36; top: true; bottom: true; }
     Text { x: 12px; y: 8px; text: root.note; color: #ffffffa0; font-size: 11px; }
+    LiveShot { width: 100%; height: 100%; }
 }
 
 /// The Stream Widget's words, as widget.html sets them: the title, the artist (and who asked for it), the
@@ -3202,6 +3211,7 @@ component WidgetPreview inherits Rectangle {
     property <length> cy: 26px + (root.height - 26px - root.ch) / 2;
     // (Frosted Glass: the cover's colours, blurred, behind the card)
     if root.th == "frosted" && !root.own-panel: Rectangle { x: root.cx - 18px; y: root.cy - 12px; width: root.cw + 36px; height: root.ch + 24px; border-radius: 30px; background: @linear-gradient(135deg, root.look.c1.with-alpha(0.55) 0%, root.look.c2.with-alpha(0.45) 100%); }
+    LiveShot { width: 100%; height: 100%; }
     card := Rectangle {
         x: root.cx;
         y: root.cy;
@@ -4678,6 +4688,7 @@ component DockPreview inherits Rectangle {
     background: Theme.bg;
     Text { text: root.name + ": the real dock shows here in a moment."; color: Theme.muted; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; width: parent.width - 40px; x: 20px; }
     LiveSpot { x: 1px; y: 1px; width: root.width - 2px; height: root.height - 2px; view-top: root.view-top; view-bottom: root.view-bottom; }
+    LiveShot { width: 100%; height: 100%; }
 }
 
 component ChatPreview inherits Rectangle {
