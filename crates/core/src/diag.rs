@@ -28,6 +28,8 @@ static LOGGER: Logger = Logger;
 /// Opens the log (once, at the start), and sends the error output and the log crate's messages to it
 pub fn install() {
     let Ok(dir) = crate::data_dir() else { return };
+    // (a self-test's log goes in its own folder: your app's own log keeps only what you did)
+    let dir = std::env::var_os("OMNIPULSE_SELFTEST").map(std::path::PathBuf::from).filter(|d| d.is_dir()).unwrap_or(dir);
     let path = dir.join("diag.log");
     if std::fs::metadata(&path).map(|m| m.len() > KEEP).unwrap_or(false) {
         let _ = std::fs::rename(&path, dir.join("diag.old.log"));

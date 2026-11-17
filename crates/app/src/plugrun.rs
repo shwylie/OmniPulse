@@ -285,14 +285,24 @@ fn run(id: String, code: String, settings: String, caps: Caps, rt: tokio::runtim
             let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<Option<String>>();
             sk.lock().unwrap().insert(n, out_tx);
             let (tx, sk2) = (tx3.clone(), sk.clone());
-            core::diag::note(&format!("[plugin {lid}] socket {n} connecting: {url}"));
+            // (an address that's failed, OBS closed say, is tried again and again: its tries aren't logged again
+            // until it opens)
+            let quiet = socket_quiet(&url, None);
+            if !quiet { core::diag::note(&format!("[plugin {lid}] socket {n} connecting: {url}")); } else { SOCKET_HUSHED.lock().unwrap().insert(n); }
             let lid2 = lid.clone();
             rt3.spawn(async move {
                 use futures_util::{SinkExt, StreamExt};
                 let ws = match tokio_tungstenite::connect_async(url.as_str()).await {
                     Ok((ws, _)) => ws,
-                    Err(e) => { core::diag::note(&format!("[plugin {lid2}] socket {n} failed: {e}")); sk2.lock().unwrap().remove(&n); let _ = tx.send(Msg::Socket(n, "close", e.to_string())); return; }
+                    Err(e) => {
+                        if !socket_quiet(&url, Some(false)) { core::diag::note(&format!("[plugin {lid2}] socket {n} failed: {e} (tries again to {url} aren't logged until it opens)")); }
+                        sk2.lock().unwrap().remove(&n);
+                        let _ = tx.send(Msg::Socket(n, "close", e.to_string()));
+                        return;
+                    }
                 };
+                if socket_quiet(&url, Some(true)) { core::diag::note(&format!("[plugin {lid2}] socket {n} connecting: {url}")); }
+                SOCKET_HUSHED.lock().unwrap().remove(&n);
                 core::diag::note(&format!("[plugin {lid2}] socket {n} open"));
                 let _ = tx.send(Msg::Socket(n, "open", String::new()));
                 let (mut w, mut r) = ws.split();
@@ -385,7 +395,7 @@ fn run(id: String, code: String, settings: String, caps: Caps, rt: tokio::runtim
                     Msg::Fetched(n, r) | Msg::App(n, r) => g.get::<_, Function>("__host_done").and_then(|f| f.call::<_, ()>((n, r))),
                     Msg::Socket(n, kind, data) => {
                         // (each socket's open and close, and its first message, in the log: to see them reach the script)
-                        if kind != "message" || heard.insert(n) { core::diag::note(&format!("[plugin {id}] socket {n} {kind}{} -> script", if kind == "message" { format!(" ({} chars)", data.len()) } else { String::new() })); }
+                        if (kind != "message" || heard.insert(n)) && !SOCKET_HUSHED.lock().unwrap().remove(&n) { core::diag::note(&format!("[plugin {id}] socket {n} {kind}{} -> script", if kind == "message" { format!(" ({} chars)", data.len()) } else { String::new() })); }
                         g.get::<_, Function>("__sock_event").and_then(|f| f.call::<_, ()>((n, kind, data)))
                     }
                     Msg::Stop => Ok(()),
@@ -1699,5 +1709,19 @@ Connection: close
     }
 }
 
+/// The addresses a plugin's sockets have failed to reach (since it last opened one to them)
+static SOCKET_FAILED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+/// The sockets whose tries aren't logged (to an address that's failing): their closing isn't either
+static SOCKET_HUSHED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<u32>>> = std::sync::LazyLock::new(Default::default);
 
-
+/// Whether tries to `url` go unlogged (it failed last time). `opened`: Some(false) it failed now (true if it had
+/// before, so this one isn't logged either), Some(true) it opened (true if it had failed before)
+fn socket_quiet(url: &str, opened: Option<bool>) -> bool {
+    let mut f = SOCKET_FAILED.lock().unwrap();
+    let was = f.iter().any(|u| u == url);
+    match opened {
+        None => was,
+        Some(false) => { if !was { f.push(url.to_string()); } was }
+        Some(true) => { f.retain(|u| u != url); was }
+    }
+}
