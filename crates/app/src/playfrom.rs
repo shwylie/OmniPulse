@@ -147,7 +147,7 @@ pub async fn find(t: &Track, prefs: &Value, locals: &[Track], elsewhere: bool) -
         decide(&t.key, None);
         return None;
     }
-    let got = look_in(&ids, t, locals).await;
+    let got = look_in(&ids, t, locals, &[]).await;
     decide(&t.key, got.clone());
     got
 }
@@ -199,12 +199,13 @@ pub fn strong(t: &Track, c: &Track) -> bool {
 
 /// The song looked for in these sources, in order: the first with it (each asked up to three ways). A
 /// stranger's re-upload on SoundCloud is noted and passed over; it plays only if nothing better turns up
-async fn look_in(ids: &[String], t: &Track, locals: &[Track]) -> Option<Track> {
+async fn look_in(ids: &[String], t: &Track, locals: &[Track], skip: &[String]) -> Option<Track> {
     let qs = queries(t);
     let mut weak: Option<(String, Track)> = None;
     for id in ids {
         for q in &qs {
-            let found = search(id, t, q, locals).await;
+            // (`skip`: ones tried already that wouldn't play)
+            let found: Vec<Track> = search(id, t, q, locals).await.into_iter().filter(|c| !skip.contains(&c.key)).collect();
             let firm: Vec<Track> = found.iter().filter(|c| strong(t, c)).cloned().collect();
             if let Some(c) = best(t, firm) {
                 omnipulse_core::diag::note(&format!("Play From: {} - {} plays from {} ({}), asked \"{q}\"", t.artist, t.title, id, c.key));
@@ -223,17 +224,24 @@ async fn look_in(ids: &[String], t: &Track, locals: &[Track]) -> Option<Track> {
 }
 
 /// The song's own way failed (a preview, YouTube paused, no version of it): every source that's on asked,
-/// in your order, below its own too, before it's given up on. What's found is kept for the song
-pub async fn find_anywhere(t: &Track, prefs: &Value, locals: &[Track]) -> Option<Track> {
+/// in your order, below its own too, before it's given up on. What's found is kept for the song. `failed`:
+/// ones found before that wouldn't play (SoundCloud says an upload's playable and then gives only its
+/// preview), passed over for the next
+pub async fn find_anywhere(t: &Track, prefs: &Value, locals: &[Track], failed: &[String]) -> Option<Track> {
     if t.is_mix() { return None; }
     let own = source_of(t);
     let off = off(prefs);
     let ids: Vec<String> = sources(prefs).into_iter().map(|(i, _)| i).filter(|i| *i != own && !off.contains(i)).collect();
     if ids.is_empty() { return None; }
     omnipulse_core::diag::note(&format!("Play From: {} - {} couldn't play its own way: every source that's on asked", t.artist, t.title));
-    let got = look_in(&ids, t, locals).await;
+    let got = look_in(&ids, t, locals, failed).await;
     if got.is_some() { decide(&t.key, got.clone()); }
     got
+}
+
+/// What was found for the song wouldn't play, and nothing else was: forgotten, so it's looked for afresh next time
+pub fn undecide(key: &str) {
+    AS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).remove(key);
 }
 
 #[cfg(test)]

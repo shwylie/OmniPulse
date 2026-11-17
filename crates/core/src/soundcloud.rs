@@ -466,6 +466,31 @@ pub async fn playlist_write(method: String, path: String, body: Option<Value>) -
 }
 
 #[cfg(test)]
+mod streams_probe {
+    // which streams SoundCloud offers for some tracks, and whether each opens (read-only):
+    // OMNIPULSE_SC_IDS=1,2 cargo test -p omnipulse-core sc_streams_probe -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn sc_streams_probe() {
+        for id in std::env::var("OMNIPULSE_SC_IDS").unwrap_or_default().split(',').filter(|x| !x.is_empty()) {
+            match super::stream_url(id.to_string()).await {
+                Err(e) => println!("{id}: {e}"),
+                Ok(v) => {
+                    println!("{id}: note {:?}", v["note"]);
+                    for c in v["candidates"].as_array().cloned().unwrap_or_default() {
+                        let name = c["name"].as_str().unwrap_or("").to_string();
+                        let url = c["url"].as_str().unwrap_or("").to_string();
+                        let real = if url.starts_with("https://api.soundcloud.com") { super::resolve_api_url(&url).await.ok_or("no answer") } else { Ok(url) };
+                        let got = match &real { Ok(u) => reqwest::get(u).await.map(|r| r.status().to_string()).unwrap_or_else(|e| e.to_string()), Err(e) => format!("not resolved: {e}") };
+                        println!("  {name}: {got}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod hls_probe {
     // which container SoundCloud's HLS segments use (read-only, one liked track):
     // cargo test -p omnipulse-core sc_hls_probe -- --ignored --nocapture

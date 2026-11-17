@@ -3507,14 +3507,24 @@ fn start(shared: &Shared) {
         };
         // (its own way failed (a preview, YouTube paused, no version of it): every source that's on is asked,
         // below its own too, and the first with the song plays it)
+        // (and one found that won't play either (SoundCloud said it's playable, then gave only its preview): passed
+        // over for the next that has the song, a few times at most)
         let (src, version) = match src {
-            Err(e) if fresh => match playfrom::find_anywhere(&t, &pf_prefs, &locals).await {
-                Some(alt) => match player::open_source(&alt, h.clone()).await {
-                    Ok(s) => (Ok(Some(s)), None),
-                    Err(e2) => { omnipulse_core::diag::note(&format!("Play From: {} couldn't play \"{}\" either: {e2}", alt.plat(), t.title)); (Err(e), version) }
-                },
-                None => (Err(e), version),
-            },
+            Err(e) if fresh => {
+                let mut failed: Vec<String> = played_as.iter().map(|a| a.key.clone()).collect();
+                let mut got = None;
+                for _ in 0..3 {
+                    let Some(alt) = playfrom::find_anywhere(&t, &pf_prefs, &locals, &failed).await else { break };
+                    match player::open_source(&alt, h.clone()).await {
+                        Ok(s) => { got = Some(s); break; }
+                        Err(e2) => { omnipulse_core::diag::note(&format!("Play From: {} couldn't play \"{}\" either: {e2}", alt.plat(), t.title)); failed.push(alt.key.clone()); }
+                    }
+                }
+                match got {
+                    Some(s) => (Ok(Some(s)), None),
+                    None => { if !failed.is_empty() { playfrom::undecide(&t.key); } (Err(e), version) }
+                }
+            }
             src => (src, version),
         };
         // (YouTube couldn't play it, or has no version of it: the same song from Audius, if it's there)
