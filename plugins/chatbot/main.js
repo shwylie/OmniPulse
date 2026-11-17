@@ -3980,7 +3980,24 @@ OmniPulse.register({
     }
     if (kind === "process") {
       const plain = (n) => String(n || "").trim().toLowerCase().replace(/^.*[\\/]/, "").replace(/\.exe$/, "");
-      for (const a of live) if (a.trigger.type === "process" && plain(a.trigger.name) === plain(d.name)) run(a, { user: S().login || S().kickLogin || "", platform: "all", path: d.path || "", process: d.name || "" });
+      const when = d.when === "stop" ? "stop" : "start";
+      for (const a of live) if (a.trigger.type === "process" && plain(a.trigger.name) === plain(d.name) && (a.trigger.when === "stop" ? "stop" : "start") === when) run(a, { user: S().login || S().kickLogin || "", platform: "all", path: d.path || "", process: d.name || "" });
+      return true;
+    }
+    // (a file in a watched folder: added, changed or removed)
+    if (kind === "file") {
+      const norm = (f) => String(f || "").trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+      const like = (pat, name) => {
+        const p = String(pat || "*").trim() || "*";
+        const re = new RegExp("^" + p.toLowerCase().replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
+        return re.test(String(name || "").toLowerCase());
+      };
+      for (const a of live) {
+        const t = a.trigger;
+        if (t.type !== "file" || norm(t.folder) !== norm(d.folder) || !like(t.pattern, d.name)) continue;
+        if (t.change && t.change !== "any" && t.change !== d.change) continue;
+        run(a, { user: S().login || S().kickLogin || "", platform: "all", file: d.file || "", fileName: d.name || "", change: d.change || "" });
+      }
       return true;
     }
     if (kind === "hotkey") {

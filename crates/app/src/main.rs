@@ -44,6 +44,7 @@ mod panelicon;
 mod flows;
 mod botimport;
 mod procwatch;
+mod filewatch;
 mod docksets;
 mod botpage;
 mod hide;
@@ -14752,8 +14753,18 @@ fn hotkeys_update(shared: &Shared) {
             .filter_map(|a| a["trigger"]["name"].as_str().map(|k| k.trim().to_string())).filter(|k| !k.is_empty()).collect()
     };
     let rt = shared.borrow().rt.clone();
-    procwatch::want(progs, move |name, path| {
-        if let Some(p) = plugrun::get(BOT) { rt.spawn(async move { let _ = p.call("appEvent", vec![serde_json::json!("process"), serde_json::json!({ "name": name, "path": path })]).await; }); }
+    procwatch::want(progs, move |name, path, when| {
+        if let Some(p) = plugrun::get(BOT) { rt.spawn(async move { let _ = p.call("appEvent", vec![serde_json::json!("process"), serde_json::json!({ "name": name, "path": path, "when": when })]).await; }); }
+    });
+    // (and the folders its actions watch: told to it as a file in one changes)
+    let folders: Vec<(String, String)> = if !on { Vec::new() } else {
+        prefs["pluginSettings"][BOT]["actions"].as_array().into_iter().flatten()
+            .filter(|a| a["on"].as_bool() != Some(false) && a["trigger"]["type"] == "file")
+            .filter_map(|a| { let t = &a["trigger"]; let f = t["folder"].as_str()?.trim().to_string(); (!f.is_empty()).then(|| (f, t["pattern"].as_str().unwrap_or("*").trim().to_string())) }).collect()
+    };
+    let rt = shared.borrow().rt.clone();
+    filewatch::want(folders, move |folder, file, name, change| {
+        if let Some(p) = plugrun::get(BOT) { rt.spawn(async move { let _ = p.call("appEvent", vec![serde_json::json!("file"), serde_json::json!({ "folder": folder, "file": file, "name": name, "change": change })]).await; }); }
     });
 }
 

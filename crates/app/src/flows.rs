@@ -145,8 +145,14 @@ pub const TRIGGERS: &[Kind] = &[
     Kind { id: "web", label: "A Web Address", note: "Another tool, like a Stream Deck plugin, a script or a bot, can run it by calling http://127.0.0.1:7879/action?key=YOUR-KEY&name=ITS-NAME. Add &user= and &input= to set %user% and %rawInput%. The key is Song Requests' secret key, in Settings > Streaming > Song Requests (turned on).", fields: &[
         f("name", "Called As", "text", "", "Leave it empty to use the action's own name."),
     ] },
-    Kind { id: "process", label: "A Program Starting", note: "When a program opens on this PC, like a game. Gives the steps %path% (where the program is) and %process% (its name).", fields: &[
+    Kind { id: "process", label: "A Program Starting or Closing", note: "When a program opens or closes on this PC, like a game. Gives the steps %path% (where the program is) and %process% (its name).", fields: &[
         f("name", "Program", "program", "", "Pick it from the ones open now, or type its name as in Task Manager's Details tab, like destiny2launcher. The .exe on the end doesn't matter."),
+        pick("when", "When", PROCESS_WHEN, "start", ""),
+    ] },
+    Kind { id: "file", label: "A File Changing", note: "When a file in a folder on this PC is added, changed or removed. Gives the steps %file% (the whole file's place), %fileName% (its name) and %change% (added, changed or removed).", fields: &[
+        f("folder", "Folder", "text", "", "The folder to watch, like C:/Users/you/Documents/Stream. Folders inside it aren't watched."),
+        f("pattern", "Files", "text", "*", "Which files: * for all of them, *.txt for text files, or one file's name."),
+        pick("change", "When One Is", FILE_CHANGES, "any", ""),
     ] },
     Kind { id: "manual", label: "Only When Run", note: "From another action's Run Another Action, or Run Now above.", fields: &[] },
 ];
@@ -510,7 +516,9 @@ pub fn trigger_menu() -> Vec<MenuItem> {
     m.push(item("OmniPulse", "A Web Address", "web", json!({})));
     m.push(item("OmniPulse", "Only When Run", "manual", json!({})));
     m.push(item("This PC", "A Hotkey", "hotkey", json!({})));
-    m.push(item("This PC", "A Program Starting", "process", json!({})));
+    m.push(item("This PC", "A Program Starting", "process", json!({ "when": "start" })));
+    m.push(item("This PC", "A Program Closing", "process", json!({ "when": "stop" })));
+    m.push(item("This PC", "A File Changing", "file", json!({})));
     m.push(item("Timers", "Every Few Minutes", "timer", json!({})));
     m.push(item("Timers", "Each Viewer, Every Few Minutes", "presence", json!({})));
     m
@@ -578,6 +586,7 @@ pub const STARTERS: &[(&str, &str, &str)] = &[
     ("message", "A Chat Message", "A message with a word or phrase in it."),
     ("hotkey", "A Hotkey", "A keyboard shortcut, from anywhere."),
     ("process", "A Program Starting", "A game or app opens on this PC."),
+    ("file", "A File Changing", "A file in a folder is added, changed or removed."),
     ("song", "The Music", "A song starts, or one is requested."),
     ("obs", "Streaming Software", "A scene changes, or you go live."),
     ("manual", "Only When Run", "From Run Now, or from another action."),
@@ -702,6 +711,12 @@ fn label(options: &[(&str, &str)], v: &str) -> String {
     options.iter().find(|o| o.0 == v).map(|o| o.1.to_string()).unwrap_or_else(|| v.to_string())
 }
 
+/// A program's trigger: when it opens, or when it closes
+pub const PROCESS_WHEN: &[(&str, &str)] = &[("start", "It Starts"), ("stop", "It Closes")];
+
+/// A file's trigger: which changes set it off
+pub const FILE_CHANGES: &[(&str, &str)] = &[("any", "Added, Changed or Removed"), ("added", "Added"), ("changed", "Changed"), ("removed", "Removed")];
+
 /// An action in a line, for the list: what starts it, and how many steps it takes
 pub fn summary(a: &Value) -> String {
     let t = &a["trigger"];
@@ -715,7 +730,8 @@ pub fn summary(a: &Value) -> String {
         "obs" => format!("When OBS: {}", label(OBS_WHEN, &s("when")).to_lowercase()),
         "presence" => format!("Each viewer, every {} minutes", t["minutes"].as_f64().unwrap_or(10.0)),
         "hotkey" => format!("On {}", s("keys")),
-        "process" => format!("When {} starts", if s("name").is_empty() { "a program".to_string() } else { s("name") }),
+        "process" => format!("When {} {}", if s("name").is_empty() { "a program".to_string() } else { s("name") }, if s("when") == "stop" { "closes" } else { "starts" }),
+        "file" => format!("When a file in {} is {}", if s("folder").is_empty() { "a folder".to_string() } else { s("folder") }, if s("change").is_empty() || s("change") == "any" { "added, changed or removed".to_string() } else { label(FILE_CHANGES, &s("change")).to_lowercase() }),
         "web" => format!("When its address is called{}", if s("name").is_empty() { String::new() } else { format!(" ({})", s("name")) }),
         "filter" => format!("When a message has {}", label(RULES, &s("rule")).to_lowercase()),
         _ => "Only when run".into(),

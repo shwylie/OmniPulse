@@ -15,8 +15,8 @@ pub fn plain(name: &str) -> String {
 }
 
 /// The programs to watch for (none: the watch idles); its thread started the first time, `heard` told of each
-/// one that starts (its name and its whole place)
-pub fn want(names: Vec<String>, heard: impl Fn(String, String) + Send + 'static) {
+/// one that starts or closes (its name, its whole place, and "start" or "stop")
+pub fn want(names: Vec<String>, heard: impl Fn(String, String, &'static str) + Send + 'static) {
     *WANTED.lock().unwrap() = names.iter().map(|n| plain(n)).filter(|n| !n.is_empty()).collect();
     STARTED.call_once(|| { std::thread::spawn(move || watch(heard)); });
 }
@@ -86,21 +86,31 @@ pub fn programs() -> Vec<String> {
 pub fn programs_listed() -> Vec<String> { LISTED.lock().unwrap().clone() }
 
 /// Every three seconds, while there's something to wait for: what's started since (not what was running
-/// when it began looking, as Streamer.bot's)
-fn watch(heard: impl Fn(String, String)) {
+/// when it began looking, as Streamer.bot's), and what's closed (each wanted one's place kept while it runs,
+/// as a closed one can't be asked)
+fn watch(heard: impl Fn(String, String, &'static str)) {
     let mut seen: Option<HashSet<u32>> = None;
+    let mut places: std::collections::HashMap<u32, (String, String)> = std::collections::HashMap::new();
     loop {
         std::thread::sleep(std::time::Duration::from_secs(3));
         let wanted = WANTED.lock().unwrap().clone();
-        if wanted.is_empty() { seen = None; continue; }
+        if wanted.is_empty() { seen = None; places.clear(); continue; }
         let now = running();
+        for (pid, name) in &now {
+            if wanted.contains(&plain(name)) && !places.contains_key(pid) { places.insert(*pid, (plain(name), place(*pid, name))); }
+        }
         if let Some(before) = &seen {
             for (pid, name) in &now {
                 if before.contains(pid) { continue; }
-                if wanted.contains(&plain(name)) { heard(plain(name), place(*pid, name)); }
+                if let Some((n, at)) = places.get(pid).filter(|_| wanted.contains(&plain(name))) { heard(n.clone(), at.clone(), "start"); }
             }
         }
-        seen = Some(now.into_iter().map(|x| x.0).collect());
+        let open: HashSet<u32> = now.iter().map(|x| x.0).collect();
+        let gone: Vec<u32> = places.keys().filter(|p| !open.contains(p)).copied().collect();
+        for pid in gone {
+            if let Some((n, at)) = places.remove(&pid) { if seen.is_some() && wanted.contains(&n) { heard(n, at, "stop"); } }
+        }
+        seen = Some(open);
     }
 }
 
@@ -181,19 +191,25 @@ mod tests {
     /// nothing pops up on screen while the tests run)
     #[test]
     #[cfg(windows)]
-    fn hears_a_program_start() {
+    fn hears_a_program_start_and_close() {
         use std::os::windows::process::CommandExt;
-        let heard = std::sync::Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+        let heard = std::sync::Arc::new(Mutex::new(Vec::<(String, String, &'static str)>::new()));
         let h2 = heard.clone();
-        want(vec!["PING.EXE".into()], move |n, p| h2.lock().unwrap().push((n, p)));
+        want(vec!["PING.EXE".into()], move |n, p, w| h2.lock().unwrap().push((n, p, w)));
         std::thread::sleep(std::time::Duration::from_millis(3500));
         // (CREATE_NO_WINDOW)
         let mut c = std::process::Command::new("ping").args(["-n", "8", "127.0.0.1"]).stdout(std::process::Stdio::null()).creation_flags(0x0800_0000).spawn().unwrap();
         let until = std::time::Instant::now() + std::time::Duration::from_secs(9);
         while heard.lock().unwrap().is_empty() && std::time::Instant::now() < until { std::thread::sleep(std::time::Duration::from_millis(100)); }
         let _ = c.kill();
+        let _ = c.wait();
         let got = heard.lock().unwrap().clone();
-        assert!(got.iter().any(|(n, p)| n == "ping" && p.to_lowercase().ends_with("ping.exe")), "{got:?}");
+        assert!(got.iter().any(|(n, p, w)| n == "ping" && *w == "start" && p.to_lowercase().ends_with("ping.exe")), "{got:?}");
+        // (and its closing, its place kept from when it ran)
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        while !heard.lock().unwrap().iter().any(|x| x.2 == "stop") && std::time::Instant::now() < until { std::thread::sleep(std::time::Duration::from_millis(100)); }
+        let got = heard.lock().unwrap().clone();
+        assert!(got.iter().any(|(n, p, w)| n == "ping" && *w == "stop" && p.to_lowercase().ends_with("ping.exe")), "{got:?}");
     }
 
     #[test]
