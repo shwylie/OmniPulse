@@ -9,7 +9,8 @@ fn every_scene_draws() {
     eprintln!("GPU: {}", r.adapter());
     let rate = 48000u32;
     // (a kick every half second, hats between, a riser from 2.5 s, the drop at 3.5 s)
-    let secs = 4.2f32;
+    // (OMNIPULSE_VIS_SECS: longer, for what builds up over time; OMNIPULSE_VIS_ONLY: one scene by its id)
+    let secs = std::env::var("OMNIPULSE_VIS_SECS").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(4.2).max(4.2);
     let n = (secs * rate as f32) as usize;
     let mut seed = 7u32;
     let (mut l, mut rr) = (Vec::with_capacity(n), Vec::with_capacity(n));
@@ -19,10 +20,10 @@ fn every_scene_draws() {
         seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
         let w = seed as f32 / u32::MAX as f32 * 2.0 - 1.0;
         let hi = w - prev; prev = w;
-        let riser = (2.5..3.5).contains(&t);
+        let riser = (2.5..3.5).contains(&(t % 8.0));
         let k = t % 0.5;
         let mut v = if riser { 0.0 } else { 0.8 * (std::f32::consts::TAU * 55.0 * k).sin() * (-k * 18.0).exp() };
-        v += if riser { 0.3 * hi * (t - 2.5) } else { 0.1 * hi * (-((t + 0.25) % 0.5) * 60.0).exp() };
+        v += if riser { 0.3 * hi * (t % 8.0 - 2.5) } else { 0.1 * hi * (-((t + 0.25) % 0.5) * 60.0).exp() };
         let tone = 0.3 * (std::f32::consts::TAU * 220.0 * t).sin();
         l.push(v + tone);
         rr.push(v + 0.3 * (std::f32::consts::TAU * 220.0 * t + 1.2).sin());
@@ -34,7 +35,8 @@ fn every_scene_draws() {
         image::RgbaImage::from_fn(300, 300, |x, y| { let d = ((x as f32 - 150.0).hypot(y as f32 - 150.0) / 15.0) as u32; image::Rgba(if d % 2 == 0 { [230, 90, 60, 255] } else { [30, 40, 90, 255] }) })
     });
     r.set_art(Some((art.as_raw(), art.width(), art.height())));
-    for scene in scenes::all() {
+    let only = std::env::var("OMNIPULSE_VIS_ONLY").ok();
+    for scene in scenes::all().iter().filter(|s| only.as_deref().is_none_or(|o| o == s.id)) {
         r.set_scene(scene).unwrap_or_else(|e| panic!("{}: {e}", scene.id));
         let mut a = Analyser::new(rate);
         let fps = 60.0;

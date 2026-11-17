@@ -257,11 +257,15 @@ void mainImage(out vec4 o, in vec2 fc) {
     vec4 was = ch1(uv - v * aspect * dt);
     // (wisps: where the noise says, a little of the smoke thins and lightens as it goes)
     float w = fbm(uv * vec2(iResolution.x / iResolution.y, 1.0) * 4.0 - v * 6.0 + iTime * 0.2);
-    // (only a touch each frame: the smoke keeps the cover's colours, paler at its thin edges)
-    vec3 smoke = mix(was.rgb, vec3(dot(was.rgb, vec3(0.33))) * 1.05, (0.004 + 0.012 * w) * was.a);
+    // (the smoke keeps the cover's colours: a touch lighter at its thin edges, never greyer. Pulled toward grey a
+    // little each frame, a dark cover's reds and blues ran together into a flat grey-brown within a minute)
+    vec3 smoke = was.rgb * (1.0 + (0.002 + 0.006 * w) * was.a);
+    // (carrying it along blurs it a little each frame, and blurred colours dull: their colour kept as it was)
+    float lum = dot(smoke, vec3(0.299, 0.587, 0.114));
+    smoke = max(vec3(0.0), lum + (smoke - lum) * (1.0 + 0.006 * was.a));
     // (how fast the cover comes back: quickly when it's quiet, slower as it builds, hardly at a drop)
     // (back toward the cover slowly and evenly: not faster when the music's quieter, which looked like it starting again)
-    float back = clamp(dt * (0.9 - 0.4 * BUILD), 0.004, 0.02);
+    float back = clamp(dt * (0.9 - 0.4 * BUILD), 0.008, 0.02);
     vec3 c = mix(smoke, art, back);
     float amount = clamp(was.a * (1.0 - back * 2.0) + length(v) * dt * 6.0, 0.0, 1.0);
     o = vec4(c, amount);
