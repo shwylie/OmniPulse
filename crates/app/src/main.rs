@@ -9612,7 +9612,7 @@ fn web_still(name: &'static str, spot: (f32, f32, f32, f32)) -> bool {
 fn web_aside(ui: &AppWindow) {
     let mut any = false;
     MODV.with(|m| if let Some(x) = m.borrow_mut().as_mut() { if x.1.4 { let _ = x.0.set_visible(false); x.1.4 = false; any = true; } });
-    BLIVE.with(|v| if let Some(x) = v.borrow_mut().as_mut() { if x.2.4 { let _ = x.1.set_visible(false); x.2.4 = false; any = true; } });
+    BLIVE.with(|v| if let Some(x) = v.borrow_mut().as_mut() { if x.0 == "vis" && x.2.4 { let _ = x.1.set_visible(false); x.2.4 = false; any = true; } });
     if any { repaint_all(ui); }
 }
 
@@ -9768,7 +9768,7 @@ fn live_ask(view: &wry::WebView, method: &str, params: &str, then: impl FnOnce(O
     let (m, p) = (windows::core::HSTRING::from(method), windows::core::HSTRING::from(params));
     let handler = webview2_com::CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |res, json: String| { then(res.ok().map(|_| json)); Ok(()) }));
     let asked = unsafe { view.webview().CallDevToolsProtocolMethod(windows::core::PCWSTR(m.as_ptr()), windows::core::PCWSTR(p.as_ptr()), &handler) };
-    if asked.is_err() { LIVE_SHOT.with(|s| s.set((None, s.get().1))); }
+    if asked.is_err() { LIVE_SHOT.with(|s| s.set((None, s.get().1))); BLIVE_SHOT.with(|s| s.set((None, s.get().1))); }
 }
 
 /// A page's picture as its developer tools give it ({"data": "<a PNG, base64>"}), for the interface to draw
@@ -9893,7 +9893,15 @@ thread_local! {
     static BLIVE: RefCell<Option<(String, wry::WebView, (f32, f32, f32, f32, bool), String)>> = const { RefCell::new(None) };
     static BLIVE_BEAT: std::cell::Cell<(i32, Option<std::time::Instant>)> = const { std::cell::Cell::new((0, None)) };
     static BLIVE_TICK: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// a creator's page has loaded (its picture can be taken)
+    static BLIVE_LOADED: RefCell<Option<Arc<std::sync::atomic::AtomicBool>>> = const { RefCell::new(None) };
+    /// its picture: when one was asked for and hasn't come yet, and when the last one came
+    static BLIVE_SHOT: std::cell::Cell<(Option<std::time::Instant>, Option<std::time::Instant>)> = const { std::cell::Cell::new((None, None)) };
 }
+
+/// The creators drawn from pictures (the Webcam Overlay, the HUD frames); the visualiser moves too much for that,
+/// so its real page is still laid over its spot
+fn creator_pictured(which: &str) -> bool { which != "vis" }
 
 /// The Webcam Overlay's and the HUD frames' live previews (from the window's 40 ms timer): the real page
 /// (/cam/main or /hud, ?live=1) in a see-through web view on its spot in their settings page, given the page's
@@ -9908,12 +9916,18 @@ fn bot_live(shared: &Shared) {
     let alive = BPULSE.with(|p| { let (last, at) = p.get(); if pulse != last { p.set((pulse, Some(std::time::Instant::now()))); true } else { at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(2500) && web_paged().is_none_or(|c| t >= c)) } });
     let want = if alive && ui.get_pf_open() && matches!(sheet.as_str(), "cam" | "hud" | "vis") && g.get_which() == sheet.as_str() { Some(sheet) } else { None };
     let Some(which) = want else {
-        if BLIVE.with(|b| b.borrow_mut().take().is_some()) { omnipulse_core::widget::creators_preview_set(None); repaint_all(&ui); }
+        if BLIVE.with(|b| b.borrow_mut().take().is_some()) {
+            omnipulse_core::widget::creators_preview_set(None);
+            BLIVE_SHOT.with(|s| s.set((None, None)));
+            g.set_live(false);
+            repaint_all(&ui);
+        }
         // (the spot's gone with its page: forgotten, so the next page's is its own)
         if !ui.get_pf_open() { g.set_which("".into()); }
         return;
     };
-    if BLIVE.with(|b| b.borrow().as_ref().is_some_and(|x| x.0 != which)) { BLIVE.with(|b| b.borrow_mut().take()); }
+    if BLIVE.with(|b| b.borrow().as_ref().is_some_and(|x| x.0 != which)) { BLIVE.with(|b| b.borrow_mut().take()); g.set_live(false); }
+    let pictured = creator_pictured(&which);
     let beat = ui.global::<WLive>().get_beat();
     let menu = BLIVE_BEAT.with(|b| {
         let (last, at) = b.get();
@@ -9926,8 +9940,11 @@ fn bot_live(shared: &Shared) {
     let seen = y >= 150.0 && y + h <= win_h - 96.0;
     let show = seen && !menu && !live_covered(&ui, x, w) && w > 8.0 && h > 8.0 && !ui.window().is_minimized();
     let show = web_still("creator", (x, y, w, h)) && web_ok(&ui) && show;
+    // (drawn from pictures: the real page out of sight to the window's left, the spot's size, never over the window)
+    let (show, px) = if pictured { (w > 8.0 && h > 8.0, -(w as f64) - 400.0) } else { (show, x as f64) };
+    let py = if pictured { 0.0 } else { y as f64 };
     let at = (x, y, w, h, show);
-    let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(x as f64, y as f64).into(), size: wry::dpi::LogicalSize::new(w as f64, h as f64).into() };
+    let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(px, py).into(), size: wry::dpi::LogicalSize::new(w as f64, h as f64).into() };
     // (the page's settings as they are, given to the Suite for what the overlay would be: when they change)
     let tick = BLIVE_TICK.with(|t| { t.set(t.get().wrapping_add(1)); t.get() });
     if tick % 2 == 0 {
@@ -9956,8 +9973,45 @@ fn bot_live(shared: &Shared) {
         if let Ok(d) = omnipulse_core::data_dir() { unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", d.join("webview")); } }
         let url = format!("http://127.0.0.1:{port}{}", if which == "hud" { "/hud?live=1" } else if which == "vis" { "/vis" } else { "/cam/main?preview=1&live=1" });
         use slint::winit_030::WinitWindowAccessor;
-        let view = ui.window().with_winit_window(|w| wry::WebViewBuilder::new().with_url(&url).with_transparent(true).with_bounds(rect).build_as_child(w).ok()).flatten();
-        if let Some(v) = view { BLIVE.with(|b| *b.borrow_mut() = Some((which, v, at, String::new()))); }
+        let loaded = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let l2 = loaded.clone();
+        let view = ui.window().with_winit_window(|w| wry::WebViewBuilder::new().with_url(&url).with_transparent(true).with_bounds(rect)
+            .with_on_page_load_handler(move |e, _| if matches!(e, wry::PageLoadEvent::Finished) { l2.store(true, std::sync::atomic::Ordering::Relaxed); })
+            .build_as_child(w).ok()).flatten();
+        if let Some(v) = view {
+            if pictured { live_ask(&v, "Emulation.setDefaultBackgroundColorOverride", r#"{"color":{"r":0,"g":0,"b":0,"a":0}}"#, |_| {}); }
+            BLIVE_LOADED.with(|l| *l.borrow_mut() = Some(loaded));
+            BLIVE_SHOT.with(|s| s.set((None, None)));
+            BLIVE.with(|b| *b.borrow_mut() = Some((which, v, at, String::new())));
+        }
+        return;
+    }
+    if pictured {
+        BLIVE.with(|b| {
+            let mut b = b.borrow_mut();
+            let Some((which, view, last, _)) = b.as_mut() else { return };
+            // (its spot a new size: the page the same size, for its picture to fit)
+            if (last.2, last.3) != (at.2, at.3) || tick % 50 == 0 { let _ = view.set_bounds(rect); }
+            *last = at;
+            let loaded = BLIVE_LOADED.with(|l| l.borrow().as_ref().is_some_and(|x| x.load(std::sync::atomic::Ordering::Relaxed)));
+            let due = BLIVE_SHOT.with(|s| { let (busy, at) = s.get(); !busy.is_some_and(|b| b.elapsed() < std::time::Duration::from_secs(3)) && at.is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(100)) });
+            if !loaded || !due || !seen { return; }
+            BLIVE_SHOT.with(|s| s.set((Some(std::time::Instant::now()), s.get().1)));
+            let weak = ui.as_weak();
+            let of = which.clone();
+            live_ask(view, "Page.captureScreenshot", r#"{"format":"png"}"#, move |json| {
+                BLIVE_SHOT.with(|s| s.set((None, Some(std::time::Instant::now()))));
+                let Some(img) = json.and_then(|j| live_picture(&j)) else { return };
+                // (still that creator's: one that came after its page was left isn't shown on the next)
+                if !BLIVE.with(|b| b.borrow().as_ref().is_some_and(|x| x.0 == of)) { return; }
+                if let Some(ui) = weak.upgrade() {
+                    let g = ui.global::<BLive>();
+                    g.set_shot(img);
+                    g.set_shot_of(of.as_str().into());
+                    g.set_live(true);
+                }
+            });
+        });
         return;
     }
     BLIVE.with(|b| {
@@ -16800,6 +16854,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("side") { vec![(9, "library"), (11, "sidefold"), (13, "sideopen"), (14, "settings"), (16, "discover"), (18, "back"), (20, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=creators: the Creators' pages, each pictured: Panels (scrolled down, too), Webcam
             // Overlay, Game HUD Frames)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("creators") { vec![(6, "size:1500:950"), (8, "nav:suite"), (9, "bot:sheet:cam"), (15, "scroll:300"), (18, "bot:back"), (19, "bot:sheet:hud"), (26, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("previews") { vec![(6, "size:1500:950"), (8, "openpanel:widget"), (12, "scroll:500"), (14, "openpanel:multichat"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panelpv") { vec![(6, "size:1500:2300"), (7, "bot:sheet:panels"), (10, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=modpage: Mod View switched on (for this run only), made-up channels and chat

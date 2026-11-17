@@ -166,10 +166,16 @@ export global BLive {
     in-out property <length> h;
     in-out property <string> which;
     in-out property <int> pulse;
+    /// the real page's picture (the Webcam Overlay's, the HUD frames'), taken a few times a second and drawn on the
+    /// spot by the page itself; live: there's one, and it's this spot's
+    in-out property <image> shot;
+    in-out property <bool> live;
+    in-out property <string> shot-of;
 }
 
 component BotLiveSpot inherits Rectangle {
     in property <string> which;
+    Image { width: 100%; height: 100%; source: BLive.shot; image-fit: fill; visible: BLive.live && BLive.shot-of == root.which; }
     Timer { interval: 200ms; running: true; triggered => { BLive.pulse += 1; BLive.which = root.which; } }
     property <length> lx: self.absolute-position.x;
     property <length> ly: self.absolute-position.y;
@@ -4164,6 +4170,8 @@ component CamPreview inherits Rectangle {
     // (the real overlay over this drawing, once it's loaded: its borders, animations and extras as they'll be)
     BotLiveSpot { which: "cam"; x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px; }
     for r in CamLook.rects: Rectangle {
+        // (the stand-ins: until the real overlay's picture is drawn over them)
+        visible: !(BLive.live && BLive.shot-of == "cam");
         x: root.ix + root.iw * r.x;
         y: root.iy + root.ih * r.y;
         width: root.iw * r.w;
