@@ -10933,6 +10933,8 @@ fn account_act(shared: &Shared, i: usize) {
                 Err(e) => format!("{name}: {e}"),
             }.into());
             accounts_refresh(&shared);
+            // (the title bar's "Sign in to SoundCloud": gone the moment you are, not at the next start)
+            if key == "soundcloud" { ui.set_title_prompt(title_prompt(&shared.borrow().web.prefs)); }
             // your library and playlists, from what you're signed in to now
             if done.is_ok() && matches!(key, "soundcloud" | "spotify") {
                 paint_plats(&shared.borrow());
@@ -10940,6 +10942,19 @@ fn account_act(shared: &Shared, i: usize) {
             }
         }));
     });
+}
+
+/// The title bar asks you to sign in to SoundCloud only once you've used it on this PC and been signed out
+/// (its sign-in ran out): never on a fresh install, where OmniPulse works without it. Noted the first time
+/// it's seen signed in
+fn title_prompt(prefs: &serde_json::Value) -> bool {
+    static NOTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let signed = omnipulse_core::soundcloud::signed_in();
+    let noted = NOTED.load(std::sync::atomic::Ordering::Relaxed);
+    if signed && !noted && prefs["scUsed"].as_bool() != Some(true) && std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("scUsed", serde_json::json!(true)); }
+    if signed { NOTED.store(true, std::sync::atomic::Ordering::Relaxed); }
+    let used = signed || noted || prefs["scUsed"].as_bool() == Some(true);
+    prefs["appName"].as_str().unwrap_or("").trim().is_empty() && plat_on(prefs, "soundcloud") && used && !signed
 }
 
 // ---------- your own keys (crate::keysetup) ----------
@@ -15138,7 +15153,7 @@ fn apply_look(shared: &Shared) {
     let nudge = nudge_of(prefs).to_string();
     if ui.get_listen_nudge().trim() != nudge && !(ui.get_listen_nudge().trim().is_empty() && nudge == "0") { ui.set_listen_nudge(nudge.into()); }
     let name = prefs["appName"].as_str().unwrap_or("").trim().to_string();
-    ui.set_title_prompt(name.is_empty() && plat_on(prefs, "soundcloud") && !omnipulse_core::soundcloud::signed_in());
+    ui.set_title_prompt(title_prompt(prefs));
     if ui.get_app_name().trim() != name { ui.set_app_name(name.into()); }
     let yours = prefs["togetherName"].as_str().unwrap_or("").trim().to_string();
     if ui.get_your_name().trim() != yours { ui.set_your_name(yours.into()); }
@@ -15821,7 +15836,10 @@ fn main() -> Result<(), slint::PlatformError> {
         // (a credentials file's text, or several keys, pasted in: each to its own box, as the web app's)
         let plat = KS.with(|k| k.borrow().as_ref().map(|x| x.0.clone())).unwrap_or_default();
         let found = keysetup::keys_from(&plat, &v);
-        if !found.is_empty() && !(found.len() == 1 && found[0] == (i as usize, v.trim().to_string())) {
+        // (one key pasted that fits the box it went in stays there: Last.fm's key and secret look alike, and the
+        // secret was put over the key)
+        let fits_here = found.len() == 1 && keysetup::setup(&plat).and_then(|st| st.fields.get(i as usize).map(|f| keysetup::looks_right(f.2, &found[0].1))).unwrap_or(false);
+        if !found.is_empty() && !fits_here && !(found.len() == 1 && found[0] == (i as usize, v.trim().to_string())) {
             ks_take(&s, found);
             return;
         }
